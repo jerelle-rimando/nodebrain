@@ -1,4 +1,5 @@
-# Nodebrain
+# 🧠 NodeBrain — AI Agent Command Center
+
 NodeBrain™ is a local-first (with potential for web deployment) system for building and running AI agents that actually do things.
 Agents are created from chat and turned into persistent nodes in a visual graph. They can execute tasks on time, interact with external tools, and run structured workflows while you monitor everything in real time.
 
