@@ -22,7 +22,7 @@ Everything runs **locally by default**, giving users full control over their env
 
 ---
 
-## Core Interface
+## Core Interface 
 
 NodeBrain is built around three primary systems:
 
@@ -37,7 +37,7 @@ Securely store and manage API keys for models and integrations.
 
 ---
 
-## Local-First Architecture
+## Local-First Architecture 📍
 
 NodeBrain runs locally and does not require a hosted service.
 
@@ -67,7 +67,7 @@ If you want an AI system that behaves more like a **command center for automatio
 
 ---
 
-## Why NodeBrain Is Open Source
+## Why NodeBrain Is Open Source 🌎
 
 Open sourcing the project provides several important benefits:
 
@@ -78,7 +78,7 @@ Open sourcing the project provides several important benefits:
 
 ---
 
-## License
+## License 🛡️
 
 This project is licensed under the **GNU Affero General Public License v3 (AGPL-3.0)**.
 
@@ -99,7 +99,7 @@ This keeps the ecosystem fair while still allowing anyone to:
 
 ---
 
-## Contributing
+## Contributing 🤝
 
 Contributions are welcome.
 
