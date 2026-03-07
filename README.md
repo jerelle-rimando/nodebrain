@@ -26,13 +26,13 @@ Everything runs **locally by default**, giving users full control over their env
 
 NodeBrain is built around three primary systems:
 
-### Dashboard
+### Dashboard 🛠️
 Create, control, and modify agents through natural language chat.
 
-### NodeGraph
+### NodeGraph 🌐
 Visualize tasks, dependencies, and execution status in a live graph interface.
 
-### Credential Vault
+### Credential Vault 🔒
 Securely store and manage API keys for models and integrations.
 
 ---
@@ -54,7 +54,7 @@ Future deployments may support **web or hosted environments**, but the core phil
 
 ---
 
-## Who NodeBrain Is For
+## Who NodeBrain Is For 👤
 
 NodeBrain is designed primarily for:
 
