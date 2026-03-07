@@ -33,7 +33,7 @@ Create, control, and modify agents through natural language chat.
 Visualize tasks, dependencies, and execution status in a live graph interface.
 
 ### Credential Vault 🔒
-Securely store and manage API keys for models and integrations.
+Securely store and manage encrypted API keys for models and integrations.
 
 ---
 
