@@ -5,7 +5,7 @@ Agents are created from chat and turned into persistent nodes in a visual graph.
 
 ---
 
-## Overview
+## Overview 🔎
 
 NodeBrain is designed to act as a **command center for AI-driven automation**.
 
@@ -22,7 +22,7 @@ Everything runs **locally by default**, giving users full control over their env
 
 ---
 
-## Core Interface 
+## Core Interface 🤖
 
 NodeBrain is built around three primary systems:
 
