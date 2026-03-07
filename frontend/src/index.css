@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #0a0a0f;
+    color: #e2e8f0;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #12121a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1e1e2e;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #374151;
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgba(18, 18, 26, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(30, 30, 46, 0.8);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .status-idle    { background-color: #374151; }
+  .status-running { background-color: #6366f1; animation: pulse 1.5s ease-in-out infinite; }
+  .status-error   { background-color: #ef4444; }
+  .status-stopped { background-color: #94a3b8; }
+  .status-completed { background-color: #10b981; }
+  .status-pending { background-color: #f59e0b; }
+  .status-failed  { background-color: #ef4444; }
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background-color: #0a0a0f !important;
+}
+.react-flow__edge-path {
+  stroke: #374151 !important;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #6366f1 !important;
+}
+.react-flow__controls {
+  background: #12121a !important;
+  border: 1px solid #1e1e2e !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: #12121a !important;
+  border: none !important;
+  border-bottom: 1px solid #1e1e2e !important;
+  fill: #94a3b8 !important;
+}
+.react-flow__controls-button:hover {
+  background: #1e1e2e !important;
+}
+.react-flow__minimap {
+  background: #12121a !important;
+  border: 1px solid #1e1e2e !important;
+  border-radius: 8px !important;
+}
+
+/* Chat markdown */
+.chat-content code {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.chat-content strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+.chat-content ul {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.chat-content li {
+  margin: 0.2em 0;
+}
