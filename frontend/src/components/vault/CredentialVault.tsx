@@ -5,8 +5,14 @@ import { api } from '../../utils/api';
 
 const PROVIDERS = [
   { id: 'openai', label: 'OpenAI', placeholder: 'sk-...' },
-  { id: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...' },
-  { id: 'custom', label: 'Custom / Other', placeholder: 'Enter API key...' },
+  { id: 'groq', label: 'Groq', placeholder: 'gsk_...' },
+  { id: 'anthropic', label: 'Claude (Anthropic)', placeholder: 'sk-ant-...' },
+  { id: 'custom', label: 'Gemini', placeholder: 'AIzaSy...' },
+  { id: 'ollama', label: 'Ollama (Local)', placeholder: 'ollama' },
+  { id: 'mistral', label: 'Mistral', placeholder: 'Enter key...' },
+  { id: 'together', label: 'Together AI', placeholder: 'Enter key...' },
+  { id: 'fireworks', label: 'Fireworks AI', placeholder: 'Enter key...' },
+  { id: 'custom', label: 'Custom / Other', placeholder: 'Enter key...' },
 ];
 
 export function CredentialVault() {

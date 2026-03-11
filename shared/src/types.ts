@@ -2,7 +2,7 @@
 
 export type AgentStatus = 'idle' | 'running' | 'error' | 'stopped';
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type ModelProvider = 'openai' | 'anthropic' | 'custom';
+export type ModelProvider = 'openai' | 'anthropic' | 'groq' | 'ollama' | 'mistral' | 'together' | 'fireworks' | 'custom';
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
 export interface Agent {

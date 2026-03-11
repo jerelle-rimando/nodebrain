@@ -1,3 +1,4 @@
+import { getCredentialForProvider } from '../vault/credentialVault';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
@@ -72,9 +73,59 @@ router.post('/message', async (req, res) => {
         assistantContent = `I couldn't find an agent named "${targetAgentName}".`;
       }
     } else {
-      const agents = getAllAgents();
-      const agentList = agents.length > 0 ? agents.map(a => `• **${a.name}** — ${a.description}`).join('\n') : 'No agents created yet.';
-      assistantContent = `I can help you create agents or execute tasks!\n\n**Your agents:**\n${agentList}\n\n**Try:**\n• "Create an agent that monitors RSS feeds"\n• "Ask [agent name] to summarize today's tech news"`;
+      // Fall back to actual AI conversation
+      const providerPriority = ['openai', 'groq', 'mistral', 'together', 'fireworks', 'ollama'];
+      let apiKey = '';
+      let chosenProvider = 'openai';
+    
+      for (const p of providerPriority) {
+        const key = getCredentialForProvider(p);
+        if (key) { apiKey = key; chosenProvider = p; break; }
+      }
+    
+      if (!apiKey) {
+        assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
+      } else {
+        const baseURLs: Record<string, string> = {
+          openai: 'https://api.openai.com/v1',
+          groq: 'https://api.groq.com/openai/v1',
+          ollama: 'http://localhost:11434/v1',
+          mistral: 'https://api.mistral.ai/v1',
+          together: 'https://api.together.xyz/v1',
+          fireworks: 'https://api.fireworks.ai/inference/v1',
+        };
+        const defaultModels: Record<string, string> = {
+          openai: 'gpt-4o-mini',
+          groq: 'llama-3.3-70b-versatile',
+          ollama: 'llama3.2',
+          mistral: 'mistral-small-latest',
+          together: 'meta-llama/Llama-3-70b-chat-hf',
+          fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
+        };
+    
+        const { default: OpenAI } = await import('openai');
+        const client = new OpenAI({
+          apiKey,
+          baseURL: baseURLs[chosenProvider] ?? baseURLs.openai,
+        });
+    
+        const agents = getAllAgents();
+        const agentContext = agents.length > 0
+          ? `The user has these agents: ${agents.map(a => a.name).join(', ')}.`
+          : 'The user has no agents yet.';
+    
+        const completion = await client.chat.completions.create({
+          model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.` },
+            { role: 'user', content: content.trim() },
+          ],
+          temperature: 0.7,
+          max_tokens: 1000,
+        });
+    
+        assistantContent = completion.choices[0]?.message?.content ?? 'No response received.';
+      }
     }
 
     const assistantMsg: ChatMessage = { id: uuidv4(), role: 'assistant', content: assistantContent, timestamp: new Date().toISOString(), agentId };
