@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import { initDb } from './db/database';
 import { startScheduler } from './scheduler/scheduler';
+import { initRag } from './rag/ragEngine';
+import { initializeToolRegistry } from './mcp/toolRegistry';
+import { disconnectAll } from './mcp/mcpClient';
 import agentRouter from './routes/agents';
 import { taskRouter, logsRouter } from './routes/tasks';
 import credentialRouter from './routes/credentials';
@@ -27,7 +30,17 @@ app.use('/api/events', eventsRouter);
 
 async function main() {
   await initDb();
+  console.log('✅ Database ready');
+
+  await initRag();
+  console.log('✅ RAG engine ready');
+
+  await initializeToolRegistry();
+  console.log('✅ Tool registry ready');
+
   startScheduler();
+  console.log('✅ Scheduler ready');
+
   app.listen(PORT, () => {
     console.log(`\n🧠 NodeBrain backend running at http://localhost:${PORT}`);
     console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
@@ -37,6 +50,10 @@ async function main() {
 
 main().catch(console.error);
 
-process.on('SIGINT', () => { process.exit(0); });
+process.on('SIGINT', async () => {
+  console.log('\nShutting down NodeBrain...');
+  await disconnectAll();
+  process.exit(0);
+});
 
 export default app;
