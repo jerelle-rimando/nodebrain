@@ -55,7 +55,8 @@ cp backend/.env.example backend/.env
 ```bash
 copy backend\.env.example backend\.env
 ```
-⚠️ IMPORTANT ⚠️
+⚠️ **IMPORTANT**
+
 Open `backend/.env` and change `VAULT_SECRET` to any long random string. This is used to encrypt your stored API keys — keep it private and never commit it.
 
 ### Running
