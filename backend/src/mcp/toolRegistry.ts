@@ -34,7 +34,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'github',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-github'],
+      args: ['-y', '@github/github-mcp-server'],
       env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
     }),
   },
@@ -78,16 +78,6 @@ const SERVER_CONFIGS: ServerConfig[] = [
       env: { BRAVE_API_KEY: token },
     }),
   },
-  {
-    name: 'fetch',
-    credentialProvider: 'fetch',
-    buildServer: () => ({
-      name: 'fetch',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-fetch'],
-      env: {},
-    }),
-  },
 ];
 
 export async function initializeToolRegistry(): Promise<void> {
@@ -96,7 +86,7 @@ export async function initializeToolRegistry(): Promise<void> {
   for (const config of SERVER_CONFIGS) {
     const credential = getCredentialForProvider(config.credentialProvider);
 
-    if (!credential && config.credentialProvider !== 'fetch') {
+    if (!credential) {
       console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
       continue;
     }

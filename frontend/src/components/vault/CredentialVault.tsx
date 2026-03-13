@@ -19,7 +19,6 @@ const PROVIDERS = [
   { id: 'notion', label: 'Notion', placeholder: 'secret_...' },
   { id: 'brave', label: 'Brave Search', placeholder: 'BSA...' },
   { id: 'filesystem', label: 'Local Filesystem', placeholder: 'C:\\Users\\you\\Documents' },
-  { id: 'fetch', label: 'Web Fetch', placeholder: 'no-key-needed' },
   { id: 'custom', label: 'Custom / Other', placeholder: 'Enter key...' },
 ];
 
