@@ -1,19 +1,18 @@
 import { create } from 'zustand';
 import type { Agent, Task, TaskLog, Credential, ChatMessage } from '@shared/types';
 
+type ActiveTab = 'dashboard' | 'graph' | 'vault' | 'integrations';
+
 interface AppState {
-  // Data
   agents: Agent[];
   tasks: Task[];
   logs: TaskLog[];
   credentials: Credential[];
   chatMessages: ChatMessage[];
 
-  // UI
-  activeTab: 'dashboard' | 'graph' | 'vault';
+  activeTab: ActiveTab;
   selectedAgentId: string | null;
 
-  // Actions
   setAgents: (agents: Agent[]) => void;
   addAgent: (agent: Agent) => void;
   updateAgent: (agent: Agent) => void;
@@ -31,7 +30,7 @@ interface AppState {
   setChatMessages: (msgs: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
 
-  setActiveTab: (tab: 'dashboard' | 'graph' | 'vault') => void;
+  setActiveTab: (tab: ActiveTab) => void;
   setSelectedAgent: (id: string | null) => void;
 }
 

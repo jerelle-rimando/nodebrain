@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { MessageSquare, GitFork, Shield, Activity } from 'lucide-react';
+import { MessageSquare, GitFork, Shield, Plug } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -7,11 +7,13 @@ import { LogsPanel } from './components/shared/LogsPanel';
 import { useStore } from './stores/appStore';
 import { useEventStream } from './hooks/useEventStream';
 import { api } from './utils/api';
+import { IntegrationsPage } from './components/integrations/IntegrationsPage'
 
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
   { id: 'graph' as const, label: 'NodeGraph', icon: GitFork },
   { id: 'vault' as const, label: 'Vault', icon: Shield },
+  { id: 'integrations' as const, label: 'Integrations', icon: Plug },
 ];
 
 export default function App() {
@@ -72,6 +74,7 @@ export default function App() {
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'graph' && <NodeGraph />}
             {activeTab === 'vault' && <CredentialVault />}
+            {activeTab === 'integrations' && <IntegrationsPage />}
           </main>
 
           {/* Persistent logs panel */}

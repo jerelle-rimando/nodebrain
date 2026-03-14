@@ -10,6 +10,7 @@ import { taskRouter, logsRouter } from './routes/tasks';
 import credentialRouter from './routes/credentials';
 import chatRouter from './routes/chat';
 import eventsRouter from './routes/events';
+import integrationsRouter from './routes/integrations';
 
 const PORT = process.env.PORT ?? 3001;
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/logs', logsRouter);
 app.use('/api/credentials', credentialRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/events', eventsRouter);
+app.use('/api/integrations', integrationsRouter);
 
 async function main() {
   await initDb();

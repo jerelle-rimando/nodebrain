@@ -15,7 +15,6 @@ async function request<T>(
 }
 
 export const api = {
-  // Agents
   getAgents: () => request<import('@shared/types').Agent[]>('/agents'),
   getAgent: (id: string) => request<import('@shared/types').Agent>(`/agents/${id}`),
   createAgent: (data: Partial<import('@shared/types').Agent>) =>
@@ -27,14 +26,11 @@ export const api = {
   executeAgent: (id: string, input: string) =>
     request<{ message: string }>(`/agents/${id}/execute`, { method: 'POST', body: JSON.stringify({ input }) }),
 
-  // Tasks
   getTasks: () => request<import('@shared/types').Task[]>('/tasks'),
 
-  // Logs
   getLogs: () => request<import('@shared/types').TaskLog[]>('/logs'),
   getAgentLogs: (agentId: string) => request<import('@shared/types').TaskLog[]>(`/logs/agent/${agentId}`),
 
-  // Credentials
   getCredentials: () => request<import('@shared/types').Credential[]>('/credentials'),
   createCredential: (data: { name: string; provider: string; value: string; description?: string }) =>
     request<import('@shared/types').Credential>('/credentials', { method: 'POST', body: JSON.stringify(data) }),
@@ -43,11 +39,13 @@ export const api = {
   deleteCredential: (id: string) =>
     request<{ id: string }>(`/credentials/${id}`, { method: 'DELETE' }),
 
-  // Chat
   getChatHistory: () => request<import('@shared/types').ChatMessage[]>('/chat/history'),
   sendChatMessage: (content: string) =>
     request<{ userMessage: import('@shared/types').ChatMessage; assistantMessage: import('@shared/types').ChatMessage }>(
       '/chat/message',
       { method: 'POST', body: JSON.stringify({ content }) }
     ),
+
+  testIntegration: (provider: string) =>
+    request<{ success: boolean; message: string }>(`/integrations/${provider}/test`),
 };
