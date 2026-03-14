@@ -23,9 +23,9 @@ const SERVER_CONFIGS: ServerConfig[] = [
     credentialProvider: 'google',
     buildServer: (token) => ({
       name: 'google',
-      command: 'npx',
-      args: ['-y', '@googleworkspace/mcp'],
-      env: { GOOGLE_OAUTH_TOKEN: token },
+      command: 'gws',
+      args: ['mcp'],
+      env: {},
     }),
   },
   {
@@ -86,7 +86,7 @@ export async function initializeToolRegistry(): Promise<void> {
   for (const config of SERVER_CONFIGS) {
     const credential = getCredentialForProvider(config.credentialProvider);
 
-    if (!credential) {
+    if (!credential && config.credentialProvider !== 'google') {
       console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
       continue;
     }
