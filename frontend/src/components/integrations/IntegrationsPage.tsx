@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
+import { toast } from '../shared/Toast';
 
 interface Integration {
   id: string;
@@ -264,6 +265,7 @@ export function IntegrationsPage() {
         [integration.id]: res.success ? 'ok' : 'fail',
       }));
     } catch {
+      toast.error('Could not reach' + integration.label + '. Check your credential.');
       setTestResults((prev) => ({ ...prev, [integration.id]: 'fail' }));
     } finally {
       setTesting(null);
@@ -283,8 +285,10 @@ export function IntegrationsPage() {
       const creds = await api.getCredentials();
       useStore.getState().setCredentials(creds);
       setTokenInputs((prev) => ({ ...prev, [integration.id]: '' }));
+            toast.success(integration.label + ' connected successfully');
     } catch (err) {
-      console.error(err);
+          toast.error('Failed to save credential. Check your input and try again.');
+          console.error(err);
     } finally {
       setSaving(null);
     }
@@ -297,13 +301,15 @@ export function IntegrationsPage() {
       await api.deleteCredential(cred.id);
       const creds = await api.getCredentials();
       useStore.getState().setCredentials(creds);
+            toast.success(integration.label + ' disconnected');
       setTestResults((prev) => {
         const next = { ...prev };
         delete next[integration.id];
         return next;
       });
     } catch (err) {
-      console.error(err);
+          toast.error('Failed to disconnect. Try again.');
+          console.error(err);
     }
   }
 

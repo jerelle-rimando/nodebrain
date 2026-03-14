@@ -8,6 +8,7 @@ import { useStore } from './stores/appStore';
 import { useEventStream } from './hooks/useEventStream';
 import { api } from './utils/api';
 import { IntegrationsPage } from './components/integrations/IntegrationsPage'
+import { ToastContainer } from './components/shared/Toast';
 
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
@@ -83,6 +84,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <ToastContainer />
     </div>
   );
 }

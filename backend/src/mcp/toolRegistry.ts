@@ -1,4 +1,4 @@
-import { connectToServer, getAllAvailableTools, type MCPServer, type MCPToolWithServer } from './mcpClient';
+import { connectToServer, getAllAvailableTools, disconnectAll, type MCPServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
 
 interface ServerConfig {
@@ -139,4 +139,10 @@ export function formatToolsForAnthropic(tools: MCPToolWithServer[]): Array<{
         required: (tool.inputSchema.required ?? []) as string[],
       },
     }));
+  }
+
+  export async function reloadToolRegistry(): Promise<void> {
+    console.log('[ToolRegistry] Reloading integrations...');
+    await disconnectAll();
+    await initializeToolRegistry();
   }
