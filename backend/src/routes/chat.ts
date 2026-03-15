@@ -1,3 +1,4 @@
+import { parseNaturalSchedule } from '../utils/parseSchedule';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -92,7 +93,9 @@ router.post('/message', async (req, res) => {
           provider: detectedProvider as ModelProvider,
           model: agentConfig.model ?? 'gpt-4o-mini',
           systemPrompt: agentConfig.systemPrompt ?? 'You are a helpful AI assistant.',
-          schedule: agentConfig.schedule,
+          schedule: agentConfig.schedule
+            ? (parseNaturalSchedule(agentConfig.schedule).cron ?? agentConfig.schedule)
+            : undefined,
           toolPermissions: agentConfig.toolPermissions ?? [],
           status: 'idle',
           config: {},

@@ -17,7 +17,7 @@ const router = Router();
 const AgentSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(''),
-  provider: z.enum(['openai', 'anthropic', 'custom']).default('openai'),
+  provider: z.enum(['openai', 'anthropic', 'groq', 'gemini', 'ollama', 'mistral', 'together', 'fireworks', 'custom']).default('openai'),
   model: z.string().default('gpt-4o-mini'),
   systemPrompt: z.string().default('You are a helpful AI assistant.'),
   schedule: z.string().optional(),
@@ -122,10 +122,13 @@ router.post('/:id/execute', async (req, res) => {
     const { input } = req.body as { input?: string };
     if (!input) return res.status(400).json({ success: false, error: 'input is required' });
 
-    // Fire and return immediately — task runs async
-    executeAgentTask(agent, input).catch(console.error);
+    const task = await executeAgentTask(agent, input);
 
-    res.json({ success: true, data: { message: 'Task started' } });
+    if (task.status === 'completed') {
+      res.json({ success: true, data: { message: task.output ?? '(no output)' } });
+    } else {
+      res.json({ success: true, data: { message: task.error ?? 'Task failed' } });
+    }
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }

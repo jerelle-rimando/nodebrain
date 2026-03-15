@@ -12,6 +12,7 @@ import chatRouter from './routes/chat';
 import eventsRouter from './routes/events';
 import integrationsRouter from './routes/integrations';
 import authRouter from './routes/auth';
+import { parseNaturalSchedule } from './utils/parseSchedule';
 
 const PORT = process.env.PORT ?? 3001;
 const app = express();
@@ -21,6 +22,13 @@ app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
+});
+
+app.get('/api/schedule/parse', (req, res) => {
+  const { input } = req.query as { input?: string };
+  if (!input) return res.status(400).json({ success: false, error: 'input required' });
+  const result = parseNaturalSchedule(input);
+  res.json({ success: true, data: result });
 });
 
 app.use('/api/agents', agentRouter);

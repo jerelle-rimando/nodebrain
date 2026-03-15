@@ -92,10 +92,12 @@ export default function App() {
             {activeTab === 'integrations' && <IntegrationsPage />}
           </main>
 
-          {/* Persistent logs panel */}
-          <div className="w-80 flex-shrink-0 border-l border-brain-border p-3 overflow-hidden">
-            <LogsPanel />
-          </div>
+          {/* Logs panel only in dashboard */}
+          {activeTab === 'dashboard' && (
+            <div className="w-80 flex-shrink-0 border-l border-brain-border p-3 overflow-hidden">
+              <LogsPanel />
+            </div>
+          )}
         </div>
       </div>
       <ToastContainer />

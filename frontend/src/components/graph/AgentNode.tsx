@@ -1,15 +1,14 @@
 import { Handle, Position } from 'reactflow';
-import { Bot, Play, Trash2, AlertCircle } from 'lucide-react';
+import { Bot, AlertCircle } from 'lucide-react';
 import type { Agent } from '@shared/types';
 
 interface AgentNodeData {
   agent: Agent;
-  onExecute: (agent: Agent) => void;
-  onDelete: (id: string) => void;
+  onSelect: (agent: Agent) => void;
 }
 
 export function AgentNode({ data }: { data: AgentNodeData }) {
-  const { agent, onExecute, onDelete } = data;
+  const { agent, onSelect } = data;
 
   const statusColors: Record<string, string> = {
     idle: '#374151',
@@ -21,21 +20,32 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
   const statusColor = statusColors[agent.status] ?? '#374151';
 
   return (
-    <div className="relative group" style={{ minWidth: 200 }}>
+    <div
+      className="relative cursor-pointer"
+      style={{ minWidth: 200 }}
+      onClick={() => onSelect(agent)}
+    >
       <Handle type="target" position={Position.Top} className="!bg-brain-border !border-brain-muted" />
 
       <div
-        className="rounded-xl border bg-brain-surface p-3 shadow-xl transition-all duration-200 cursor-default"
+        className="rounded-xl border bg-brain-surface p-3 shadow-xl transition-all duration-200 hover:scale-105"
         style={{
-          borderColor: agent.status === 'running' ? '#6366f1' : '#1e1e2e',
-          boxShadow: agent.status === 'running' ? '0 0 20px rgba(99,102,241,0.15)' : undefined,
+          borderColor: agent.status === 'running'
+            ? '#6366f1'
+            : agent.status === 'error'
+            ? '#ef4444'
+            : '#1e1e2e',
+          boxShadow: agent.status === 'running'
+            ? '0 0 20px rgba(99,102,241,0.2)'
+            : agent.status === 'error'
+            ? '0 0 20px rgba(239,68,68,0.15)'
+            : undefined,
         }}
       >
-        {/* Header */}
         <div className="flex items-center gap-2 mb-2">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: `${statusColor}22`, border: `1px solid ${statusColor}44` }}
+            style={{ backgroundColor: statusColor + '22', border: '1px solid ' + statusColor + '44' }}
           >
             <Bot size={14} style={{ color: statusColor }} />
           </div>
@@ -49,44 +59,29 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
                   animation: agent.status === 'running' ? 'pulse 1.5s ease-in-out infinite' : undefined,
                 }}
               />
-              <span className="text-xs capitalize" style={{ color: statusColor }}>{agent.status}</span>
+              <span className="text-xs capitalize" style={{ color: statusColor }}>
+                {agent.status}
+              </span>
             </div>
           </div>
-
           {agent.status === 'error' && (
             <AlertCircle size={14} className="text-brain-error flex-shrink-0" />
           )}
         </div>
 
-        {/* Description */}
         <p className="text-xs text-brain-text-dim leading-relaxed mb-3 line-clamp-2">
           {agent.description || 'No description'}
         </p>
 
-        {/* Meta */}
-        <div className="flex gap-2 text-xs text-brain-text-dim mb-3">
-          <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 font-mono">{agent.model}</span>
+        <div className="flex gap-2 text-xs text-brain-text-dim">
+          <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 font-mono truncate max-w-32">
+            {agent.model}
+          </span>
           {agent.schedule && (
-            <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5">⏱ scheduled</span>
+            <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5">
+              scheduled
+            </span>
           )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => onExecute(agent)}
-            disabled={agent.status === 'running'}
-            className="flex-1 flex items-center justify-center gap-1.5 text-xs bg-brain-accent/10 hover:bg-brain-accent/20 disabled:opacity-40 disabled:cursor-not-allowed border border-brain-accent/20 rounded-lg py-1.5 text-brain-accent transition-colors"
-          >
-            <Play size={11} />
-            Run
-          </button>
-          <button
-            onClick={() => onDelete(agent.id)}
-            className="w-8 flex items-center justify-center bg-brain-error/10 hover:bg-brain-error/20 border border-brain-error/20 rounded-lg py-1.5 text-brain-error transition-colors"
-          >
-            <Trash2 size={11} />
-          </button>
         </div>
       </div>
 

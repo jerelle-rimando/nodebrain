@@ -20,6 +20,16 @@ router.get('/', (_req, res) => {
   }
 });
 
+// GET /api/tasks/agent/:agentId
+router.get('/agent/:agentId', (req, res) => {
+  try {
+    const tasks = getTasksByAgent(req.params.agentId);
+    res.json({ success: true, data: tasks });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
 // GET /api/tasks/:id
 router.get('/:id', (req, res) => {
   try {

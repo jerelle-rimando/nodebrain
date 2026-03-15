@@ -27,6 +27,7 @@ export const api = {
     request<{ message: string }>(`/agents/${id}/execute`, { method: 'POST', body: JSON.stringify({ input }) }),
 
   getTasks: () => request<import('@shared/types').Task[]>('/tasks'),
+  getAgentTasks: (agentId: string) => request<import('@shared/types').Task[]>(`/tasks/agent/${agentId}`),
 
   getLogs: () => request<import('@shared/types').TaskLog[]>('/logs'),
   getAgentLogs: (agentId: string) => request<import('@shared/types').TaskLog[]>(`/logs/agent/${agentId}`),
@@ -48,4 +49,7 @@ export const api = {
 
   testIntegration: (provider: string) =>
     request<{ success: boolean; message: string }>(`/integrations/${provider}/test`),
+  
+  parseSchedule: (input: string) =>
+    request<{ cron: string | null; human: string | null }>(`/schedule/parse?input=${encodeURIComponent(input)}`),
 };
