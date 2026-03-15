@@ -1,3 +1,7 @@
+import 'dotenv/config';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import { initDb } from './db/database';
@@ -41,6 +45,24 @@ app.use('/api/integrations', integrationsRouter);
 app.use('/api/auth', authRouter);
 
 async function main() {
+  if (!process.env.VAULT_SECRET) {
+    const envPath = path.join(process.cwd(), '.env');
+    const secret = crypto.randomBytes(32).toString('hex');
+    const envContent = fs.existsSync(envPath)
+      ? fs.readFileSync(envPath, 'utf8')
+      : '';
+    if (envContent.includes('VAULT_SECRET=')) {
+      fs.writeFileSync(
+        envPath,
+        envContent.replace(/VAULT_SECRET=.*/, 'VAULT_SECRET=' + secret),
+      );
+    } else {
+      fs.appendFileSync(envPath, '\nVAULT_SECRET=' + secret);
+    }
+    process.env.VAULT_SECRET = secret;
+    console.log('✅ Generated new VAULT_SECRET and saved to .env');
+  }
+
   await initDb();
   console.log('✅ Database ready');
 

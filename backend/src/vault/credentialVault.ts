@@ -4,7 +4,10 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Credential } from '../../shared-types';
 
 function getEncryptionKey(): string {
-  const envKey = process.env.VAULT_SECRET ?? 'nodebrain-local-vault-key-change-in-production';
+  const envKey = process.env.VAULT_SECRET;
+  if (!envKey) {
+    throw new Error('VAULT_SECRET is not set. NodeBrain cannot start without it.');
+  }
   return CryptoJS.SHA256(envKey).toString();
 }
 
