@@ -44,7 +44,7 @@ npm install --prefix frontend
 
 ### Configuration
 
-Copy the example environment file and optionally edit it to set a custom vault encryption secret.
+Copy the example environment file and edit it to set a custom vault encryption secret.
 
 **Mac/Linux:**
 ```bash

@@ -9,6 +9,7 @@ import { useEventStream } from './hooks/useEventStream';
 import { api } from './utils/api';
 import { IntegrationsPage } from './components/integrations/IntegrationsPage'
 import { ToastContainer } from './components/shared/Toast';
+import { toast } from './components/shared/Toast';
 
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
@@ -24,8 +25,21 @@ export default function App() {
   useEffect(() => {
     // Bootstrap data
     api.getAgents().then(setAgents).catch(console.error);
-    api.getLogs().then(setLogs).catch(console.error);
-  }, [setAgents, setLogs]);
+  api.getLogs().then(setLogs).catch(console.error);
+
+  const params = new URLSearchParams(window.location.search);
+  const authStatus = params.get('auth');
+  const provider = params.get('provider');
+  if (authStatus === 'success' && provider) {
+    toast.success('Google Workspace connected successfully');
+    api.getCredentials().then(useStore.getState().setCredentials).catch(console.error);
+    window.history.replaceState({}, '', '/');
+    setActiveTab('integrations');
+  } else if (authStatus === 'error' && provider) {
+    toast.error('Google connection failed. Check your .env and try again.');
+    window.history.replaceState({}, '', '/');
+  }
+}, [setAgents, setLogs]);
 
   return (
     <div className="flex h-screen bg-brain-bg overflow-hidden">

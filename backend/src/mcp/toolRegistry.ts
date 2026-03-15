@@ -21,12 +21,21 @@ const SERVER_CONFIGS: ServerConfig[] = [
   {
     name: 'google',
     credentialProvider: 'google',
-    buildServer: (token) => ({
-      name: 'google',
-      command: 'gws',
-      args: ['mcp'],
-      env: {},
-    }),
+    buildServer: (tokenJson) => {
+      let accessToken = tokenJson;
+      try {
+        const parsed = JSON.parse(tokenJson) as { access_token?: string };
+        accessToken = parsed.access_token ?? tokenJson;
+      } catch {
+        // use raw value if not JSON
+      }
+      return {
+        name: 'google',
+        command: 'gws',
+        args: ['mcp'],
+        env: { GOOGLE_OAUTH_TOKEN: accessToken },
+      };
+    },
   },
   {
     name: 'github',
