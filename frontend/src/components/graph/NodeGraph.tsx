@@ -276,12 +276,25 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
 export function NodeGraph() {
   const { agents, removeAgent } = useStore();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, , onEdgesChange] = useEdgesState([]);
+  const [edges, setEdges , onEdgesChange] = useEdgesState([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const onConnect = useCallback(
-    (_params: Connection) => {},
-    [],
+    (params: Connection) => {
+      setEdges((eds) => [
+        ...eds,
+        {
+          id: params.source + '-' + params.target,
+          source: params.source ?? '',
+          target: params.target ?? '',
+          sourceHandle: params.sourceHandle ?? null,
+          targetHandle: params.targetHandle ?? null,
+          animated: true,
+          style: { stroke: '#6366f1', strokeWidth: 1.5 },
+        },
+      ]);
+    },
+    [setEdges],
   );
 
   async function handleDeleteAgent(id: string) {

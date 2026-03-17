@@ -28,6 +28,7 @@ export default {
         'spin-slow': 'spin 3s linear infinite',
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-out',
+        'marquee': 'marquee 4s linear',
       },
       keyframes: {
         fadeIn: {
@@ -37,6 +38,10 @@ export default {
         slideUp: {
           '0%': { transform: 'translateY(8px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        marquee: {
+          '0%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(-100%)' },
         },
       },
     },

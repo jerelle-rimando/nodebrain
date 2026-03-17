@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Loader2, Zap } from 'lucide-react';
+import { Send, Bot, User, Loader2, Zap, ArrowLeft } from 'lucide-react';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
-import type { ChatMessage } from '@shared/types';
+import type { Agent, ChatMessage } from '@shared/types';
 
 function formatContent(content: string): string {
   return content
@@ -14,6 +14,8 @@ export function Dashboard() {
   const { chatMessages, setChatMessages, addChatMessage, agents, logs } = useStore();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -23,7 +25,7 @@ export function Dashboard() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [chatMessages, agentMessages, selectedAgent]);
 
   async function handleSend() {
     if (!input.trim() || sending) return;
@@ -32,16 +34,51 @@ export function Dashboard() {
     setSending(true);
 
     try {
-      const { userMessage, assistantMessage } = await api.sendChatMessage(text);
-      addChatMessage(userMessage);
-      addChatMessage(assistantMessage);
+      if (selectedAgent) {
+        const userMsg: ChatMessage = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: text,
+          timestamp: new Date().toISOString(),
+          agentId: selectedAgent.id,
+        };
+        setAgentMessages((prev) => ({
+          ...prev,
+          [selectedAgent.id]: [...(prev[selectedAgent.id] ?? []), userMsg],
+        }));
+
+        const result = await api.executeAgent(selectedAgent.id, text);
+        const assistantMsg: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: result.message ?? '(no response)',
+          timestamp: new Date().toISOString(),
+          agentId: selectedAgent.id,
+        };
+        setAgentMessages((prev) => ({
+          ...prev,
+          [selectedAgent.id]: [...(prev[selectedAgent.id] ?? []), assistantMsg],
+        }));
+      } else {
+        const { userMessage, assistantMessage } = await api.sendChatMessage(text);
+        addChatMessage(userMessage);
+        addChatMessage(assistantMessage);
+      }
     } catch (err) {
-      addChatMessage({
+      const errorMsg: ChatMessage = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        content: 'Error: ' + (err instanceof Error ? err.message : 'Unknown error'),
         timestamp: new Date().toISOString(),
-      });
+      };
+      if (selectedAgent) {
+        setAgentMessages((prev) => ({
+          ...prev,
+          [selectedAgent.id]: [...(prev[selectedAgent.id] ?? []), errorMsg],
+        }));
+      } else {
+        addChatMessage(errorMsg);
+      }
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -55,22 +92,56 @@ export function Dashboard() {
     }
   }
 
+  const activeMessages = selectedAgent
+    ? (agentMessages[selectedAgent.id] ?? [])
+    : chatMessages;
+
   const recentLogs = logs.slice(-5);
+
+  const placeholder = selectedAgent
+    ? 'Ask ' + selectedAgent.name + ' anything...'
+    : 'Create an agent, assign tasks, or ask questions...';
 
   return (
     <div className="flex h-full gap-4 p-4">
-      {/* Chat Panel */}
       <div className="flex flex-col flex-1 rounded-xl border border-brain-border bg-brain-surface overflow-hidden">
-        {/* Header */}
+
         <div className="flex items-center gap-3 px-4 py-3 border-b border-brain-border">
-          <div className="w-2 h-2 rounded-full bg-brain-accent animate-pulse-slow" />
-          <h2 className="text-sm font-semibold text-brain-text">NodeBrain Command Interface</h2>
-          <span className="ml-auto text-xs text-brain-text-dim font-mono">{agents.length} agents active</span>
+          {selectedAgent ? (
+            <>
+              <button
+                onClick={() => setSelectedAgent(null)}
+                className="w-6 h-6 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-text hover:bg-brain-border transition-colors flex-shrink-0"
+              >
+                <ArrowLeft size={13} />
+              </button>
+              <div
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{
+                  backgroundColor:
+                    selectedAgent.status === 'running' ? '#6366f1' :
+                    selectedAgent.status === 'error' ? '#ef4444' :
+                    '#22c55e',
+                }}
+              />
+              <h2 className="text-sm font-semibold text-brain-text truncate">{selectedAgent.name}</h2>
+              <span className="ml-auto text-xs text-brain-text-dim font-mono capitalize">
+                {selectedAgent.model}
+              </span>
+            </>
+          ) : (
+            <>
+              <div className="w-2 h-2 rounded-full bg-brain-accent animate-pulse-slow" />
+              <h2 className="text-sm font-semibold text-brain-text">NodeBrain Command Interface</h2>
+              <span className="ml-auto text-xs text-brain-text-dim font-mono">
+                {agents.length} agents active
+              </span>
+            </>
+          )}
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {chatMessages.length === 0 && (
+          {activeMessages.length === 0 && !selectedAgent && (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-16">
               <div className="w-16 h-16 rounded-2xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center">
                 <Zap size={28} className="text-brain-accent" />
@@ -92,14 +163,27 @@ export function Dashboard() {
                     onClick={() => setInput(suggestion)}
                     className="w-full text-left text-xs text-brain-text-dim hover:text-brain-text bg-brain-bg hover:bg-brain-border border border-brain-border rounded-lg px-3 py-2 transition-colors"
                   >
-                    "{suggestion}"
+                    {suggestion}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {chatMessages.map((msg) => (
+          {activeMessages.length === 0 && selectedAgent && (
+            <div className="flex flex-col items-center justify-center h-full text-center space-y-3 py-16">
+              <div className="w-12 h-12 rounded-xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center">
+                <Bot size={22} className="text-brain-accent" />
+              </div>
+              <div>
+                <h3 className="text-brain-text font-semibold mb-1">{selectedAgent.name}</h3>
+                <p className="text-brain-text-dim text-xs max-w-xs">{selectedAgent.description}</p>
+              </div>
+              <p className="text-xs text-brain-text-dim">Ask this agent anything or give it a task</p>
+            </div>
+          )}
+
+          {activeMessages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
 
@@ -117,7 +201,6 @@ export function Dashboard() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
         <div className="p-3 border-t border-brain-border">
           <div className="flex gap-2 items-end">
             <textarea
@@ -125,7 +208,7 @@ export function Dashboard() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Create an agent, assign tasks, or ask questions..."
+              placeholder={placeholder}
               rows={1}
               className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2.5 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none focus:border-brain-accent transition-colors font-sans"
               style={{ minHeight: '40px', maxHeight: '120px' }}
@@ -142,9 +225,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Right Sidebar */}
       <div className="w-72 flex flex-col gap-4">
-        {/* Agent Status */}
         <div className="rounded-xl border border-brain-border bg-brain-surface p-4 flex-1">
           <h3 className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider mb-3">Active Agents</h3>
           {agents.length === 0 ? (
@@ -152,13 +233,32 @@ export function Dashboard() {
           ) : (
             <div className="space-y-2">
               {agents.map((agent) => (
-                <div key={agent.id} className="flex items-center gap-2 p-2 rounded-lg bg-brain-bg border border-brain-border">
-                  <span className={`status-dot status-${agent.status}`} />
+                <button
+                  key={agent.id}
+                  onClick={() => setSelectedAgent(agent)}
+                  className={
+                    'w-full flex items-center gap-2 p-2 rounded-lg border transition-all text-left ' + (
+                      selectedAgent?.id === agent.id
+                        ? 'border-brain-accent/40 bg-brain-accent/10'
+                        : 'border-brain-border bg-brain-bg hover:border-brain-muted hover:bg-brain-border'
+                    )
+                  }
+                >
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{
+                      backgroundColor:
+                        agent.status === 'running' ? '#6366f1' :
+                        agent.status === 'error' ? '#ef4444' :
+                        agent.status === 'stopped' ? '#94a3b8' :
+                        '#22c55e',
+                    }}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-brain-text truncate">{agent.name}</p>
                     <p className="text-xs text-brain-text-dim capitalize">{agent.status}</p>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -172,13 +272,23 @@ export function Dashboard() {
               <p className="text-xs text-brain-text-dim">No activity yet</p>
             ) : (
               recentLogs.map((log) => (
-                <div key={log.id} className="flex gap-2 text-xs">
-                  <span className={`flex-shrink-0 font-mono ${
-                    log.level === 'error' ? 'text-brain-error' :
-                    log.level === 'warn' ? 'text-brain-warning' :
-                    'text-brain-text-dim'
-                  }`}>[{log.level}]</span>
-                  <span className="text-brain-text-dim truncate">{log.message}</span>
+                <div key={log.id} className="flex gap-2 text-xs group overflow-hidden">
+                  <span className={
+                    'flex-shrink-0 font-mono ' + (
+                      log.level === 'error' ? 'text-brain-error' :
+                      log.level === 'warn' ? 'text-brain-warning' :
+                      'text-brain-text-dim'
+                    )
+                  }>
+                    [{log.level}]
+                  </span>
+                  <div className="flex-1 overflow-hidden">
+                    <span
+                      className="text-brain-text-dim whitespace-nowrap inline-block max-w-full group-hover:animate-marquee"
+                    >
+                      {log.message}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
@@ -192,20 +302,20 @@ export function Dashboard() {
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   return (
-    <div className={`flex items-start gap-3 animate-slide-up ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+    <div className={'flex items-start gap-3 animate-slide-up ' + (isUser ? 'flex-row-reverse' : '')}>
+      <div className={'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ' + (
         isUser ? 'bg-brain-accent/20' : 'bg-brain-surface border border-brain-border'
-      }`}>
+      )}>
         {isUser
           ? <User size={14} className="text-brain-accent" />
           : <Bot size={14} className="text-brain-text-dim" />
         }
       </div>
-      <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm ${
+      <div className={'max-w-[80%] rounded-xl px-4 py-3 text-sm ' + (
         isUser
           ? 'bg-brain-accent/10 border border-brain-accent/20 text-brain-text'
           : 'bg-brain-bg border border-brain-border text-brain-text-dim'
-      }`}>
+      )}>
         <div
           className="chat-content leading-relaxed"
           dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
