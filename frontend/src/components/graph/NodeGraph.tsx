@@ -276,7 +276,14 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
 export function NodeGraph() {
   const { agents, removeAgent } = useStore();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges , onEdgesChange] = useEdgesState([]);
+  const savedEdges = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('nodebrain-edges') ?? '[]');
+    } catch {
+      return [];
+    }
+  })();
+  const [edges, setEdges, onEdgesChange] = useEdgesState(savedEdges);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const onConnect = useCallback(
@@ -304,14 +311,22 @@ export function NodeGraph() {
 
   // Sync agents to nodes
   useEffect(() => {
+    const savedPositions = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('nodebrain-positions') ?? '{}') as Record<string, {x: number, y: number}>;
+      } catch {
+        return {} as Record<string, {x: number, y: number}>;
+      }
+    })();
     const newNodes: Node[] = agents.map((agent, i) => {
       const cols = 3;
       const col = i % cols;
       const row = Math.floor(i / cols);
+      const defaultPos = { x: 60 + col * 260, y: 60 + row * 200 };
       return {
         id: agent.id,
         type: 'agentNode',
-        position: { x: 60 + col * 260, y: 60 + row * 200 },
+        position: savedPositions[agent.id] ?? defaultPos,
         data: {
           agent,
           onSelect: setSelectedAgent,
@@ -328,6 +343,16 @@ export function NodeGraph() {
       if (updated) setSelectedAgent(updated);
     }
   }, [agents]);
+
+  useEffect(() => {
+    const positions: Record<string, {x: number, y: number}> = {};
+    nodes.forEach((n) => { positions[n.id] = n.position; });
+    localStorage.setItem('nodebrain-positions', JSON.stringify(positions));
+  }, [nodes]);
+
+  useEffect(() => {
+    localStorage.setItem('nodebrain-edges', JSON.stringify(edges));
+  }, [edges]);
 
   return (
     <div className="h-full relative">
