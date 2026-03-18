@@ -43,7 +43,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'github',
       command: 'npx',
-      args: ['-y', '@github/github-mcp-server'],
+      args: ['-y', '@modelcontextprotocol/server-github'],
       env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
     }),
   },
@@ -63,8 +63,13 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'notion',
       command: 'npx',
-      args: ['-y', '@notionhq/mcp'],
-      env: { NOTION_API_KEY: token },
+      args: ['-y', '@notionhq/notion-mcp-server'],
+      env: {
+        OPENAPI_MCP_HEADERS: JSON.stringify({
+          Authorization: 'Bearer ' + token,
+          'Notion-Version': '2022-06-28',
+        }),
+      },
     }),
   },
   {

@@ -318,22 +318,31 @@ export function NodeGraph() {
         return {} as Record<string, {x: number, y: number}>;
       }
     })();
-    const newNodes: Node[] = agents.map((agent, i) => {
-      const cols = 3;
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const defaultPos = { x: 60 + col * 260, y: 60 + row * 200 };
-      return {
-        id: agent.id,
-        type: 'agentNode',
-        position: savedPositions[agent.id] ?? defaultPos,
-        data: {
-          agent,
-          onSelect: setSelectedAgent,
-        },
-      };
+
+    setNodes((currentNodes) => {
+      const currentPositions: Record<string, {x: number, y: number}> = {};
+      currentNodes.forEach((n) => { currentPositions[n.id] = n.position; });
+
+      return agents.map((agent, i) => {
+        const cols = 3;
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const defaultPos = { x: 60 + col * 260, y: 60 + row * 200 };
+
+        // Priority: current in-memory position > saved localStorage > default grid
+        const position = currentPositions[agent.id] ?? savedPositions[agent.id] ?? defaultPos;
+
+        return {
+          id: agent.id,
+          type: 'agentNode',
+          position,
+          data: {
+            agent,
+            onSelect: setSelectedAgent,
+          },
+        };
+      });
     });
-    setNodes(newNodes);
   }, [agents]);
 
   // Update selected agent when agents store updates

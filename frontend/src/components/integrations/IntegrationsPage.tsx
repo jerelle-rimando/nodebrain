@@ -95,7 +95,7 @@ const INTEGRATIONS: Integration[] = [
     label: 'Notion',
     description: 'Read and write Notion pages and databases.',
     credentialProvider: 'notion',
-    credentialPlaceholder: 'secret_...',
+    credentialPlaceholder: 'ntn_...',
     tools: ['Read page', 'Create page', 'Update page', 'Query database', 'Create database entry'],
     setupSteps: [
       'Go to notion.so/my-integrations',

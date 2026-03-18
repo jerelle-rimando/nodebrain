@@ -35,7 +35,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   custom: 'gpt-4o-mini',
 };
 
-const MAX_TOOL_ITERATIONS = 10;
+const MAX_TOOL_ITERATIONS = 15;
 
 function getClient(provider: string, apiKey: string): OpenAI {
   return new OpenAI({
@@ -87,7 +87,7 @@ async function runOpenAIAgenticLoop(
       messages,
       temperature: agent.config.temperature ?? 0.7,
       max_tokens: agent.config.maxTokens ?? 2000,
-      ...(formattedTools.length > 0 ? { tools: formattedTools } : {}),
+      ...(formattedTools.length > 0 ? { tools: formattedTools, tool_choice: 'auto' } : {}),
     });
 
     const choice = completion.choices[0];
