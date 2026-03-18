@@ -169,7 +169,7 @@ During task execution, the agent runs in an agentic loop:
 4. Feed results back to the model
 5. Repeat until the model returns a final answer
 
-This loop supports a maximum of 10 tool iterations per task to prevent runaway execution.
+This loop supports a maximum of 15 tool iterations per task to prevent runaway execution.
 
 ---
 
@@ -244,6 +244,16 @@ This keeps the ecosystem fair while still allowing anyone to:
 - study the code
 - modify it
 - contribute improvements
+
+---
+
+## Known Limitations 🚧
+
+- **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
+- **Brave Search and Slack** — currently use deprecated npm packages that still work but may break in a future update. Replacements planned for v0.2.
+- **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
+- **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
+- **Local only** — no cloud deployment, no mobile, no collaboration features yet.
 
 ---
 
