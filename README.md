@@ -73,6 +73,10 @@ http://localhost:5173
 
 ### First Time Setup
 
+> ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model on startup. 
+> This only happens once. If the backend seems slow to start, wait 30-60 seconds — it's normal.
+> MCP integrations also download their servers on first use, which may take a moment.
+
 1. Click the **Vault** tab (shield icon) and add your API key for your preferred provider
 2. Click the **Integrations** tab (plug icon) to connect external services like Telegram, GitHub, Slack, Notion, and more
 3. Go to the **Dashboard** tab and type something like "Create an agent that summarizes news every morning"
@@ -91,6 +95,9 @@ NodeBrain is model-agnostic and works with any of the following out of the box:
 - Together AI
 - Fireworks AI
 - Ollama (fully local, no API key needed)
+
+> 💡 **For best tool calling performance**, OpenAI GPT-4o or Anthropic Claude Opus 4.6 are recommended. 
+> Groq works but may require more explicit prompts for complex tool use.
 
 ### Security Notes
 
