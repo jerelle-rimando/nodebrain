@@ -127,7 +127,7 @@ const INTEGRATIONS: Integration[] = [
     label: 'Local Filesystem',
     description: 'Let agents read and write files on your local machine.',
     credentialProvider: 'filesystem',
-    credentialPlaceholder: 'C:\\Users\\you\\Documents',
+    credentialPlaceholder: 'Windows: C:\\Users\\you\\Documents | Mac: /Users/you/Documents',
     tools: ['Read file', 'Write file', 'List directory', 'Create folder', 'Delete file'],
     setupSteps: [
       'Enter the folder path you want agents to have access to',

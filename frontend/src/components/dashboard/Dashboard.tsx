@@ -149,14 +149,14 @@ export function Dashboard() {
               <div>
                 <h3 className="text-brain-text font-semibold mb-2">Create your first agent</h3>
                 <p className="text-brain-text-dim text-sm max-w-xs">
-                  Describe what you want an agent to do in plain English and NodeBrain will configure it automatically.
+                Describe what you want an agent to do. Connect integrations to give it real tools — file access, messaging, code, and more.
                 </p>
               </div>
               <div className="space-y-2 text-left w-full max-w-sm">
                 {[
-                  'Create an agent that summarizes RSS feeds every hour',
-                  'Build a research agent that answers questions about topics',
-                  'Make an agent that monitors news and sends summaries',
+                  'Create a file manager agent that reads and summarizes my local documents',
+                  'Build a Telegram agent that sends me a daily briefing every morning at 9am',
+                  'Make a GitHub agent that monitors my repos and summarizes new issues',
                 ].map((suggestion) => (
                   <button
                     key={suggestion}
