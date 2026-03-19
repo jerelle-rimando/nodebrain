@@ -286,7 +286,7 @@ NodeBrain is licensed under AGPL-3.0 for open source use. This means you can use
 
 If you want to use NodeBrain in a commercial product or hosted service without open sourcing your modifications, a separate commercial license is available.
 
-Contact **jerellerimando.dev@gmail.com** for commercial licensing inquiries.
+Contact Jerelle Rimando at **https://www.linkedin.com/in/jerellerimando/** for commercial licensing inquiries.
 
 ---
 
