@@ -122,7 +122,7 @@ NodeBrain is provided **as-is** with no warranty of any kind, express or implied
 NodeBrain is built around four primary systems:
 
 ### Dashboard ⚙️
-Create and control agents through natural language chat. Click any agent in the Active Agents list to open a dedicated chat with that agent directly — no need to reference it by name.
+Create and control agents through chat. Click any agent in the Active Agents list to open a dedicated chat with that agent directly — no need to reference it by name.
 
 ### NodeGraph 🌐
 Visualize agents and their execution status in a live graph interface. Click any node to open a detail panel showing agent configuration, task history, and a direct run interface. Node border colors reflect live status — purple for running, red for error.
