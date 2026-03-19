@@ -192,23 +192,6 @@ Agents can be scheduled using plain English. NodeBrain converts natural language
 
 ---
 
-## Local-First Architecture 📍
-
-NodeBrain runs locally and does not require a hosted service.
-
-Users can connect their preferred AI models by adding API keys inside the **Credential Vault**.
-
-This allows developers to choose their own infrastructure while maintaining full control over:
-
-- data
-- models
-- integrations
-- execution
-
-Future deployments may support **web or hosted environments**, but the core philosophy remains **local-first and transparent**.
-
----
-
 ## Who NodeBrain Is For 👤
 
 NodeBrain is designed primarily for:
@@ -233,6 +216,49 @@ Open sourcing the project provides several important benefits:
 
 ---
 
+## Local-First Architecture 📍
+
+NodeBrain runs entirely on your machine and does not require a hosted service. Users connect their preferred AI models via the Credential Vault and choose their own infrastructure.
+
+Future versions may support web or hosted environments — see [Security & Architecture Philosophy](#security--architecture-philosophy) for the reasoning behind starting local-first.
+
+---
+
+## Known Limitations 🚧
+
+- **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
+- **Brave Search and Slack** — currently use deprecated npm packages that still work but may break in a future update. Replacements planned for v0.2.
+- **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
+- **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
+- **Local only** — no cloud deployment, no mobile, no collaboration features yet.
+
+---
+
+## Security & Architecture Philosophy 🔐
+
+MCP introduces real security concerns in centralized deployments — unauthorized access, over-privileged servers, and prompt injection are legitimate risks when multiple users share infrastructure.
+
+NodeBrain's local-first architecture mitigates many of these risks by design:
+
+- Every MCP server runs on your own machine with your own credentials
+- There is no central server or shared infrastructure, significantly reducing the external attack surface
+- Your agents only have access to what you explicitly connect in the Vault
+- CORS restricts browser-based access to localhost, adding an additional layer of protection
+
+This isn't just a v0.1 limitation — it's a deliberate architectural choice. MCP is still evolving, and the security model for multi-user, web-based deployments is not yet fully mature.
+
+By building local-first, NodeBrain avoids many server-side and multi-tenant risks that centralized agent platforms face today, while keeping control in the hands of the user.
+
+When MCP security patterns for web deployments mature, NodeBrain is designed to evolve in that direction — but starting local-first ensures a stronger foundation rather than retrofitting security later.
+
+For now, local-first prioritizes control and safety: your keys, your machine, your agents.
+
+> ⚠️ **Third party MCP servers:** NodeBrain only ships integrations from verified publishers (Anthropic, Notion, GitHub, IQAi). Third party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
+
+> ⚠️ **Network deployment:** NodeBrain is designed for localhost use only. Deploying to a networked environment without authentication, rate limiting, and input sanitization introduces significant security risks.
+
+---
+
 ## License 🛡️
 
 This project is licensed under the **GNU Affero General Public License v3 (AGPL-3.0)**.
@@ -254,20 +280,13 @@ This keeps the ecosystem fair while still allowing anyone to:
 
 ---
 
-## Known Limitations 🚧
+## Commercial Licensing 💼
 
-- **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
-- **Brave Search and Slack** — currently use deprecated npm packages that still work but may break in a future update. Replacements planned for v0.2.
-- **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
-- **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
-- **Local only** — no cloud deployment, no mobile, no collaboration features yet.
-- MCP servers run as child processes with access to the credentials you provide. 
-  Only use MCP servers from trusted sources. NodeBrain only ships integrations 
-  from verified publishers (Anthropic, Notion, GitHub, IQAi) but cannot audit 
-  third party MCP servers added by users or contributors.
-- NodeBrain is designed for localhost use only. Deploying it to a networked 
-  environment without adding authentication, rate limiting, and input sanitization 
-  is not recommended and introduces significant security risks.
+NodeBrain is licensed under AGPL-3.0 for open source use. This means you can use, modify, and distribute NodeBrain freely as long as you open source your modifications under the same license.
+
+If you want to use NodeBrain in a commercial product or hosted service without open sourcing your modifications, a separate commercial license is available.
+
+Contact **jerellerimando.dev@gmail.com** for commercial licensing inquiries.
 
 ---
 
