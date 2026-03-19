@@ -100,7 +100,7 @@ export function Dashboard() {
 
   const placeholder = selectedAgent
     ? 'Ask ' + selectedAgent.name + ' anything...'
-    : 'Create an agent, assign tasks, or ask questions...';
+    : 'Create an agent, run tasks, or ask questions...';
 
   return (
     <div className="flex h-full gap-4 p-4">
