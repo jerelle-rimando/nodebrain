@@ -261,6 +261,13 @@ This keeps the ecosystem fair while still allowing anyone to:
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
 - **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
 - **Local only** — no cloud deployment, no mobile, no collaboration features yet.
+- MCP servers run as child processes with access to the credentials you provide. 
+  Only use MCP servers from trusted sources. NodeBrain only ships integrations 
+  from verified publishers (Anthropic, Notion, GitHub, IQAi) but cannot audit 
+  third party MCP servers added by users or contributors.
+- NodeBrain is designed for localhost use only. Deploying it to a networked 
+  environment without adding authentication, rate limiting, and input sanitization 
+  is not recommended and introduces significant security risks.
 
 ---
 
