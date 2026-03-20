@@ -46,6 +46,17 @@ router.get('/history', (_req, res) => {
   }
 });
 
+router.post('/save', (req, res) => {
+  try {
+    const { messages } = req.body as { messages?: ChatMessage[] };
+    if (!messages?.length) return res.status(400).json({ success: false, error: 'messages required' });
+    messages.forEach(saveChatMessage);
+    res.json({ success: true, data: { saved: messages.length } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
 router.post('/message', async (req, res) => {
   try {
     const { content } = req.body as { content?: string };

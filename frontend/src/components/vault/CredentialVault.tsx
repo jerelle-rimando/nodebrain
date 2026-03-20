@@ -27,7 +27,6 @@ export function CredentialVault() {
   const [showForm, setShowForm] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
-  // Form state
   const [name, setName] = useState('');
   const [provider, setProvider] = useState('openai');
   const [value, setValue] = useState('');
@@ -72,7 +71,7 @@ export function CredentialVault() {
   return (
     <div className="h-full p-4 overflow-y-auto">
       <div className="max-w-2xl mx-auto space-y-4">
-        {/* Header */}
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center">
@@ -92,7 +91,6 @@ export function CredentialVault() {
           </button>
         </div>
 
-        {/* Security notice */}
         <div className="flex items-start gap-3 p-3 rounded-xl bg-brain-success/5 border border-brain-success/20">
           <Shield size={14} className="text-brain-success mt-0.5 flex-shrink-0" />
           <p className="text-xs text-brain-text-dim leading-relaxed">
@@ -100,7 +98,6 @@ export function CredentialVault() {
           </p>
         </div>
 
-        {/* Add Credential Form */}
         {showForm && (
           <div className="rounded-xl border border-brain-border bg-brain-surface p-4 space-y-3 animate-slide-up">
             <h3 className="text-sm font-medium text-brain-text">New Credential</h3>
@@ -131,22 +128,26 @@ export function CredentialVault() {
             </div>
 
             <div>
-              <label className="block text-xs text-brain-text-dim mb-1">API Key</label>
+              <label className="block text-xs text-brain-text-dim mb-1">
+                {provider === 'filesystem' ? 'Folder Path' : 'API Key'}
+              </label>
               <div className="relative">
                 <input
-                  type={showValue ? 'text' : 'password'}
+                  type={showValue || provider === 'filesystem' ? 'text' : 'password'}
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   placeholder={selectedProvider?.placeholder ?? 'Enter key...'}
                   className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 pr-10 text-sm text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowValue(!showValue)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-brain-text-dim hover:text-brain-text"
-                >
-                  {showValue ? <EyeOff size={13} /> : <Eye size={13} />}
-                </button>
+                {provider !== 'filesystem' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowValue(!showValue)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-brain-text-dim hover:text-brain-text"
+                  >
+                    {showValue ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -176,7 +177,6 @@ export function CredentialVault() {
           </div>
         )}
 
-        {/* Credentials List */}
         <div className="space-y-2">
           {credentials.length === 0 ? (
             <div className="text-center py-12 text-brain-text-dim">

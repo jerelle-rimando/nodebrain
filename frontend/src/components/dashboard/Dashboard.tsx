@@ -20,7 +20,17 @@ export function Dashboard() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    api.getChatHistory().then(setChatMessages).catch(console.error);
+    api.getChatHistory().then((messages) => {
+      setChatMessages(messages.filter((m) => !m.agentId));
+      const byAgent: Record<string, ChatMessage[]> = {};
+      messages
+        .filter((m) => m.agentId)
+        .forEach((m) => {
+          if (!byAgent[m.agentId!]) byAgent[m.agentId!] = [];
+          byAgent[m.agentId!].push(m);
+        });
+      setAgentMessages(byAgent);
+    }).catch(console.error);
   }, [setChatMessages]);
 
   useEffect(() => {
@@ -59,6 +69,7 @@ export function Dashboard() {
           ...prev,
           [selectedAgent.id]: [...(prev[selectedAgent.id] ?? []), assistantMsg],
         }));
+        api.saveMessages([userMsg, assistantMsg]).catch(console.error);
       } else {
         const { userMessage, assistantMessage } = await api.sendChatMessage(text);
         addChatMessage(userMessage);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEffect } from 'react';
 import {
   Plug,
   CheckCircle,
@@ -19,6 +20,7 @@ interface Integration {
   credentialProvider: string;
   credentialPlaceholder: string;
   oauthProvider?: string;
+  isSecret?: boolean;
   tools: string[];
   setupSteps: string[];
   docsUrl?: string;
@@ -31,6 +33,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Send messages, receive commands, and interact via a Telegram bot.',
     credentialProvider: 'telegram',
     credentialPlaceholder: 'bot123456:ABC-DEF...',
+    isSecret: true,
     tools: ['Send message', 'Send photo', 'Send document', 'Get chat info', 'Forward message'],
     setupSteps: [
       'Open Telegram and search for @BotFather',
@@ -46,6 +49,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Access Gmail, Google Docs, Sheets, Drive, and Calendar.',
     credentialProvider: 'google',
     credentialPlaceholder: 'Connects via OAuth',
+    isSecret: true,
     oauthProvider: 'google',
     tools: ['Read/send Gmail', 'Create/edit Docs', 'Read/write Sheets', 'List Drive files', 'Create Calendar events'],
     setupSteps: [
@@ -64,6 +68,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Read repos, create issues, open pull requests, and manage code.',
     credentialProvider: 'github',
     credentialPlaceholder: 'ghp_...',
+    isSecret: true,
     tools: ['List repos', 'Create issue', 'Create PR', 'Read file contents', 'Push commits'],
     setupSteps: [
       'Go to GitHub Settings then Developer Settings',
@@ -80,6 +85,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Send messages and interact with Slack workspaces.',
     credentialProvider: 'slack',
     credentialPlaceholder: 'xoxb-...',
+    isSecret: true,
     tools: ['Send message', 'List channels', 'Read messages', 'Upload file', 'Set status'],
     setupSteps: [
       'Go to api.slack.com/apps and create a new app',
@@ -96,6 +102,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Read and write Notion pages and databases.',
     credentialProvider: 'notion',
     credentialPlaceholder: 'ntn_...',
+    isSecret: true,
     tools: ['Read page', 'Create page', 'Update page', 'Query database', 'Create database entry'],
     setupSteps: [
       'Go to notion.so/my-integrations',
@@ -113,6 +120,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Give agents the ability to search the web.',
     credentialProvider: 'brave',
     credentialPlaceholder: 'BSA...',
+    isSecret: true,
     tools: ['Web search', 'News search', 'Image search'],
     setupSteps: [
       'Go to brave.com/search/api',
@@ -176,7 +184,7 @@ function ConnectSection(props: ConnectSectionProps) {
   return (
     <div className="flex gap-2">
       <input
-        type="password"
+        type={props.integration.isSecret ? 'password' : 'text'}
         value={tokenInputs[integration.id] ?? ''}
         onChange={(e) => onTokenChange(integration.id, e.target.value)}
         placeholder={integration.credentialPlaceholder}
@@ -253,6 +261,12 @@ export function IntegrationsPage() {
   const [testResults, setTestResults] = useState<Record<string, 'ok' | 'fail'>>({});
   const [tokenInputs, setTokenInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getCredentials()
+      .then((creds) => useStore.getState().setCredentials(creds))
+      .catch(console.error);
+  }, []);
 
   function isConnected(integration: Integration): boolean {
     return credentials.some((c) => c.provider === integration.credentialProvider);

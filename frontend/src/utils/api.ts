@@ -47,6 +47,9 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ content }) }
     ),
 
+    saveMessages: (messages: import('@shared/types').ChatMessage[]) =>
+      request<{ saved: number }>('/chat/save', { method: 'POST', body: JSON.stringify({ messages }) }),
+
   testIntegration: (provider: string) =>
     request<{ success: boolean; message: string }>(`/integrations/${provider}/test`),
   
