@@ -1,6 +1,6 @@
 # Contributing to NodeBrain
 
-Contributions are welcome. Here's how to get started:
+Contributions are welcome! Here's how to get started:
 
 ## Getting Started
 
