@@ -115,10 +115,9 @@ router.post('/message', async (req, res) => {
           updatedAt: now,
         };
         createAgent(agent);
-        agentId = agent.id;
         assistantContent = `✅ **Agent Created: "${agent.name}"**\n\n${agent.description}\n\n**Model:** ${agent.model}${agent.schedule ? `\n**Schedule:** ${agent.schedule}` : ''}\n\nThe agent is ready. Say "Ask ${agent.name} to [task]" to run it.`;
       } else {
-        assistantContent = `I couldn't parse an agent configuration from that. Try: "Create an agent that summarizes news articles every morning."`;
+        assistantContent = `I couldn't parse an agent configuration from that. Try: "Create an agent that summarizes news articles and sends it to me every morning in Telegram."`;
       }
     } else if (targetAgentName) {
       const agents = getAllAgents();
