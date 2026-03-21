@@ -72,11 +72,12 @@ router.post('/message', async (req, res) => {
     };
     saveChatMessage(userMsg);
 
-    const lowerContent = content.toLowerCase();
+    const safeContent = content.slice(0, 1000);
+    const lowerContent = safeContent.toLowerCase();
     const isCreateIntent = ['create', 'make', 'build', 'set up', 'new agent'].some((w) =>
       lowerContent.includes(w),
     );
-    const agentMatch = content.match(
+    const agentMatch = safeContent.match(
       /(?:ask|tell|use|run|execute)\s+["']?([^"']+?)["']?\s+(?:to|agent)/i,
     );
     const targetAgentName = agentMatch?.[1]?.trim();
@@ -126,7 +127,7 @@ router.post('/message', async (req, res) => {
       );
 
       if (targetAgent) {
-        const taskInput = content.replace(
+        const taskInput = safeContent.replace(
           /(?:ask|tell|use|run|execute)\s+["']?[^"']+?["']?\s+(?:to|agent)\s*/i,
           '',
         );

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -35,14 +36,20 @@ app.get('/api/schedule/parse', (req, res) => {
   res.json({ success: true, data: result });
 });
 
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+});
+
 app.use('/api/agents', agentRouter);
 app.use('/api/tasks', taskRouter);
 app.use('/api/logs', logsRouter);
 app.use('/api/credentials', credentialRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/events', eventsRouter);
-app.use('/api/integrations', integrationsRouter);
-app.use('/api/auth', authRouter);
+app.use('/api/integrations', limiter, integrationsRouter);
+app.use('/api/auth', limiter, authRouter);
 
 async function main() {
   if (!process.env.VAULT_SECRET) {
