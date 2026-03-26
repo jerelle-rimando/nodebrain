@@ -227,7 +227,6 @@ Future versions may support web or hosted environments — see [Security & Archi
 ## Known Limitations 🚧
 
 - **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
-- **Brave Search and Slack** — currently use deprecated npm packages that still work but may break in a future update. Replacements planned for v0.2.
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
 - **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
 - **Local only** — no cloud deployment, no mobile, no collaboration features yet.
@@ -236,6 +235,7 @@ Future versions may support web or hosted environments — see [Security & Archi
   attack on any dependency (similar to the LiteLLM PyPI compromise of March 2026), 
   users should rotate all credentials stored in the vault immediately. 
   Monitor dependency advisories and keep packages updated via Dependabot.
+- **Deprecated Slack package** — still works but will be replaced when Slack's official stdio MCP server is available.
 
 ---
 

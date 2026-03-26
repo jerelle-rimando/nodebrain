@@ -88,7 +88,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'brave-search',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-brave-search'],
+      args: ['-y', '@brave/brave-search-mcp-server'],
       env: { BRAVE_API_KEY: token },
     }),
   },
