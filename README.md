@@ -231,6 +231,11 @@ Future versions may support web or hosted environments — see [Security & Archi
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
 - **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
 - **Local only** — no cloud deployment, no mobile, no collaboration features yet.
+- **Dependency supply chain risk** — NodeBrain relies on third party npm packages 
+  including MCP SDK, OpenAI SDK, and Anthropic SDK. In the event of a supply chain 
+  attack on any dependency (similar to the LiteLLM PyPI compromise of March 2026), 
+  users should rotate all credentials stored in the vault immediately. 
+  Monitor dependency advisories and keep packages updated via Dependabot.
 
 ---
 
