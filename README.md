@@ -71,6 +71,38 @@ Open your browser and go to:
 http://localhost:5173
 ```
 
+### Running 24/7 (Background Mode)
+
+To keep NodeBrain running permanently in the background:
+```bash
+cd backend
+npm run start:prod
+```
+
+**Check status:**
+```bash
+npm run status
+```
+
+**View live logs:**
+```bash
+npm run logs
+```
+
+**Stop:**
+```bash
+npm run stop
+```
+
+**Restart after changes:**
+```bash
+npm run restart
+```
+
+> ⚠️ Do not run `npm run dev` from root and `npm run start:prod` at the same time — they conflict on port 3001.
+
+> ⏳ First start downloads a ~25MB embedding model. Wait 60 seconds.
+
 ### First Time Setup
 
 > ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model on startup. 

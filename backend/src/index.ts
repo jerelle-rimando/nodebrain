@@ -52,48 +52,59 @@ app.use('/api/integrations', limiter, integrationsRouter);
 app.use('/api/auth', limiter, authRouter);
 
 async function main() {
-  if (!process.env.VAULT_SECRET) {
-    const envPath = path.join(process.cwd(), '.env');
-    const secret = crypto.randomBytes(32).toString('hex');
-    const envContent = fs.existsSync(envPath)
-      ? fs.readFileSync(envPath, 'utf8')
-      : '';
-    if (envContent.includes('VAULT_SECRET=')) {
-      fs.writeFileSync(
-        envPath,
-        envContent.replace(/VAULT_SECRET=.*/, 'VAULT_SECRET=' + secret),
+  try {
+    /**
+     * SAFE VAULT_SECRET HANDLING
+     * - No overwriting .env during runtime under PM2
+     * - Only generates in-memory if missing
+     * - Logs warning instead of mutating files
+     */
+    if (!process.env.VAULT_SECRET) {
+      const secret = crypto.randomBytes(32).toString('hex');
+      process.env.VAULT_SECRET = secret;
+
+      console.warn(
+        '⚠️ VAULT_SECRET not found in .env. Using generated value in memory only. ' +
+        'Persist it manually in .env to avoid regeneration on restart.'
       );
-    } else {
-      fs.appendFileSync(envPath, '\nVAULT_SECRET=' + secret);
     }
-    process.env.VAULT_SECRET = secret;
-    console.log('✅ Generated new VAULT_SECRET and saved to .env');
+
+    await initDb();
+    console.log('✅ Database ready');
+
+    await initRag();
+    console.log('✅ RAG engine ready');
+
+    await initializeToolRegistry();
+    console.log('✅ Tool registry ready');
+
+    startScheduler();
+    console.log('✅ Scheduler ready');
+
+    app.listen(PORT, () => {
+      console.log(`\n🧠 NodeBrain backend running at http://localhost:${PORT}`);
+      console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
+      console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
+    });
+
+  } catch (err) {
+    console.error('❌ Fatal error during startup:', err);
+    process.exit(1);
   }
-
-  await initDb();
-  console.log('✅ Database ready');
-
-  await initRag();
-  console.log('✅ RAG engine ready');
-
-  await initializeToolRegistry();
-  console.log('✅ Tool registry ready');
-
-  startScheduler();
-  console.log('✅ Scheduler ready');
-
-  app.listen(PORT, () => {
-    console.log(`\n🧠 NodeBrain backend running at http://localhost:${PORT}`);
-    console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
-    console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
-  });
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error('❌ Unhandled error in main():', err);
+  process.exit(1);
+});
 
 process.on('SIGINT', async () => {
   console.log('\nShutting down NodeBrain...');
-  await disconnectAll();
+  try {
+    await disconnectAll();
+  } catch (e) {
+    console.error('Error during shutdown:', e);
+  }
   process.exit(0);
 });
 
