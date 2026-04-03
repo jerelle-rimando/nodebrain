@@ -69,6 +69,11 @@ async function main() {
       );
     }
 
+    // Verify pdfjs-dist loads correctly
+    import('pdfjs-dist/legacy/build/pdf.mjs').catch((err) => {
+      console.warn('[PDF] pdfjs-dist failed to load:', err.message);
+    });
+
     await initDb();
     console.log('✅ Database ready');
 

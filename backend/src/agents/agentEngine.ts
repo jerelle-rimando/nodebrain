@@ -107,7 +107,12 @@ async function runOpenAIAgenticLoop(
 
       let toolResult: string;
       try {
+        if (serverName === 'pdf-reader') {
+          const { readPdfAsText } = await import('../utils/pdfReader');
+          toolResult = await readPdfAsText(args.file_path as string);
+      } else {
         toolResult = await callTool(serverName, toolName, args);
+      }
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" completed`));
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -177,7 +182,12 @@ async function runAnthropicAgenticLoop(
 
       let toolResult: string;
       try {
+        if (serverName === 'pdf-reader') {
+          const { readPdfAsText } = await import('../utils/pdfReader');
+          toolResult = await readPdfAsText(args.file_path as string);
+      } else {
         toolResult = await callTool(serverName, toolName, args);
+      }
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" completed`));
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;

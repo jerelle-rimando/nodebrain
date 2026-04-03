@@ -1,5 +1,6 @@
 import { connectToServer, getAllAvailableTools, disconnectAll, type MCPServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
+import { readPdfAsText } from '../utils/pdfReader';
 
 interface ServerConfig {
   name: string;
@@ -113,8 +114,25 @@ export async function initializeToolRegistry(): Promise<void> {
   console.log(`[ToolRegistry] Ready — ${tools.length} tools available`);
 }
 
+const PDF_TOOL: MCPToolWithServer = {
+  serverName: 'pdf-reader',
+  name: 'read_pdf',
+  description: 'Read and extract text content from a PDF file on the local filesystem',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description: 'Absolute path to the PDF file to read',
+      },
+    },
+    required: ['file_path'],
+  },
+};
+
 export async function getToolsForAgent(): Promise<MCPToolWithServer[]> {
-  return getAllAvailableTools();
+  const mcpTools = await getAllAvailableTools();
+  return [...mcpTools, PDF_TOOL];
 }
 
 export function formatToolsForOpenAI(tools: MCPToolWithServer[]): Array<{
