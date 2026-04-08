@@ -114,6 +114,16 @@ export async function initDb(): Promise<void> {
       timestamp TEXT NOT NULL,
       agent_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS custom_mcp_servers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      transport TEXT NOT NULL DEFAULT 'stdio',
+      command TEXT,
+      args TEXT NOT NULL DEFAULT '[]',
+      url TEXT,
+      env_vars TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
   `);
   persist();
 }

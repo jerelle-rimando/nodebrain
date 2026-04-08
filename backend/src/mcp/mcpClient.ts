@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 
 export interface MCPTool {
   name: string;
@@ -12,6 +13,11 @@ export interface MCPServer {
   command: string;
   args: string[];
   env?: Record<string, string>;
+}
+
+export interface MCPSSEServer {
+  name: string;
+  url: string;
 }
 
 export interface MCPToolWithServer extends MCPTool {
@@ -56,6 +62,34 @@ export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
     return tools;
   } catch (err) {
     console.error(`[MCP] Failed to connect to "${server.name}":`, err);
+    return [];
+  }
+}
+
+export async function connectToSSEServer(server: MCPSSEServer): Promise<MCPTool[]> {
+  try {
+    const transport = new SSEClientTransport(new URL(server.url));
+
+    const client = new Client(
+      { name: 'nodebrain', version: '1.0.0' },
+      { capabilities: {} },
+    );
+
+    await client.connect(transport);
+
+    const toolsResult = await client.listTools();
+    const tools: MCPTool[] = toolsResult.tools.map(t => ({
+      name: t.name,
+      description: t.description ?? '',
+      inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
+    }));
+
+    activeConnections.set(server.name, { client, tools });
+    console.log(`[MCP] Connected to SSE server "${server.name}" — ${tools.length} tools available`);
+
+    return tools;
+  } catch (err) {
+    console.error(`[MCP] Failed to connect to SSE server "${server.name}":`, err);
     return [];
   }
 }

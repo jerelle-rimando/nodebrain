@@ -1,6 +1,8 @@
 import { connectToServer, getAllAvailableTools, disconnectAll, type MCPServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
+import { getAllCustomMCPServers } from '../db/mcpServerRepository';
+import { connectToSSEServer } from './mcpClient';
 
 interface ServerConfig {
   name: string;
@@ -108,6 +110,21 @@ export async function initializeToolRegistry(): Promise<void> {
 
     const server = config.buildServer(credential ?? '');
     await connectToServer(server);
+  }
+
+  // Load custom MCP servers from DB
+  const customServers = getAllCustomMCPServers();
+  for (const server of customServers) {
+    if (server.transport === 'sse' && server.url) {
+      await connectToSSEServer({ name: server.name, url: server.url });
+    } else if (server.transport === 'stdio' && server.command) {
+      await connectToServer({
+        name: server.name,
+        command: server.command,
+        args: server.args,
+        env: server.envVars,
+      });
+    }
   }
 
   const tools = await getAllAvailableTools();

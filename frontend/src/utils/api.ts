@@ -40,6 +40,12 @@ export const api = {
   deleteCredential: (id: string) =>
     request<{ id: string }>(`/credentials/${id}`, { method: 'DELETE' }),
 
+  getMcpServers: () => request<any[]>('/mcp-servers'),
+  createMcpServer: (data: any) =>
+    request<any>('/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
+  deleteMcpServer: (id: string) =>
+    request<{ id: string }>(`/mcp-servers/${id}`, { method: 'DELETE' }),
+
   getChatHistory: () => request<import('@shared/types').ChatMessage[]>('/chat/history'),
   sendChatMessage: (content: string) =>
     request<{ userMessage: import('@shared/types').ChatMessage; assistantMessage: import('@shared/types').ChatMessage }>(
