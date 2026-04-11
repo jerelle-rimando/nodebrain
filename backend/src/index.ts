@@ -19,6 +19,7 @@ import integrationsRouter from './routes/integrations';
 import authRouter from './routes/auth';
 import { parseNaturalSchedule } from './utils/parseSchedule';
 import mcpServersRouter from './routes/mcpServers';
+import agentConnectionsRouter from './routes/agentConnections';
 
 const PORT = process.env.PORT ?? 3001;
 const app = express();
@@ -52,6 +53,7 @@ app.use('/api/events', eventsRouter);
 app.use('/api/integrations', limiter, integrationsRouter);
 app.use('/api/auth', limiter, authRouter);
 app.use('/api/mcp-servers', mcpServersRouter);
+app.use('/api/agent-connections', agentConnectionsRouter);
 
 async function main() {
   try {

@@ -3,6 +3,7 @@ import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { getAllCustomMCPServers } from '../db/mcpServerRepository';
 import { connectToSSEServer } from './mcpClient';
+import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 
 interface ServerConfig {
   name: string;
@@ -147,9 +148,34 @@ const PDF_TOOL: MCPToolWithServer = {
   },
 };
 
-export async function getToolsForAgent(): Promise<MCPToolWithServer[]> {
+const DELEGATE_TOOL: MCPToolWithServer = {
+  serverName: 'agent-coordinator',
+  name: 'delegate_to_agent',
+  description: 'Delegate a task to a connected sub-agent by name and get its response back. Only use this if you need another agent to handle part of the work.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      target_agent_name: {
+        type: 'string',
+        description: 'The exact name of the agent to delegate to',
+      },
+      task: {
+        type: 'string',
+        description: 'The task or question to send to that agent',
+      },
+    },
+    required: ['target_agent_name', 'task'],
+  },
+};
+
+export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithServer[]> {
   const mcpTools = await getAllAvailableTools();
-  return [...mcpTools, PDF_TOOL];
+  const tools: MCPToolWithServer[] = [...mcpTools, PDF_TOOL];
+  if (agentId) {
+    const connections = getConnectionsForAgent(agentId);
+    if (connections.length > 0) tools.push(DELEGATE_TOOL);
+  }
+  return tools;
 }
 
 export function formatToolsForOpenAI(tools: MCPToolWithServer[]): Array<{

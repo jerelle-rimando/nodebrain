@@ -26,6 +26,17 @@ export const api = {
   executeAgent: (id: string, input: string) =>
     request<{ message: string }>(`/agents/${id}/execute`, { method: 'POST', body: JSON.stringify({ input }) }),
 
+  getAgentConnections: () => request<import('@shared/types').AgentConnection[]>('/agent-connections'),
+  createAgentConnection: (sourceAgentId: string, targetAgentId: string) =>
+    request<import('@shared/types').AgentConnection>('/agent-connections', {
+      method: 'POST',
+      body: JSON.stringify({ sourceAgentId, targetAgentId }),
+    }),
+  deleteAgentConnection: (id: string) =>
+    request<{ id: string }>(`/agent-connections/${id}`, { method: 'DELETE' }),
+  deleteAgentConnectionBetween: (sourceId: string, targetId: string) =>
+    request<{ deleted: boolean }>(`/agent-connections/between/${sourceId}/${targetId}`, { method: 'DELETE' }),
+
   getTasks: () => request<import('@shared/types').Task[]>('/tasks'),
   getAgentTasks: (agentId: string) => request<import('@shared/types').Task[]>(`/tasks/agent/${agentId}`),
 

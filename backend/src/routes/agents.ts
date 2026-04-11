@@ -11,6 +11,7 @@ import {
 import { executeAgentTask } from '../agents/agentEngine';
 import { scheduleAgent, unscheduleAgent } from '../scheduler/scheduler';
 import type { Agent } from '../../shared-types';
+import { deleteConnectionsForAgent } from '../db/agentConnectionRepository';
 
 const router = Router();
 
@@ -105,6 +106,7 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   try {
     unscheduleAgent(req.params.id);
+    deleteConnectionsForAgent(req.params.id);
     const deleted = deleteAgent(req.params.id);
     if (!deleted) return res.status(404).json({ success: false, error: 'Agent not found' });
     res.json({ success: true, data: { id: req.params.id } });

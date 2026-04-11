@@ -276,30 +276,29 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
 export function NodeGraph() {
   const { agents, removeAgent } = useStore();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const savedEdges = (() => {
-    try {
-      return JSON.parse(localStorage.getItem('nodebrain-edges') ?? '[]');
-    } catch {
-      return [];
-    }
-  })();
-  const [edges, setEdges, onEdgesChange] = useEdgesState(savedEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const onConnect = useCallback(
-    (params: Connection) => {
-      setEdges((eds) => [
-        ...eds,
-        {
-          id: params.source + '-' + params.target,
-          source: params.source ?? '',
-          target: params.target ?? '',
-          sourceHandle: params.sourceHandle ?? null,
-          targetHandle: params.targetHandle ?? null,
-          animated: true,
-          style: { stroke: '#6366f1', strokeWidth: 1.5 },
-        },
-      ]);
+    async (params: Connection) => {
+      if (!params.source || !params.target) return;
+      try {
+        const connection = await api.createAgentConnection(params.source, params.target);
+        setEdges((eds) => [
+          ...eds,
+          {
+            id: connection.id,
+            source: params.source ?? '',
+            target: params.target ?? '',
+            sourceHandle: params.sourceHandle ?? null,
+            targetHandle: params.targetHandle ?? null,
+            animated: true,
+            style: { stroke: '#6366f1', strokeWidth: 1.5 },
+          },
+        ]);
+      } catch (err) {
+        console.error('Failed to create agent connection:', err);
+      }
     },
     [setEdges],
   );
@@ -345,6 +344,19 @@ export function NodeGraph() {
     });
   }, [agents]);
 
+  // Load edges from backend
+  useEffect(() => {
+    api.getAgentConnections().then(connections => {
+      setEdges(connections.map(conn => ({
+        id: conn.id,
+        source: conn.sourceAgentId,
+        target: conn.targetAgentId,
+        animated: true,
+        style: { stroke: '#6366f1', strokeWidth: 1.5 },
+      })));
+    }).catch(console.error);
+  }, []);
+
   // Update selected agent when agents store updates
   useEffect(() => {
     if (selectedAgent) {
@@ -359,9 +371,17 @@ export function NodeGraph() {
     localStorage.setItem('nodebrain-positions', JSON.stringify(positions));
   }, [nodes]);
 
-  useEffect(() => {
-    localStorage.setItem('nodebrain-edges', JSON.stringify(edges));
-  }, [edges]);
+  const onEdgesChangeWithSync = useCallback(
+    (changes: any[]) => {
+      onEdgesChange(changes);
+      changes.forEach(change => {
+        if (change.type === 'remove') {
+          api.deleteAgentConnection(change.id).catch(console.error);
+        }
+      });
+    },
+    [onEdgesChange],
+  );
 
   return (
     <div className="h-full relative">
@@ -369,7 +389,7 @@ export function NodeGraph() {
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={onEdgesChangeWithSync}
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView

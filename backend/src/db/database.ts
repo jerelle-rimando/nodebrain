@@ -124,6 +124,12 @@ export async function initDb(): Promise<void> {
       env_vars TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS agent_connections (
+      id TEXT PRIMARY KEY,
+      source_agent_id TEXT NOT NULL,
+      target_agent_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
   persist();
 }

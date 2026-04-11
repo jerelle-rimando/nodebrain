@@ -9,6 +9,9 @@ import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic } from 
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, Task, TaskLog } from '../../shared-types';
 import { EventEmitter } from 'events';
+import { getConnectionsForAgent } from '../db/agentConnectionRepository';
+import { getAllAgents } from '../db/agentRepository';
+import { getTasksByAgent } from '../db/taskRepository';
 
 export const agentEvents = new EventEmitter();
 
@@ -74,8 +77,9 @@ async function runOpenAIAgenticLoop(
   messages: OpenAI.ChatCompletionMessageParam[],
   agent: Agent,
   taskId: string,
+  depth = 0,
 ): Promise<string> {
-  const tools = await getToolsForAgent();
+  const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForOpenAI(tools);
   let iterations = 0;
 
@@ -110,9 +114,33 @@ async function runOpenAIAgenticLoop(
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
           toolResult = await readPdfAsText(args.file_path as string);
-      } else {
-        toolResult = await callTool(serverName, toolName, args);
-      }
+        } else if (serverName === 'agent-coordinator' && toolName === 'delegate_to_agent') {
+          const targetName = args.target_agent_name as string;
+          const task = args.task as string;
+          if (depth >= 3) {
+            toolResult = 'Error: Maximum delegation depth of 3 reached. Cannot delegate further.';
+          } else {
+            const connections = getConnectionsForAgent(agent.id);
+            const allAgents = getAllAgents();
+            const targetAgent = allAgents.find(a =>
+              a.name.toLowerCase() === targetName.toLowerCase() &&
+              connections.some(c => c.targetAgentId === a.id)
+            );
+            if (!targetAgent) {
+              const connectedNames = connections
+                .map(c => allAgents.find(a => a.id === c.targetAgentId)?.name)
+                .filter(Boolean)
+                .join(', ');
+              toolResult = `Error: No connected agent found with name "${targetName}". Your connected agents are: ${connectedNames || 'none'}`;
+            } else {
+              persistLog(makeLog(taskId, agent.id, `Delegating to agent "${targetAgent.name}" (depth ${depth + 1})`));
+              const delegatedTask = await executeAgentTask(targetAgent, task, depth + 1);
+              toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
+            }
+          }
+        } else {
+          toolResult = await callTool(serverName, toolName, args);
+        }
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" completed`));
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -137,8 +165,9 @@ async function runAnthropicAgenticLoop(
   userInput: string,
   agent: Agent,
   taskId: string,
+  depth = 0,
 ): Promise<string> {
-  const tools = await getToolsForAgent();
+  const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForAnthropic(tools);
 
   const messages: Anthropic.MessageParam[] = [
@@ -185,9 +214,33 @@ async function runAnthropicAgenticLoop(
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
           toolResult = await readPdfAsText(args.file_path as string);
-      } else {
-        toolResult = await callTool(serverName, toolName, args);
-      }
+        } else if (serverName === 'agent-coordinator' && toolName === 'delegate_to_agent') {
+          const targetName = args.target_agent_name as string;
+          const task = args.task as string;
+          if (depth >= 3) {
+            toolResult = 'Error: Maximum delegation depth of 3 reached. Cannot delegate further.';
+          } else {
+            const connections = getConnectionsForAgent(agent.id);
+            const allAgents = getAllAgents();
+            const targetAgent = allAgents.find(a =>
+              a.name.toLowerCase() === targetName.toLowerCase() &&
+              connections.some(c => c.targetAgentId === a.id)
+            );
+            if (!targetAgent) {
+              const connectedNames = connections
+                .map(c => allAgents.find(a => a.id === c.targetAgentId)?.name)
+                .filter(Boolean)
+                .join(', ');
+              toolResult = `Error: No connected agent found with name "${targetName}". Your connected agents are: ${connectedNames || 'none'}`;
+            } else {
+              persistLog(makeLog(taskId, agent.id, `Delegating to agent "${targetAgent.name}" (depth ${depth + 1})`));
+              const delegatedTask = await executeAgentTask(targetAgent, task, depth + 1);
+              toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
+            }
+          }
+        } else {
+          toolResult = await callTool(serverName, toolName, args);
+        }
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" completed`));
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -207,7 +260,7 @@ async function runAnthropicAgenticLoop(
   return '(max tool iterations reached)';
 }
 
-export async function executeAgentTask(agent: Agent, userInput: string): Promise<Task> {
+export async function executeAgentTask(agent: Agent, userInput: string, depth = 0): Promise<Task> {
   const taskId = uuidv4();
   const now = new Date().toISOString();
 
@@ -236,12 +289,34 @@ export async function executeAgentTask(agent: Agent, userInput: string): Promise
     const model = agent.model || DEFAULT_MODELS[agent.provider] || 'gpt-4o-mini';
     persistLog(makeLog(taskId, agent.id, `Calling ${model} via ${agent.provider}...`));
 
+    // Build context from connected agents' recent activity
+    const connections = getConnectionsForAgent(agent.id);
+    let connectionContext = '';
+    if (connections.length > 0) {
+      const allAgents = getAllAgents();
+      const contextParts: string[] = [];
+      for (const conn of connections) {
+        const connectedAgent = allAgents.find(a => a.id === conn.targetAgentId);
+        if (!connectedAgent) continue;
+        const recentTasks = getTasksByAgent(conn.targetAgentId).slice(0, 3);
+        if (recentTasks.length > 0) {
+          const summary = recentTasks
+            .map(t => `- Task: ${t.input?.slice(0, 100) ?? 'unknown'} → Result: ${t.output?.slice(0, 200) ?? t.error ?? 'no output'}`)
+            .join('\n');
+          contextParts.push(`Connected agent "${connectedAgent.name}" recent activity:\n${summary}`);
+        }
+      }
+      if (contextParts.length > 0) {
+        connectionContext = `\n\nConnected agents context:\n${contextParts.join('\n\n')}`;
+      }
+    }
+
     const relevantContext = await queryRelevantContext(userInput, agent.id);
     const contextBlock = relevantContext.length > 0
       ? `\n\nRelevant context:\n${relevantContext.join('\n---\n')}`
       : '';
 
-    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock;
+    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext;
 
     let output = '';
 
@@ -254,6 +329,7 @@ export async function executeAgentTask(agent: Agent, userInput: string): Promise
         userInput,
         agent,
         taskId,
+        depth,
       );
     } else {
       const client = getClient(agent.provider, apiKey);
@@ -261,7 +337,7 @@ export async function executeAgentTask(agent: Agent, userInput: string): Promise
         { role: 'system', content: fullSystemPrompt },
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, depth);
     }
 
     persistLog(makeLog(taskId, agent.id, `Task completed successfully.`));

@@ -91,3 +91,10 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+export interface AgentConnection {
+  id: string;
+  sourceAgentId: string;
+  targetAgentId: string;
+  createdAt: string;
+}
