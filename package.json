@@ -21,7 +21,7 @@
     "@types/wait-on": "^5.3.4",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
-    "electron": "^34.0.0",
+    "electron": "^39.8.5",
     "electron-builder": "^25.0.0",
     "wait-on": "^8.0.0"
   },
