@@ -145,3 +145,8 @@ data/
 
 # backend logs
 backend/logs/
+
+# Build outputs
+dist-electron/
+backend/dist/
+frontend/dist/

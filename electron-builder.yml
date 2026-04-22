@@ -1,0 +1,56 @@
+appId: com.nodebrain.app
+productName: NodeBrain
+copyright: Copyright © 2026 Jerelle Rimando
+
+asar: false
+forceCodeSigning: false
+
+directories:
+  output: dist-electron
+  buildResources: electron/assets
+
+files:
+  - electron/dist/**/*
+  - electron/wizard/**/*
+  - electron/assets/**/*
+  - node_modules/**/*
+  - "!node_modules/.cache"
+  - "!**/*.map"
+
+extraResources:
+  - from: frontend/dist
+    to: frontend/dist
+  - from: electron/wizard
+    to: electron/wizard
+  - from: electron/assets
+    to: electron/assets
+  - from: backend/dist
+    to: backend/dist
+  - from: backend/node_modules
+    to: backend/node_modules
+  - from: backend/package.json
+    to: backend/package.json
+
+win:
+  icon: electron/assets/icon.ico
+  signingHashAlgorithms: []
+  target:
+    - target: nsis
+      arch: x64
+    - target: portable
+      arch: x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: NodeBrain
+
+portable:
+  artifactName: NodeBrain-${version}-portable.exe
+
+publish:
+  provider: github
+  owner: jerelle-rimando
+  repo: nodebrain
