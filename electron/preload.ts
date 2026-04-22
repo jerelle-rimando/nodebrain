@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   testApiKey: (provider: string, key: string) => ipcRenderer.invoke('test-api-key', provider, key),
   loadMainApp: () => ipcRenderer.invoke('load-main-app'),
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 });

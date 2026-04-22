@@ -372,6 +372,11 @@ function registerIpcHandlers(): void {
   });
 }
 
+ipcMain.handle('open-external', (_event, url: string) => {
+  const { shell } = require('electron');
+  shell.openExternal(url);
+});
+
 // ── Second instance handler ───────────────────────────────────────────────────
 app.on('second-instance', () => {
   if (mainWindow) {
