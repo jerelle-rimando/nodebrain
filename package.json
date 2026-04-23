@@ -15,7 +15,7 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "build:all": "npm run build && npm run build:electron",
     "dist": "npm run build:all && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder build --win",
-    "electron:dev": "NODE_ENV=development npm run dev:electron"
+    "electron:dev": "cross-env NODE_ENV=development npm run dev:electron"
   },
   "devDependencies": {
     "@types/wait-on": "^5.3.4",

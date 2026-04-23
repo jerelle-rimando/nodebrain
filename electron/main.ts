@@ -72,7 +72,9 @@ async function startBackend(): Promise<void> {
     ? path.join(__dirname, '../backend/src/index.ts')
     : path.join(process.resourcesPath, 'backend/dist/backend/src/index.js');
 
-  const command = isDev ? 'npx' : process.execPath;
+  const command = isDev
+    ? (process.platform === 'win32' ? 'npx.cmd' : 'npx')
+    : process.execPath;
   const args = isDev ? ['tsx', backendEntry] : [backendEntry];
 
   const cwd = isDev
