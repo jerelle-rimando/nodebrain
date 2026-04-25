@@ -15,11 +15,9 @@ export interface CustomMCPServer {
 export function useMcpServers() {
   const [customServers, setCustomServers] = useState<CustomMCPServer[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [transport, setTransport] = useState<'stdio' | 'sse'>('stdio');
   const [name, setName] = useState('');
-  const [command, setCommand] = useState('');
-  const [args, setArgs] = useState('');
-  const [url, setUrl] = useState('');
+  const [installCommand, setInstallCommand] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [envVars, setEnvVars] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -31,18 +29,14 @@ export function useMcpServers() {
 
   function resetForm() {
     setName('');
-    setCommand('');
-    setArgs('');
-    setUrl('');
+    setInstallCommand('');
     setEnvVars('');
+    setShowAdvanced(false);
     setShowAddForm(false);
-    setTransport('stdio');
   }
 
   async function addServer() {
-    if (!name.trim()) return;
-    if (transport === 'stdio' && !command.trim()) return;
-    if (transport === 'sse' && !url.trim()) return;
+    if (!name.trim() || !installCommand.trim()) return;
 
     setSaving(true);
     try {
@@ -54,22 +48,12 @@ export function useMcpServers() {
         }
       }
 
-      const payload = transport === 'stdio'
-        ? {
-            name: name.trim(),
-            transport: 'stdio' as const,
-            command: command.trim(),
-            args: args.trim() ? args.trim().split(/\s+/) : [],
-            envVars: parsedEnvVars,
-          }
-        : {
-            name: name.trim(),
-            transport: 'sse' as const,
-            url: url.trim(),
-            envVars: parsedEnvVars,
-          };
+      await api.createMcpServer({
+        name: name.trim(),
+        installCommand: installCommand.trim(),
+        envVars: parsedEnvVars,
+      });
 
-      await api.createMcpServer(payload);
       const updated = await api.getMcpServers();
       setCustomServers(updated);
       resetForm();
@@ -94,11 +78,9 @@ export function useMcpServers() {
   return {
     customServers,
     showAddForm, setShowAddForm,
-    transport, setTransport,
     name, setName,
-    command, setCommand,
-    args, setArgs,
-    url, setUrl,
+    installCommand, setInstallCommand,
+    showAdvanced, setShowAdvanced,
     envVars, setEnvVars,
     saving,
     addServer,

@@ -33,7 +33,8 @@ extraResources:
 
 win:
   icon: electron/assets/icon.ico
-  signingHashAlgorithms: []
+  sign: false
+  signAndEditExecutable: false
   target:
     - target: nsis
       arch: x64

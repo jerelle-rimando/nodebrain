@@ -52,7 +52,11 @@ export const api = {
     request<{ id: string }>(`/credentials/${id}`, { method: 'DELETE' }),
 
   getMcpServers: () => request<any[]>('/mcp-servers'),
-  createMcpServer: (data: any) =>
+  createMcpServer: (data: {
+    name: string;
+    installCommand: string;
+    envVars?: Record<string, string>;
+  }) =>
     request<any>('/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
   deleteMcpServer: (id: string) =>
     request<{ id: string }>(`/mcp-servers/${id}`, { method: 'DELETE' }),

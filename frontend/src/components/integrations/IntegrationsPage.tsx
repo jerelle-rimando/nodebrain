@@ -265,24 +265,11 @@ export function IntegrationsPage() {
   const [testResults, setTestResults] = useState<Record<string, 'ok' | 'fail'>>({});
   const [tokenInputs, setTokenInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
-  const [customServers, setCustomServers] = useState<any[]>([]);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [mcpTransport, setMcpTransport] = useState<'stdio' | 'sse'>('stdio');
-  const [mcpName, setMcpName] = useState('');
-  const [mcpCommand, setMcpCommand] = useState('');
-  const [mcpArgs, setMcpArgs] = useState('');
-  const [mcpUrl, setMcpUrl] = useState('');
-  const [mcpEnvVars, setMcpEnvVars] = useState('');
-  const [mcpSaving, setMcpSaving] = useState(false);
   const mcp = useMcpServers();
 
   useEffect(() => {
     api.getCredentials()
       .then((creds) => useStore.getState().setCredentials(creds))
-      .catch(console.error);
-    
-    api.getMcpServers()
-      .then(setCustomServers)
       .catch(console.error);
   }, []);
 
@@ -355,63 +342,6 @@ export function IntegrationsPage() {
     setTokenInputs((prev) => ({ ...prev, [id]: value }));
   }
 
-  async function handleAddMcpServer() {
-    if (!mcpName.trim()) return;
-    if (mcpTransport === 'stdio' && !mcpCommand.trim()) return;
-    if (mcpTransport === 'sse' && !mcpUrl.trim()) return;
-
-    setMcpSaving(true);
-    try {
-      let envVars: Record<string, string> = {};
-      if (mcpEnvVars.trim()) {
-        for (const line of mcpEnvVars.split('\n')) {
-          const [k, ...rest] = line.split('=');
-          if (k?.trim()) envVars[k.trim()] = rest.join('=').trim();
-        }
-      }
-
-      const payload = mcpTransport === 'stdio'
-        ? {
-            name: mcpName.trim(),
-            transport: 'stdio',
-            command: mcpCommand.trim(),
-            args: mcpArgs.trim() ? mcpArgs.trim().split(/\s+/) : [],
-            envVars,
-          }
-        : {
-            name: mcpName.trim(),
-            transport: 'sse',
-            url: mcpUrl.trim(),
-            envVars,
-          };
-
-      await api.createMcpServer(payload);
-      const updated = await api.getMcpServers();
-      setCustomServers(updated);
-      setShowAddForm(false);
-      setMcpName('');
-      setMcpCommand('');
-      setMcpArgs('');
-      setMcpUrl('');
-      setMcpEnvVars('');
-      toast.success('MCP server connected');
-    } catch (err) {
-      toast.error('Failed to connect MCP server');
-    } finally {
-      setMcpSaving(false);
-    }
-  }
-
-  async function handleDeleteMcpServer(id: string) {
-    try {
-      await api.deleteMcpServer(id);
-      setCustomServers(prev => prev.filter(s => s.id !== id));
-      toast.success('MCP server removed');
-    } catch {
-      toast.error('Failed to remove MCP server');
-    }
-  }
-
   return (
     <div className="h-full p-4 overflow-y-auto">
       <div className="max-w-2xl mx-auto space-y-4">
@@ -445,82 +375,65 @@ export function IntegrationsPage() {
           </div>
 
           {mcp.showAddForm && (
-            <div className="rounded-lg border border-brain-border bg-brain-bg p-3 space-y-3 animate-slide-up">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => mcp.setTransport('stdio')}
-                  className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${mcp.transport === 'stdio' ? 'bg-brain-accent/20 border-brain-accent/40 text-brain-accent' : 'border-brain-border text-brain-text-dim hover:text-brain-text'}`}
-                >
-                  stdio
-                </button>
-                <button
-                  onClick={() => mcp.setTransport('sse')}
-                  className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${mcp.transport === 'sse' ? 'bg-brain-accent/20 border-brain-accent/40 text-brain-accent' : 'border-brain-border text-brain-text-dim hover:text-brain-text'}`}
-                >
-                  SSE / HTTP
-                </button>
-              </div>
+  <div className="rounded-lg border border-brain-border bg-brain-bg p-3 space-y-3 animate-slide-up">
+    
+    <input
+      type="text"
+      value={mcp.name}
+      onChange={e => mcp.setName(e.target.value)}
+      placeholder="Server name (e.g. GitHub, Notion, My DB)"
+      className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent"
+    />
 
-              <input
-                type="text"
-                value={mcp.name}
-                onChange={e => mcp.setName(e.target.value)}
-                placeholder="Server name (e.g. my-db-server)"
-                className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent"
-              />
+    <div>
+      <input
+        type="text"
+        value={mcp.installCommand}
+        onChange={e => mcp.setInstallCommand(e.target.value)}
+        placeholder="npx -y @modelcontextprotocol/server-github  or  https://your-server.com/sse"
+        className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+      />
+      <p className="text-xs text-brain-text-dim mt-1.5 px-0.5">
+        Paste any MCP install command or SSE URL. Works with npx, uvx, node, and HTTP servers.
+      </p>
+    </div>
 
-              {mcp.transport === 'stdio' ? (
-                <>
-                  <input
-                    type="text"
-                    value={mcp.command}
-                    onChange={e => mcp.setCommand(e.target.value)}
-                    placeholder="Command (e.g. npx or node)"
-                    className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
-                  />
-                  <input
-                    type="text"
-                    value={mcp.args}
-                    onChange={e => mcp.setArgs(e.target.value)}
-                    placeholder="Args (e.g. -y @my/mcp-server --flag)"
-                    className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
-                  />
-                </>
-              ) : (
-                <input
-                  type="text"
-                  value={mcp.url}
-                  onChange={e => mcp.setUrl(e.target.value)}
-                  placeholder="URL (e.g. https://your-mcp-server.com/sse)"
-                  className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
-                />
-              )}
+    {/* Advanced toggle */}
+    <button
+      onClick={() => mcp.setShowAdvanced(!mcp.showAdvanced)}
+      className="text-xs text-brain-text-dim hover:text-brain-text transition-colors flex items-center gap-1.5"
+    >
+      <span>{mcp.showAdvanced ? '▾' : '▸'}</span>
+      Environment variables (optional)
+    </button>
 
-              <textarea
-                value={mcp.envVars}
-                onChange={e => mcp.setEnvVars(e.target.value)}
-                placeholder={'Env vars (optional)\nKEY=value\nANOTHER_KEY=value'}
-                rows={3}
-                className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono resize-none"
-              />
+    {mcp.showAdvanced && (
+      <textarea
+        value={mcp.envVars}
+        onChange={e => mcp.setEnvVars(e.target.value)}
+        placeholder={'KEY=value\nANOTHER_KEY=value'}
+        rows={3}
+        className="w-full bg-brain-surface border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono resize-none"
+      />
+    )}
 
-              <div className="flex gap-2">
-                <button
-                  onClick={() => mcp.setShowAddForm(false)}
-                  className="flex-1 py-2 text-xs border border-brain-border rounded-lg text-brain-text-dim hover:text-brain-text transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={mcp.addServer}
-                  disabled={mcp.saving || !mcp.name.trim()}
-                  className="flex-1 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
-                >
-                  {mcp.saving ? 'Connecting...' : 'Connect'}
-                </button>
-              </div>
-            </div>
-          )}
+    <div className="flex gap-2">
+      <button
+        onClick={() => mcp.setShowAddForm(false)}
+        className="flex-1 py-2 text-xs border border-brain-border rounded-lg text-brain-text-dim hover:text-brain-text transition-colors"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={mcp.addServer}
+        disabled={mcp.saving || !mcp.name.trim() || !mcp.installCommand.trim()}
+        className="flex-1 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+      >
+        {mcp.saving ? 'Connecting...' : 'Connect'}
+      </button>
+    </div>
+  </div>
+)}
 
           {mcp.customServers.length === 0 ? (
             <p className="text-xs text-brain-text-dim py-2">No custom servers connected yet.</p>
@@ -532,7 +445,10 @@ export function IntegrationsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-brain-text">{server.name}</p>
                     <p className="text-xs text-brain-text-dim font-mono truncate">
-                      {server.transport === 'sse' ? server.url : `${server.command} ${server.args?.join(' ')}`}
+                      {server.transport === 'sse'
+                        ? server.url
+                        : `${server.command ?? 'npx'} ${server.args?.join(' ') ?? ''}`
+                      }
                     </p>
                   </div>
                   <span className="text-xs text-brain-text-dim bg-brain-surface border border-brain-border rounded px-1.5 py-0.5">
