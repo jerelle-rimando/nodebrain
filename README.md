@@ -31,7 +31,16 @@ Everything runs **locally by default**, giving users full control over their env
 - Node.js v18 or higher — download from [nodejs.org](https://nodejs.org) (LTS version)
 - An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.)
 
-### Installation
+### Installation (Recommended)
+NodeBrain uses SignPath Foundation for code signing.
+
+- **NodeBrain Setup 0.2.0.exe**  
+  Installs NodeBrain on your system.
+
+- **NodeBrain-0.2.0-portable.exe**  
+  Run instantly without installation.
+
+### Installation (Development)
 
 Clone the repository and install dependencies for all three parts of the project.
 ```bash
