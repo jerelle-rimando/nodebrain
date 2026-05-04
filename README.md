@@ -32,7 +32,7 @@ Everything runs **locally by default**, giving users full control over their env
 - An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.)
 
 ### Installation (Recommended)
-NodeBrain uses SignPath Foundation for code signing.
+NodeBrain uses **SignPath Foundation** for code signing. Download from the **Releases** tab
 
 - **NodeBrain Setup 0.2.0.exe**  
   Installs NodeBrain on your system.
