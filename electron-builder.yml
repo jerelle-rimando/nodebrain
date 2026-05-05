@@ -28,6 +28,10 @@ extraResources:
     to: backend/dist
   - from: backend/node_modules
     to: backend/node_modules
+    filter:
+      - "**/*"
+      - "!nodebrain"
+      - "!nodebrain/**"
   - from: backend/package.json
     to: backend/package.json
 
