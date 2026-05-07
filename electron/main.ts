@@ -147,10 +147,26 @@ function serveStaticFrontend(): Promise<void> {
     log(`Frontend dist exists: ${fs.existsSync(frontendPath)}`);
 
     const server = http.createServer((req, res) => {
-      let filePath = path.join(
-        frontendPath,
-        req.url === '/' ? 'index.html' : req.url!
-      );
+      const rawUrl = req.url === '/' ? '/index.html' : (req.url ?? '/index.html');
+      const decodedUrl = decodeURIComponent(rawUrl.split('?')[0].split('#')[0]);
+      
+      let filePath: string;
+      
+      // Reject path traversal attempts, null bytes, absolute paths
+      if (decodedUrl.includes('..') || decodedUrl.includes('\0') || path.isAbsolute(decodedUrl)) {
+        filePath = path.join(frontendPath, 'index.html');
+      } else {
+        const resolvedFrontend = path.resolve(frontendPath);
+        const candidate = path.resolve(resolvedFrontend, '.' + decodedUrl);
+        
+        // Strict containment check
+        if (candidate === resolvedFrontend || candidate.startsWith(resolvedFrontend + path.sep)) {
+          filePath = candidate;
+        } else {
+          filePath = path.join(frontendPath, 'index.html');
+        }
+      }
+      
       if (!fs.existsSync(filePath)) {
         filePath = path.join(frontendPath, 'index.html');
       }
