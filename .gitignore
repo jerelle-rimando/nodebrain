@@ -150,6 +150,3 @@ backend/logs/
 dist-electron/
 backend/dist/
 frontend/dist/
-
-#Dev uninstall
-dev-uninstall.ps1
