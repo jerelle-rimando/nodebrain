@@ -19,6 +19,8 @@ interface AppState {
   removeAgent: (id: string) => void;
 
   setTasks: (tasks: Task[]) => void;
+  addTask: (task: Task) => void;
+  updateTask: (task: Task) => void;
 
   setLogs: (logs: TaskLog[]) => void;
   addLog: (log: TaskLog) => void;
@@ -50,6 +52,8 @@ export const useStore = create<AppState>((set) => ({
   removeAgent: (id) => set((s) => ({ agents: s.agents.filter((a) => a.id !== id) })),
 
   setTasks: (tasks) => set({ tasks }),
+  addTask: (task) => set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] })),
+  updateTask: (task) => set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) })),
 
   setLogs: (logs) => set({ logs }),
   addLog: (log) => set((s) => ({ logs: [...s.logs.slice(-499), log] })),

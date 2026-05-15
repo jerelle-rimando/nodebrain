@@ -5,11 +5,12 @@ import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
 import { LogsPanel } from './components/shared/LogsPanel';
 import { useStore } from './stores/appStore';
-import { useEventStream } from './hooks/useEventStream';
+import { useLiveSync } from './hooks/useLiveSync';
 import { api } from './utils/api';
 import { IntegrationsPage } from './components/integrations/IntegrationsPage'
 import { ToastContainer } from './components/shared/Toast';
 import { toast } from './components/shared/Toast';
+import TitleBar from './components/shared/TitleBar';
 
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
@@ -19,30 +20,41 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-  const { activeTab, setActiveTab, setAgents, setLogs } = useStore();
-  useEventStream();
+  const { activeTab, setActiveTab, setAgents, setCredentials, setTasks, setLogs } = useStore();
+  useLiveSync();
 
   useEffect(() => {
-    // Bootstrap data
-    api.getAgents().then(setAgents).catch(console.error);
-  api.getLogs().then(setLogs).catch(console.error);
+    Promise.all([
+      api.getAgents(),
+      api.getCredentials(),
+      api.getTasks(),
+      api.getLogs(),
+    ])
+      .then(([agents, credentials, tasks, logs]) => {
+        setAgents(agents);
+        setCredentials(credentials);
+        setTasks(tasks);
+        setLogs(logs);
+      })
+      .catch(console.error);
 
-  const params = new URLSearchParams(window.location.search);
-  const authStatus = params.get('auth');
-  const provider = params.get('provider');
-  if (authStatus === 'success' && provider) {
-    toast.success('Google Workspace connected successfully');
-    api.getCredentials().then(useStore.getState().setCredentials).catch(console.error);
-    window.history.replaceState({}, '', '/');
-    setActiveTab('integrations');
-  } else if (authStatus === 'error' && provider) {
-    toast.error('Google connection failed. Check your .env and try again.');
-    window.history.replaceState({}, '', '/');
-  }
-}, [setAgents, setLogs]);
+    const params = new URLSearchParams(window.location.search);
+    const authStatus = params.get('auth');
+    const provider = params.get('provider');
+    if (authStatus === 'success' && provider) {
+      toast.success('Google Workspace connected successfully');
+      window.history.replaceState({}, '', '/');
+      setActiveTab('integrations');
+    } else if (authStatus === 'error' && provider) {
+      toast.error('Google connection failed. Check your .env and try again.');
+      window.history.replaceState({}, '', '/');
+    }
+  }, [setAgents, setCredentials, setTasks, setLogs, setActiveTab]);
 
   return (
-    <div className="flex h-screen bg-brain-bg overflow-hidden">
+    <div className="flex flex-col h-screen bg-brain-bg overflow-hidden">
+      <TitleBar />
+      <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
       <aside className="w-14 flex flex-col items-center py-4 gap-2 border-r border-brain-border bg-brain-surface flex-shrink-0">
         {/* Logo */}
@@ -99,6 +111,7 @@ export default function App() {
             </div>
           )}
         </div>
+      </div>
       </div>
       <ToastContainer />
     </div>

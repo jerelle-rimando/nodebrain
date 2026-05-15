@@ -63,6 +63,7 @@ router.post('/', (req, res) => {
     const agent: Agent = {
       id: uuidv4(),
       ...parsed.data,
+      description: parsed.data.description.slice(0, 80),
       status: 'idle',
       createdAt: now,
       updatedAt: now,
@@ -86,7 +87,9 @@ router.patch('/:id', (req, res) => {
     const existing = getAgentById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Agent not found' });
 
-    const updated = updateAgent(req.params.id, req.body);
+    const patch = req.body as Partial<Agent>;
+    if (typeof patch.description === 'string') patch.description = patch.description.slice(0, 80);
+    const updated = updateAgent(req.params.id, patch);
     if (!updated) return res.status(404).json({ success: false, error: 'Agent not found' });
 
     // Re-schedule if schedule changed

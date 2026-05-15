@@ -370,7 +370,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
   }
 }
 
-export async function parseAgentFromChat(userMessage: string): Promise<Partial<Agent> | null> {
+export async function parseAgentFromChat(userMessage: string): Promise<Partial<Agent>[] | null> {
   const providerPriority = ['openai', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'ollama', 'custom'];
 
   let apiKey = '';
@@ -390,37 +390,44 @@ export async function parseAgentFromChat(userMessage: string): Promise<Partial<A
   const client = getClient(provider, apiKey);
   const model = DEFAULT_MODELS[provider] ?? 'gpt-4o-mini';
 
-  const systemPrompt = `You are an AI agent configuration parser. When given a natural language description of an AI agent, extract structured configuration.
+  const systemPrompt = `You are an AI agent configuration parser. When given a natural language description of one or more AI agents, extract structured configuration for each agent.
 
-Return ONLY valid JSON in this exact format:
+ALWAYS return a JSON array, even when only one agent is described. Each element has this shape:
 {
   "name": "Agent Name",
   "description": "What this agent does",
   "model": "${model}",
   "systemPrompt": "You are a helpful assistant that...",
   "schedule": "0 * * * *" or null,
-  "toolPermissions": []
+  "toolPermissions": [],
+  "connectsTo": ["Other Agent Name"]
 }
 
+"connectsTo" is an array of OTHER agent names (from the same batch) that this agent should delegate tasks to. Only include it when the user explicitly describes delegation, orchestration, or one agent handing off work to another. Omit the field (or use an empty array) otherwise.
+
+description must be one short sentence, max 80 characters.
 For schedule, use cron expressions if time-based tasks are mentioned (e.g., "every hour" = "0 * * * *", "daily at 9am" = "0 9 * * *"). Otherwise null.
-Model should default to "${model}" unless the user specifies otherwise.`;
+Model should default to "${model}" unless the user specifies otherwise.
+Return ONLY the JSON array with no additional text or markdown.`;
 
   try {
     const completion = await client.chat.completions.create({
       model,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Create an agent configuration for: ${userMessage}` },
+        { role: 'user', content: `Create agent configuration(s) for: ${userMessage}` },
       ],
       temperature: 0.3,
-      max_tokens: 500,
+      max_tokens: 1000,
     });
 
     const content = completion.choices[0]?.message?.content;
     if (!content) return null;
 
     const clean = content.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean) as Partial<Agent>;
+    const parsed: unknown = JSON.parse(clean);
+    if (Array.isArray(parsed)) return parsed as Partial<Agent>[];
+    return [parsed as Partial<Agent>];
   } catch {
     return null;
   }

@@ -309,6 +309,8 @@ async function createWindow(): Promise<void> {
     icon: iconPath,
     title: 'NodeBrain',
     backgroundColor: '#0a0a0f',
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -463,6 +465,13 @@ function registerIpcHandlers(): void {
     return app.getLoginItemSettings().openAtLogin;
   });
 
+  ipcMain.handle('window-minimize', () => { mainWindow?.minimize(); });
+  ipcMain.handle('window-maximize', () => {
+    if (mainWindow?.isMaximized()) mainWindow.unmaximize();
+    else mainWindow?.maximize();
+  });
+  ipcMain.handle('window-close', () => { mainWindow?.hide(); });
+
   ipcMain.handle('load-main-app', async () => {
     log('load-main-app called');
     try {
@@ -502,6 +511,7 @@ app.whenReady().then(async () => {
   log('Backend started');
   createTray();
   log('Tray created');
+  Menu.setApplicationMenu(null);
   await createWindow();
   log('Window created');
   setupAutoUpdater();

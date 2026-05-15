@@ -1,5 +1,6 @@
 import { dbRun, dbGet, dbAll } from './database';
 import type { Agent, AgentConfig, ModelProvider, AgentStatus } from '../../shared-types';
+import { agentEvents } from '../agents/agentEngine';
 
 interface AgentRow {
   id: string;
@@ -54,6 +55,7 @@ export function createAgent(agent: Agent): Agent {
       JSON.stringify(agent.config), agent.createdAt, agent.updatedAt,
     ],
   );
+  agentEvents.emit('agent:created', agent);
   return agent;
 }
 
@@ -71,6 +73,7 @@ export function updateAgent(id: string, updates: Partial<Agent>): Agent | null {
       JSON.stringify(updated.config), updated.updatedAt, id,
     ],
   );
+  agentEvents.emit('agent:updated', updated);
   return updated;
 }
 
@@ -78,6 +81,7 @@ export function deleteAgent(id: string): boolean {
   const existing = getAgentById(id);
   if (!existing) return false;
   dbRun('DELETE FROM agents WHERE id = ?', [id]);
+  agentEvents.emit('agent:deleted', { id });
   return true;
 }
 

@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
 import { parseAgentFromChat, executeAgentTask } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
+import { createConnection } from '../db/agentConnectionRepository';
 import type { Agent, ChatMessage, ModelProvider } from '../../shared-types';
 
 const router = Router();
@@ -86,11 +87,11 @@ router.post('/message', async (req, res) => {
     let agentId: string | undefined;
 
     if (isCreateIntent) {
-      const agentConfig = await parseAgentFromChat(content);
-      if (agentConfig?.name) {
+      const agentConfigs = await parseAgentFromChat(content);
+      const validConfigs = (agentConfigs ?? []).filter((c) => c.name);
+      if (validConfigs.length > 0) {
         const now = new Date().toISOString();
 
-        // Detect provider from available credentials
         const providerPriority = ['openai', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'anthropic', 'ollama'];
         let detectedProvider = 'openai';
         for (const p of providerPriority) {
@@ -98,24 +99,50 @@ router.post('/message', async (req, res) => {
           if (key || p === 'ollama') { detectedProvider = p; break; }
         }
 
-        const agent: Agent = {
+        // Pass 1: create every agent
+        const createdAgents: Agent[] = validConfigs.map((cfg) => ({
           id: uuidv4(),
-          name: agentConfig.name,
-          description: agentConfig.description ?? '',
+          name: cfg.name!,
+          description: (cfg.description ?? '').slice(0, 80),
           provider: detectedProvider as ModelProvider,
-          model: agentConfig.model ?? 'gpt-4o-mini',
-          systemPrompt: agentConfig.systemPrompt ?? 'You are a helpful AI assistant.',
-          schedule: agentConfig.schedule
-            ? (parseNaturalSchedule(agentConfig.schedule).cron ?? agentConfig.schedule)
+          model: cfg.model ?? 'gpt-4o-mini',
+          systemPrompt: cfg.systemPrompt ?? 'You are a helpful AI assistant.',
+          schedule: cfg.schedule
+            ? (parseNaturalSchedule(cfg.schedule).cron ?? cfg.schedule)
             : undefined,
-          toolPermissions: agentConfig.toolPermissions ?? [],
-          status: 'idle',
+          toolPermissions: cfg.toolPermissions ?? [],
+          status: 'idle' as const,
           config: {},
           createdAt: now,
           updatedAt: now,
-        };
-        createAgent(agent);
-        assistantContent = `✅ **Agent Created: "${agent.name}"**\n\n${agent.description}\n\n**Model:** ${agent.model}${agent.schedule ? `\n**Schedule:** ${agent.schedule}` : ''}\n\nThe agent is ready. Say "Ask ${agent.name} to [task]" to run it.`;
+        }));
+        createdAgents.forEach(createAgent);
+
+        // Pass 2: resolve connectsTo by case-insensitive name within this batch
+        const madeConnections: string[] = [];
+        for (let i = 0; i < validConfigs.length; i++) {
+          const connectsTo = (validConfigs[i] as Record<string, unknown>).connectsTo as string[] | undefined;
+          if (!connectsTo?.length) continue;
+          for (const targetName of connectsTo) {
+            const target = createdAgents.find(
+              (a) => a.name.toLowerCase() === targetName.toLowerCase(),
+            );
+            if (target) {
+              createConnection(createdAgents[i].id, target.id);
+              madeConnections.push(`${createdAgents[i].name} → ${target.name}`);
+            }
+          }
+        }
+
+        const agentLines = createdAgents
+          .map((a) => `- **${a.name}**: ${a.description}${a.schedule ? ` _(${a.schedule})_` : ''}`)
+          .join('\n');
+        const connectionLines = madeConnections.map((c) => `- ${c}`).join('\n');
+        assistantContent = [
+          `✅ **${createdAgents.length === 1 ? 'Agent' : `${createdAgents.length} Agents`} Created:**`,
+          agentLines,
+          ...(madeConnections.length ? ['\n**Connections:**', connectionLines] : []),
+        ].join('\n');
       } else {
         assistantContent = `I couldn't parse an agent configuration from that. Try: "Create an agent that summarizes news articles and sends it to me every morning in Telegram."`;
       }

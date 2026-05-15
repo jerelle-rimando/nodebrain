@@ -15,12 +15,70 @@
       font-family: 'Segoe UI', system-ui, sans-serif;
     }
 
+    /* ── Title bar ── */
+    #titlebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 36px;
+      z-index: 1000;
+      background: #12121a;
+      border-bottom: 1px solid #1e1e2e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    #titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #titlebar-logo {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+    }
+
+    #titlebar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+
+    #titlebar-close {
+      -webkit-app-region: no-drag;
+      width: 40px;
+      height: 36px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #titlebar-close:hover {
+      background: #e81123;
+      color: #fff;
+    }
+
     .screen {
       display: none;
       position: fixed;
-      inset: 0;
+      top: 36px;
+      left: 0;
+      right: 0;
+      bottom: 0;
       width: 100%;
-      height: 100%;
+      height: calc(100% - 36px);
     }
 
     .screen.active {
@@ -30,7 +88,10 @@
     /* ── Screen 1: Welcome ── */
     #screen-welcome {
       position: fixed;
-      inset: 0;
+      top: 36px;
+      left: 0;
+      right: 0;
+      bottom: 0;
     }
 
     #welcome-bg {
@@ -101,7 +162,10 @@
     /* ── Screen 2: Loading ── */
     #screen-loading {
       position: fixed;
-      inset: 0;
+      top: 36px;
+      left: 0;
+      right: 0;
+      bottom: 0;
       background: #060608;
     }
 
@@ -210,6 +274,20 @@
   </style>
 </head>
 <body>
+
+  <!-- ── Title bar ── -->
+  <div id="titlebar">
+    <div id="titlebar-left">
+      <img id="titlebar-logo" src="../assets/tray-icon.png" alt="" draggable="false" />
+      <span id="titlebar-title">NodeBrain</span>
+    </div>
+    <button id="titlebar-close" onclick="window.electronAPI?.windowClose()" title="Close">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
 
   <!-- ── Screen 1: Welcome ── -->
   <div id="screen-welcome" class="screen active">
