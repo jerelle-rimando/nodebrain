@@ -34,9 +34,26 @@ export function CredentialVault() {
   const [showValue, setShowValue] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const isElectron = !!(window as any).electronAPI;
+  const [launchOnStartup, setLaunchOnStartupState] = useState(false);
+
   useEffect(() => {
     api.getCredentials().then(setCredentials).catch(console.error);
   }, [setCredentials]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    (window as any).electronAPI.getLaunchOnStartup().then(setLaunchOnStartupState).catch(console.error);
+  }, [isElectron]);
+
+  async function handleLaunchOnStartupChange(enabled: boolean) {
+    try {
+      const newState = await (window as any).electronAPI.setLaunchOnStartup(enabled);
+      setLaunchOnStartupState(newState);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function handleCreate() {
     if (!name.trim() || !value.trim()) return;
@@ -227,6 +244,34 @@ export function CredentialVault() {
             ))
           )}
         </div>
+
+        {isElectron && (
+          <div className="pt-4 border-t border-brain-border flex items-center justify-between">
+            <p className="text-sm text-brain-text">Launch NodeBrain at system startup</p>
+            <button
+              role="switch"
+              aria-checked={launchOnStartup}
+              onClick={() => handleLaunchOnStartupChange(!launchOnStartup)}
+              className={`relative inline-flex w-10 h-6 rounded-full transition-colors ${launchOnStartup ? 'bg-brain-accent' : 'bg-brain-border'}`}
+            >
+              <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${launchOnStartup ? 'translate-x-4' : 'translate-x-0'}`} />
+            </button>
+          </div>
+        )}
+
+        <div className="pt-4 border-t border-brain-border">
+          <button
+            onClick={() => {
+              if (confirm('This will permanently delete all agents, credentials, tasks, and memory. NodeBrain will restart. Continue?')) {
+                (window as any).electronAPI?.resetAllData();
+              }
+            }}
+            className="w-full py-2 text-sm text-red-400 border border-red-500/30 hover:bg-red-500/10 rounded-lg transition-colors"
+          >
+            Reset all data
+          </button>
+        </div>
+
       </div>
     </div>
   );

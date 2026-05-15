@@ -35,6 +35,7 @@ function log(msg: string): void {
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
+let isQuitting = false;
 
 const BACKEND_PORT = 3001;
 const FRONTEND_PORT = 5173;
@@ -45,23 +46,42 @@ let ACTIVE_FRONTEND_PORT = FRONTEND_PORT;
 async function getOrCreateVaultSecret(): Promise<string> {
   const SERVICE = 'NodeBrain';
   const ACCOUNT = 'vault-secret';
+
+  let keytarLib: any = null;
   try {
     const keytar = await import('keytar');
-    const keytarLib = ('default' in keytar) ? (keytar as any).default : keytar;
-    let secret = await keytarLib.getPassword(SERVICE, ACCOUNT) as string | null;
-    if (!secret) {
-      secret = crypto.randomBytes(32).toString('hex');
-      await keytarLib.setPassword(SERVICE, ACCOUNT, secret);
-    }
-    return secret;
-  } catch {
-    let secret = store.get('vaultSecret') as string | undefined;
-    if (!secret) {
-      secret = crypto.randomBytes(32).toString('hex');
-      store.set('vaultSecret', secret);
-    }
-    return secret;
+    keytarLib = ('default' in keytar) ? (keytar as any).default : keytar;
+  } catch { /* keytar unavailable */ }
+
+  let keytarSecret: string | null = null;
+  if (keytarLib) {
+    try { keytarSecret = await keytarLib.getPassword(SERVICE, ACCOUNT) as string | null; } catch { /* ignore */ }
   }
+
+  let storeSecret: string | undefined;
+  try { storeSecret = store.get('vaultSecret') as string | undefined; } catch { /* ignore */ }
+
+  if (keytarSecret) {
+    // keytar is authoritative; keep store in sync
+    try { store.set('vaultSecret', keytarSecret); } catch { /* ignore */ }
+    return keytarSecret;
+  }
+
+  if (storeSecret) {
+    // store has it; backfill keytar
+    if (keytarLib) {
+      try { await keytarLib.setPassword(SERVICE, ACCOUNT, storeSecret); } catch { /* ignore */ }
+    }
+    return storeSecret;
+  }
+
+  // Neither has a secret — generate and persist to both
+  const secret = crypto.randomBytes(32).toString('hex');
+  if (keytarLib) {
+    try { await keytarLib.setPassword(SERVICE, ACCOUNT, secret); } catch { /* ignore */ }
+  }
+  try { store.set('vaultSecret', secret); } catch { /* ignore */ }
+  return secret;
 }
 
 // ── Start backend ─────────────────────────────────────────────────────────────
@@ -95,6 +115,7 @@ async function startBackend(): Promise<void> {
       NODE_ENV: 'production',
       ELECTRON_RUN_AS_NODE: '1',
       ELECTRON_RUN: 'true',
+      ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
     },
     shell: false,
     cwd,
@@ -102,7 +123,13 @@ async function startBackend(): Promise<void> {
 
   backendProcess.stdout?.on('data', (data: Buffer) => log(`[Backend] ${data.toString().trim()}`));
   backendProcess.stderr?.on('data', (data: Buffer) => log(`[Backend Error] ${data.toString().trim()}`));
-  backendProcess.on('exit', (code: number | null) => log(`[Backend] exited with code ${code}`));
+  backendProcess.on('exit', (code: number | null) => {
+    log(`[Backend] exited with code ${code}`);
+    if (code !== 0 && !isQuitting) {
+      log('[Backend] crashed, restarting in 3s...');
+      setTimeout(() => startBackend().catch(err => log(`[Backend] restart failed: ${err}`)), 3000);
+    }
+  });
 }
 
 // ── Wait for backend to be ready ──────────────────────────────────────────────
@@ -147,6 +174,31 @@ function serveStaticFrontend(): Promise<void> {
     log(`Frontend dist exists: ${fs.existsSync(frontendPath)}`);
 
     const server = http.createServer((req, res) => {
+      if (req.url?.startsWith('/api')) {
+        const proxyReq = http.request(
+          {
+            hostname: '127.0.0.1',
+            port: BACKEND_PORT,
+            path: req.url,
+            method: req.method,
+            headers: req.headers,
+          },
+          (proxyRes) => {
+            res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
+            res.flushHeaders();
+            proxyRes.pipe(res);
+          },
+        );
+        proxyReq.on('error', () => {
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'backend not ready' }));
+          }
+        });
+        req.pipe(proxyReq);
+        return;
+      }
+
       const rawUrl = req.url === '/' ? '/index.html' : (req.url ?? '/index.html');
       const decodedUrl = decodeURIComponent(rawUrl.split('?')[0].split('#')[0]);
       
@@ -377,6 +429,33 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('reset-all-data', async () => {
+    log('reset-all-data: starting');
+    backendProcess?.kill();
+    await new Promise(r => setTimeout(r, 500));
+
+    const dataDir = path.join(app.getPath('userData'), 'data');
+    try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (err) { log(`reset-all-data: rmSync failed: ${err}`); }
+
+    try {
+      const keytar = await import('keytar');
+      const keytarLib = ('default' in keytar) ? (keytar as any).default : keytar;
+      await keytarLib.deletePassword('NodeBrain', 'vault-secret');
+    } catch { /* ignore */ }
+
+    try { store.clear(); } catch { /* ignore */ }
+
+    app.relaunch();
+    app.exit(0);
+  });
+
+  ipcMain.handle('get-launch-on-startup', () => app.getLoginItemSettings().openAtLogin);
+
+  ipcMain.handle('set-launch-on-startup', (_event: Electron.IpcMainInvokeEvent, enabled: boolean) => {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return app.getLoginItemSettings().openAtLogin;
+  });
+
   ipcMain.handle('load-main-app', async () => {
     log('load-main-app called');
     try {
@@ -426,6 +505,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   backendProcess?.kill();
 });
 

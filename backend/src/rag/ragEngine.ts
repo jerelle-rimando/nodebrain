@@ -2,7 +2,7 @@ import path from 'path';
 import { LocalIndex } from 'vectra';
 import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
 
-const INDEX_PATH = path.join(process.cwd(), 'data', 'rag-index');
+const INDEX_PATH = path.join(process.env.NODEBRAIN_DATA_DIR ?? path.join(process.cwd(), 'data'), 'rag-index');
 
 let index: LocalIndex | null = null;
 let extractor: FeatureExtractionPipeline | null = null;

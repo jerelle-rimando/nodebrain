@@ -311,7 +311,12 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       }
     }
 
-    const relevantContext = await queryRelevantContext(userInput, agent.id);
+    let relevantContext: string[] = [];
+    try {
+      relevantContext = await queryRelevantContext(userInput, agent.id);
+    } catch {
+      // RAG not yet ready or unavailable; proceed without context
+    }
     const contextBlock = relevantContext.length > 0
       ? `\n\nRelevant context:\n${relevantContext.join('\n---\n')}`
       : '';

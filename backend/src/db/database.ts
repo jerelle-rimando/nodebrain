@@ -2,7 +2,7 @@ import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
 
-const DB_DIR = path.join(process.cwd(), 'data');
+const DB_DIR = process.env.NODEBRAIN_DATA_DIR ?? path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DB_DIR, 'nodebrain.db');
 
 let _db: SqlJsDatabase | null = null;

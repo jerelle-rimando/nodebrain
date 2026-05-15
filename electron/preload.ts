@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testApiKey: (provider: string, key: string) => ipcRenderer.invoke('test-api-key', provider, key),
   loadMainApp: () => ipcRenderer.invoke('load-main-app'),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  resetAllData: () => ipcRenderer.invoke('reset-all-data'),
+  getLaunchOnStartup: () => ipcRenderer.invoke('get-launch-on-startup'),
+  setLaunchOnStartup: (enabled: boolean) => ipcRenderer.invoke('set-launch-on-startup', enabled),
 });

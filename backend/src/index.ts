@@ -24,7 +24,16 @@ import agentConnectionsRouter from './routes/agentConnections';
 const PORT = process.env.PORT ?? 3001;
 const app = express();
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS: origin not allowed'));
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
@@ -81,9 +90,6 @@ async function main() {
     await initDb();
     console.log('✅ Database ready');
 
-    await initRag();
-    console.log('✅ RAG engine ready');
-
     await initializeToolRegistry();
     console.log('✅ Tool registry ready');
 
@@ -95,6 +101,10 @@ async function main() {
       console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
       console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
     });
+
+    initRag()
+      .then(() => console.log('✅ RAG engine ready'))
+      .catch(err => console.warn('[RAG] Failed to initialize:', (err as Error).message ?? err));
 
   } catch (err) {
     console.error('❌ Fatal error during startup:', err);
