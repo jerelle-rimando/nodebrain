@@ -36,6 +36,7 @@ let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
 let isQuitting = false;
+let suppressAutoRestart = false;
 
 const BACKEND_PORT = 3001;
 const FRONTEND_PORT = 5173;
@@ -125,7 +126,7 @@ async function startBackend(): Promise<void> {
   backendProcess.stderr?.on('data', (data: Buffer) => log(`[Backend Error] ${data.toString().trim()}`));
   backendProcess.on('exit', (code: number | null) => {
     log(`[Backend] exited with code ${code}`);
-    if (code !== 0 && !isQuitting) {
+    if (code !== 0 && !isQuitting && !suppressAutoRestart) {
       log('[Backend] crashed, restarting in 3s...');
       setTimeout(() => startBackend().catch(err => log(`[Backend] restart failed: ${err}`)), 3000);
     }
@@ -374,7 +375,13 @@ function createTray(): void {
     { label: 'Open NodeBrain', click: () => { mainWindow?.show(); } },
     {
       label: 'Restart Backend',
-      click: () => { backendProcess?.kill(); startBackend().catch(console.error); },
+      click: () => {
+        suppressAutoRestart = true;
+        backendProcess?.kill();
+        setTimeout(() => {
+          startBackend().catch(console.error).finally(() => { suppressAutoRestart = false; });
+        }, 500);
+      },
     },
     { type: 'separator' },
     { label: 'Quit', click: () => { backendProcess?.kill(); app.exit(0); } },
