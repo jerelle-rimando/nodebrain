@@ -25,6 +25,12 @@ export const api = {
     request<{ id: string }>(`/agents/${id}`, { method: 'DELETE' }),
   executeAgent: (id: string, input: string) =>
     request<{ message: string }>(`/agents/${id}/execute`, { method: 'POST', body: JSON.stringify({ input }) }),
+  getAgentMemory: (id: string) =>
+    request<{ id: string; text: string; source: string; timestamp: string }[]>(`/agents/${id}/memory`),
+  deleteAgentMemory: (agentId: string, memoryId: string) =>
+    request<{ id: string }>(`/agents/${agentId}/memory/${memoryId}`, { method: 'DELETE' }),
+  clearAgentMemory: (id: string) =>
+    request<{ deleted: number }>(`/agents/${id}/memory`, { method: 'DELETE' }),
 
   getAgentConnections: () => request<import('@shared/types').AgentConnection[]>('/agent-connections'),
   createAgentConnection: (sourceAgentId: string, targetAgentId: string) =>
@@ -39,6 +45,12 @@ export const api = {
 
   getTasks: () => request<import('@shared/types').Task[]>('/tasks'),
   getAgentTasks: (agentId: string) => request<import('@shared/types').Task[]>(`/tasks/agent/${agentId}`),
+  stopTask: (id: string) => request<import('@shared/types').Task>(`/tasks/${id}/stop`, { method: 'POST' }),
+  respondToApproval: (taskId: string, approvalId: string, approved: boolean) =>
+    request<{ approvalId: string; approved: boolean }>(`/tasks/${taskId}/approve/${approvalId}`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    }),
 
   getLogs: () => request<import('@shared/types').TaskLog[]>('/logs'),
   getAgentLogs: (agentId: string) => request<import('@shared/types').TaskLog[]>(`/logs/agent/${agentId}`),
@@ -76,4 +88,26 @@ export const api = {
   
   parseSchedule: (input: string) =>
     request<{ cron: string | null; human: string | null }>(`/schedule/parse?input=${encodeURIComponent(input)}`),
+
+  getAnalytics: () =>
+    request<{
+      totalCost: number;
+      totalCostThisMonth: number;
+      totalTokens: number;
+      totalTasks: number;
+      successRate: number;
+      costByProvider: { provider: string; totalCostUsd: number; totalTokens: number }[];
+      costByAgent: { agentId: string; totalCostUsd: number; totalTokens: number }[];
+      tasksPerDay: { date: string; count: number }[];
+      topExpensiveTasks: {
+        taskId: string;
+        input: string | null;
+        status: string | null;
+        createdAt: string | null;
+        cost: number;
+        tokens: number;
+        agentId: string | null;
+        model: string | null;
+      }[];
+    }>('/analytics'),
 };

@@ -136,6 +136,11 @@ export function Dashboard() {
                 }}
               />
               <h2 className="text-sm font-semibold text-brain-text truncate">{selectedAgent.name}</h2>
+              {selectedAgent.config.dryRun && (
+                <span className="flex-shrink-0 bg-yellow-500/10 border border-yellow-500/40 text-yellow-400 rounded px-1.5 py-0.5 text-xs font-semibold tracking-wide">
+                  DRY-RUN
+                </span>
+              )}
               <span className="ml-auto text-xs text-brain-text-dim font-mono capitalize">
                 {selectedAgent.model}
               </span>

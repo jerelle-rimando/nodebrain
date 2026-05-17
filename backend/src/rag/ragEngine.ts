@@ -83,6 +83,40 @@ export async function queryRelevantContext(
     .map(r => r.item.metadata.text as string);
 }
 
+export async function listMemories(
+  agentId: string,
+): Promise<{ id: string; text: string; source: string; timestamp: string }[]> {
+  const idx = await getIndex();
+  const items = await idx.listItems();
+  return items
+    .filter((item) => item.metadata.agentId === agentId)
+    .map((item) => ({
+      id: item.id,
+      text: item.metadata.text as string,
+      source: item.metadata.source as string,
+      timestamp: item.metadata.timestamp as string,
+    }));
+}
+
+export async function deleteMemory(itemId: string): Promise<boolean> {
+  const idx = await getIndex();
+  const items = await idx.listItems();
+  const exists = items.some((item) => item.id === itemId);
+  if (!exists) return false;
+  await idx.deleteItem(itemId);
+  return true;
+}
+
+export async function clearAgentMemory(agentId: string): Promise<number> {
+  const idx = await getIndex();
+  const items = await idx.listItems();
+  const matching = items.filter((item) => item.metadata.agentId === agentId);
+  for (const item of matching) {
+    await idx.deleteItem(item.id);
+  }
+  return matching.length;
+}
+
 export async function initRag(): Promise<void> {
   await getIndex();
   await getExtractor();

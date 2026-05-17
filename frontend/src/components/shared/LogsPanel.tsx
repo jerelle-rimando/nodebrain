@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore } from '../../stores/appStore';
+import { api } from '../../utils/api';
 import { Terminal, ChevronDown, ChevronUp } from 'lucide-react';
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -17,11 +18,38 @@ function formatTime(timestamp: string): string {
 }
 
 export function LogsPanel() {
-  const { logs, agents } = useStore();
+  const { logs, agents, tasks, updateTask } = useStore();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [agentFilter, setAgentFilter] = useState('');
+  const [levelFilter, setLevelFilter] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const id = useStore.getState().logsFilterAgentId;
+    if (id) {
+      setAgentFilter(id);
+      useStore.getState().setLogsFilterAgentId(null);
+    }
+  }, []);
+
+  const filteredLogs = logs.filter((log) => {
+    if (agentFilter && log.agentId !== agentFilter) return false;
+    if (levelFilter && log.level !== levelFilter) return false;
+    if (search && !log.message.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   function getAgentName(agentId: string): string {
     return agents.find((a) => a.id === agentId)?.name ?? agentId.slice(0, 8);
+  }
+
+  async function handleStop(taskId: string) {
+    try {
+      const updated = await api.stopTask(taskId);
+      updateTask(updated);
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   return (
@@ -29,13 +57,54 @@ export function LogsPanel() {
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-brain-border">
         <Terminal size={14} className="text-brain-text-dim" />
         <span className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider">Execution Logs</span>
-        <span className="ml-auto text-xs font-mono text-brain-text-dim">{logs.length} entries</span>
+        <span className="ml-auto text-xs font-mono text-brain-text-dim">{filteredLogs.length} entries</span>
+      </div>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-brain-border flex-shrink-0">
+        <select
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
+          className="flex-1 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text focus:outline-none focus:border-brain-accent"
+        >
+          <option value="">All agents</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <select
+          value={levelFilter}
+          onChange={(e) => setLevelFilter(e.target.value)}
+          className="w-24 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text focus:outline-none focus:border-brain-accent"
+        >
+          <option value="">All levels</option>
+          <option value="info">info</option>
+          <option value="warn">warn</option>
+          <option value="error">error</option>
+          <option value="debug">debug</option>
+        </select>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search…"
+          className="flex-1 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent"
+        />
+      </div>
+      <div className="px-3 py-1.5 border-b border-brain-border flex-shrink-0 flex items-center justify-between">
+        <span className="text-xs text-brain-text-dim">Showing {filteredLogs.length} of {logs.length} logs</span>
+        {(agentFilter || levelFilter || search) && (
+          <button
+            onClick={() => { setAgentFilter(''); setLevelFilter(''); setSearch(''); }}
+            className="text-xs text-brain-accent hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-3 font-mono text-xs space-y-1">
-        {logs.length === 0 ? (
-          <p className="text-brain-text-dim text-center py-4">No logs yet. Execute an agent task to see output here.</p>
+        {filteredLogs.length === 0 ? (
+          <p className="text-brain-text-dim text-center py-4">{logs.length === 0 ? 'No logs yet. Execute an agent task to see output here.' : 'No logs match the current filters.'}</p>
         ) : (
-          logs.map((log) => (
+          filteredLogs.map((log) => (
             <div key={log.id} className="rounded overflow-hidden border border-transparent hover:border-brain-border transition-colors">
               <button
                 onClick={() => setExpanded(expanded === log.id ? null : log.id)}
@@ -81,6 +150,26 @@ export function LogsPanel() {
                       {log.message}
                     </p>
                   </div>
+                  {(() => {
+                    const task = tasks.find((t) => t.id === log.taskId);
+                    if (!task) return null;
+                    return (
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-brain-border">
+                        <span className="text-brain-text-dim text-xs">Task</span>
+                        {task.status === 'running' && (
+                          <button
+                            onClick={() => handleStop(task.id)}
+                            className="px-2 py-0.5 text-xs text-red-400 border border-red-400/40 hover:bg-red-400/10 rounded transition-colors"
+                          >
+                            Stop
+                          </button>
+                        )}
+                        {task.status === 'cancelled' && (
+                          <span className="text-xs font-mono text-brain-text-dim">[CANCELLED]</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

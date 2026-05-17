@@ -73,13 +73,18 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
           {agent.description || 'No description'}
         </p>
 
-        <div className="flex gap-2 text-xs text-brain-text-dim">
+        <div className="flex gap-2 text-xs text-brain-text-dim flex-wrap">
           <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 font-mono truncate max-w-32">
             {agent.model}
           </span>
           {agent.schedule && (
             <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5">
               scheduled
+            </span>
+          )}
+          {agent.config.dryRun && (
+            <span className="bg-yellow-500/10 border border-yellow-500/40 text-yellow-400 rounded px-1.5 py-0.5 font-semibold tracking-wide">
+              DRY-RUN
             </span>
           )}
         </div>

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { MessageSquare, GitFork, Shield, Plug } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3 } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -7,21 +7,40 @@ import { LogsPanel } from './components/shared/LogsPanel';
 import { useStore } from './stores/appStore';
 import { useLiveSync } from './hooks/useLiveSync';
 import { api } from './utils/api';
-import { IntegrationsPage } from './components/integrations/IntegrationsPage'
+import { IntegrationsPage } from './components/integrations/IntegrationsPage';
+import { AnalyticsPage } from './components/analytics/AnalyticsPage';
+import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
+import { ApprovalModal } from './components/shared/ApprovalModal';
 import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
+import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
   { id: 'graph' as const, label: 'NodeGraph', icon: GitFork },
+  { id: 'templates' as const, label: 'Templates', icon: LayoutTemplate },
   { id: 'vault' as const, label: 'Vault', icon: Shield },
   { id: 'integrations' as const, label: 'Integrations', icon: Plug },
+  { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
 ];
 
 export default function App() {
-  const { activeTab, setActiveTab, setAgents, setCredentials, setTasks, setLogs } = useStore();
+  const { activeTab, setActiveTab, agents, setAgents, setCredentials, setTasks, setLogs } = useStore();
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
   useLiveSync();
+
+  useEffect(() => {
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI) {
+      electronAPI.isOnboardingComplete().then((complete: boolean) => {
+        setOnboardingComplete(complete);
+      }).catch(() => setOnboardingComplete(true));
+    } else {
+      setOnboardingComplete(true);
+    }
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -36,7 +55,8 @@ export default function App() {
         setTasks(tasks);
         setLogs(logs);
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setAgentsLoaded(true));
 
     const params = new URLSearchParams(window.location.search);
     const authStatus = params.get('auth');
@@ -50,6 +70,12 @@ export default function App() {
       window.history.replaceState({}, '', '/');
     }
   }, [setAgents, setCredentials, setTasks, setLogs, setActiveTab]);
+
+  if (onboardingComplete === null || !agentsLoaded) return null;
+
+  if (!onboardingComplete && agents.length === 0) {
+    return <OnboardingScreen onComplete={() => setOnboardingComplete(true)} />;
+  }
 
   return (
     <div className="flex flex-col h-screen bg-brain-bg overflow-hidden">
@@ -100,8 +126,10 @@ export default function App() {
           <main className="flex-1 overflow-hidden">
             {activeTab === 'dashboard' && <Dashboard />}
             {activeTab === 'graph' && <NodeGraph />}
+            {activeTab === 'templates' && <TemplatesPage />}
             {activeTab === 'vault' && <CredentialVault />}
             {activeTab === 'integrations' && <IntegrationsPage />}
+            {activeTab === 'analytics' && <AnalyticsPage />}
           </main>
 
           {/* Logs panel only in dashboard */}
@@ -113,6 +141,7 @@ export default function App() {
         </div>
       </div>
       </div>
+      <ApprovalModal />
       <ToastContainer />
     </div>
   );

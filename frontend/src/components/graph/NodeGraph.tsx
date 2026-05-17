@@ -25,6 +25,10 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  Ban,
+  ScrollText,
+  Database,
+  Download,
 } from 'lucide-react';
 
 const nodeTypes = { agentNode: AgentNode };
@@ -38,6 +42,7 @@ function statusColor(status: string): string {
     completed: '#22c55e',
     failed: '#ef4444',
     pending: '#f59e0b',
+    cancelled: '#94a3b8',
   };
   return colors[status] ?? '#374151';
 }
@@ -48,7 +53,11 @@ interface AgentPanelProps {
   onDelete: (id: string) => void;
 }
 
+type MemoryItem = { id: string; text: string; source: string; timestamp: string };
+
 function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
+  const { setActiveTab, setLogsFilterAgentId } = useStore();
+  const [tab, setTab] = useState<'config' | 'tasks' | 'memory'>('config');
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState<string | null>(null);
@@ -56,6 +65,8 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [loadingMemory, setLoadingMemory] = useState(false);
 
   useEffect(() => {
     setLoadingTasks(true);
@@ -64,6 +75,43 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
       .catch(console.error)
       .finally(() => setLoadingTasks(false));
   }, [agent.id]);
+
+  useEffect(() => {
+    if (tab !== 'memory') return;
+    setLoadingMemory(true);
+    api.getAgentMemory(agent.id)
+      .then(setMemories)
+      .catch(console.error)
+      .finally(() => setLoadingMemory(false));
+  }, [agent.id, tab]);
+
+  async function handleDeleteMemory(memoryId: string) {
+    try {
+      await api.deleteAgentMemory(agent.id, memoryId);
+      setMemories((prev) => prev.filter((m) => m.id !== memoryId));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleClearMemory() {
+    if (!confirm(`Delete all memory for "${agent.name}"? This cannot be undone.`)) return;
+    try {
+      await api.clearAgentMemory(agent.id);
+      setMemories([]);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleStop(taskId: string) {
+    try {
+      const updated = await api.stopTask(taskId);
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function handleRun() {
     if (!input.trim()) return;
@@ -102,6 +150,13 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => { setLogsFilterAgentId(agent.id); setActiveTab('dashboard'); onClose(); }}
+            title="View logs"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-accent hover:bg-brain-accent/10 transition-colors"
+          >
+            <ScrollText size={13} />
+          </button>
+          <button
             onClick={() => { onDelete(agent.id); onClose(); }}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-error hover:bg-brain-error/10 transition-colors"
           >
@@ -116,7 +171,27 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
         </div>
       </div>
 
+      {/* Tab bar */}
+      <div className="flex border-b border-brain-border flex-shrink-0">
+        {(['config', 'tasks', 'memory'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 py-2 text-xs font-medium transition-colors capitalize ${
+              tab === t
+                ? 'text-brain-accent border-b-2 border-brain-accent'
+                : 'text-brain-text-dim hover:text-brain-text'
+            }`}
+          >
+            {t === 'tasks' ? 'Task History' : t === 'memory' ? 'Memory' : 'Config'}
+          </button>
+        ))}
+      </div>
+
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+        {/* Config tab */}
+        {tab === 'config' && (<>
 
         {/* Agent Details */}
         <div className="space-y-2">
@@ -140,6 +215,56 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
               <span className="text-brain-text-dim">Created</span>
               <span className="text-brain-text">{new Date(agent.createdAt).toLocaleDateString()}</span>
             </div>
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-brain-border">
+              <span className="text-brain-text-dim">Require approval for destructive actions</span>
+              <button
+                role="switch"
+                aria-checked={!!agent.config.approvalMode}
+                onClick={async () => {
+                  try {
+                    await api.updateAgent(agent.id, {
+                      config: { ...agent.config, approvalMode: !agent.config.approvalMode },
+                    });
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
+                  agent.config.approvalMode ? 'bg-brain-accent' : 'bg-brain-border'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${
+                    agent.config.approvalMode ? 'translate-x-4' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-brain-border">
+              <span className="text-brain-text-dim">Dry-run mode (skip writes)</span>
+              <button
+                role="switch"
+                aria-checked={!!agent.config.dryRun}
+                onClick={async () => {
+                  try {
+                    await api.updateAgent(agent.id, {
+                      config: { ...agent.config, dryRun: !agent.config.dryRun },
+                    });
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
+                  agent.config.dryRun ? 'bg-yellow-500' : 'bg-brain-border'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${
+                    agent.config.dryRun ? 'translate-x-4' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
           {agent.description && (
             <p className="text-xs text-brain-text-dim leading-relaxed">{agent.description}</p>
@@ -151,6 +276,42 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
             </div>
           )}
         </div>
+
+        <button
+          onClick={() => {
+            const template = {
+              version: '1',
+              name: agent.name,
+              description: agent.description,
+              agents: [{
+                name: agent.name,
+                description: agent.description,
+                systemPrompt: agent.systemPrompt,
+                provider: agent.provider,
+                model: agent.model,
+                ...(agent.schedule ? { schedule: agent.schedule } : {}),
+                ...(agent.toolPermissions?.length ? { toolPermissions: agent.toolPermissions } : {}),
+              }],
+              connections: [],
+              tags: [],
+            };
+            const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${agent.name.toLowerCase().replace(/\s+/g, '-')}-template.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs border border-brain-border text-brain-text-dim hover:text-brain-text hover:border-brain-muted rounded-lg transition-colors"
+        >
+          <Download size={11} /> Export as Template
+        </button>
+
+        </>)}
+
+        {/* Tasks tab */}
+        {tab === 'tasks' && (<>
 
         {/* Run Task */}
         <div className="space-y-2">
@@ -220,27 +381,41 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
                   key={task.id}
                   className="rounded-lg bg-brain-bg border border-brain-border overflow-hidden"
                 >
-                  <button
-                    onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
-                    className="w-full flex items-center gap-2 p-2.5 text-left hover:bg-brain-border/30 transition-colors"
-                  >
-                    {task.status === 'completed' && <CheckCircle size={11} className="text-brain-success flex-shrink-0" />}
-                    {task.status === 'failed' && <XCircle size={11} className="text-brain-error flex-shrink-0" />}
-                    {task.status === 'running' && <Loader2 size={11} className="animate-spin text-brain-accent flex-shrink-0" />}
-                    {task.status === 'pending' && <Clock size={11} className="text-brain-warning flex-shrink-0" />}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-brain-text truncate">
-                        {task.input ?? task.description ?? 'Task'}
-                      </p>
-                      <p className="text-xs text-brain-text-dim">
-                        {new Date(task.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                    {expandedTask === task.id
-                      ? <ChevronUp size={11} className="text-brain-text-dim flex-shrink-0" />
-                      : <ChevronDown size={11} className="text-brain-text-dim flex-shrink-0" />
-                    }
-                  </button>
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
+                      className="flex-1 flex items-center gap-2 p-2.5 text-left hover:bg-brain-border/30 transition-colors min-w-0"
+                    >
+                      {task.status === 'completed' && <CheckCircle size={11} className="text-brain-success flex-shrink-0" />}
+                      {task.status === 'failed' && <XCircle size={11} className="text-brain-error flex-shrink-0" />}
+                      {task.status === 'running' && <Loader2 size={11} className="animate-spin text-brain-accent flex-shrink-0" />}
+                      {task.status === 'pending' && <Clock size={11} className="text-brain-warning flex-shrink-0" />}
+                      {task.status === 'cancelled' && <Ban size={11} className="text-brain-text-dim flex-shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-brain-text truncate">
+                          {task.input ?? task.description ?? 'Task'}
+                        </p>
+                        <p className="text-xs text-brain-text-dim">
+                          {new Date(task.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      {task.status === 'cancelled' && (
+                        <span className="text-xs font-mono text-brain-text-dim flex-shrink-0">[CANCELLED]</span>
+                      )}
+                      {expandedTask === task.id
+                        ? <ChevronUp size={11} className="text-brain-text-dim flex-shrink-0" />
+                        : <ChevronDown size={11} className="text-brain-text-dim flex-shrink-0" />
+                      }
+                    </button>
+                    {task.status === 'running' && (
+                      <button
+                        onClick={() => handleStop(task.id)}
+                        className="flex-shrink-0 mx-1.5 px-2 py-1 text-xs text-red-400 border border-red-400/40 hover:bg-red-400/10 rounded transition-colors"
+                      >
+                        Stop
+                      </button>
+                    )}
+                  </div>
                   {expandedTask === task.id && (
                     <div className="px-3 pb-3 space-y-2 border-t border-brain-border pt-2">
                       {task.input && (
@@ -268,6 +443,60 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
             </div>
           )}
         </div>
+
+        </>)}
+
+        {/* Memory tab */}
+        {tab === 'memory' && (
+          <div className="space-y-2">
+            {loadingMemory ? (
+              <div className="flex items-center gap-2 text-xs text-brain-text-dim py-2">
+                <Loader2 size={11} className="animate-spin" />
+                Loading memory...
+              </div>
+            ) : memories.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-8 text-brain-text-dim">
+                <Database size={22} className="opacity-40" />
+                <p className="text-xs">No memory stored for this agent</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-brain-text-dim">{memories.length} chunk{memories.length !== 1 ? 's' : ''} stored</p>
+                <div className="space-y-2">
+                  {memories.map((m) => (
+                    <div key={m.id} className="rounded-lg bg-brain-bg border border-brain-border p-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <p className="text-xs text-brain-text leading-relaxed line-clamp-3">
+                            {m.text.slice(0, 200)}{m.text.length > 200 ? '…' : ''}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-brain-text-dim">
+                            <span className="font-mono truncate max-w-32">{m.source}</span>
+                            <span>·</span>
+                            <span>{new Date(m.timestamp).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteMemory(m.id)}
+                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-brain-text-dim hover:text-brain-error hover:bg-brain-error/10 transition-colors"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleClearMemory}
+                  className="w-full mt-2 py-1.5 text-xs text-brain-error border border-brain-error/30 hover:bg-brain-error/10 rounded-lg transition-colors"
+                >
+                  Clear all memory
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );

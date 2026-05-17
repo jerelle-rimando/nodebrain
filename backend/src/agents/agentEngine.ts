@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
+import { dbRun } from '../db/database';
 import { updateAgentStatus } from '../db/agentRepository';
 import { queryRelevantContext } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic } from '../mcp/toolRegistry';
@@ -14,6 +15,38 @@ import { getAllAgents } from '../db/agentRepository';
 import { getTasksByAgent } from '../db/taskRepository';
 
 export const agentEvents = new EventEmitter();
+
+const activeTaskControllers = new Map<string, AbortController>();
+
+export function cancelTask(taskId: string): boolean {
+  const controller = activeTaskControllers.get(taskId);
+  if (!controller) return false;
+  controller.abort();
+  return true;
+}
+
+const pendingApprovals = new Map<string, (approved: boolean) => void>();
+
+export function resolveApproval(approvalId: string, approved: boolean): boolean {
+  const resolve = pendingApprovals.get(approvalId);
+  if (!resolve) return false;
+  pendingApprovals.delete(approvalId);
+  resolve(approved);
+  return true;
+}
+
+function requestApproval(
+  taskId: string,
+  agentId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const approvalId = uuidv4();
+    pendingApprovals.set(approvalId, resolve);
+    agentEvents.emit('tool:approval_needed', { taskId, agentId, approvalId, toolName, args });
+  });
+}
 
 const BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -38,7 +71,72 @@ const DEFAULT_MODELS: Record<string, string> = {
   custom: 'gpt-4o-mini',
 };
 
+// Prices in USD per million tokens { input, output }
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'gpt-4o-mini':              { input: 0.15, output: 0.60  },
+  'gpt-4o':                   { input: 2.50, output: 10.00 },
+  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
+  'llama-3.3-70b-versatile':  { input: 0.59, output: 0.79  },
+  'gemini-2.0-flash':         { input: 0.10, output: 0.40  },
+};
+
+const FREE_PROVIDERS = new Set(['ollama', 'custom']);
+
+function recordUsage(
+  taskId: string,
+  agentId: string,
+  provider: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+): void {
+  const pricing = FREE_PROVIDERS.has(provider) ? { input: 0, output: 0 } : (MODEL_PRICING[model] ?? { input: 0, output: 0 });
+  const estimatedCostUsd =
+    (promptTokens / 1_000_000) * pricing.input +
+    (completionTokens / 1_000_000) * pricing.output;
+  dbRun(
+    `INSERT INTO usage_records
+       (id, task_id, agent_id, provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      uuidv4(), taskId, agentId, provider, model,
+      promptTokens, completionTokens, promptTokens + completionTokens,
+      estimatedCostUsd, new Date().toISOString(),
+    ],
+  );
+}
+
 const MAX_TOOL_ITERATIONS = 15;
+
+const READ_ONLY_TOOL_PREFIXES = [
+  'search_',
+  'get_',
+  'list_',
+  'read_',
+  'query_',
+  'find_',
+  'fetch_',
+];
+
+function isReadOnlyTool(toolName: string): boolean {
+  return READ_ONLY_TOOL_PREFIXES.some((prefix) => toolName.startsWith(prefix));
+}
+
+const DESTRUCTIVE_TOOLS = new Set([
+  'gmail__send_email',
+  'telegram__send_message',
+  'slack__send_message',
+  'github__create_issue',
+  'github__create_pull_request',
+  'filesystem__write_file',
+  'filesystem__delete_file',
+  'notion__create_page',
+  'notion__update_page',
+  'google_drive__upload_file',
+  'google_docs__create_document',
+  'google_sheets__update_values',
+  'google_calendar__create_event',
+]);
 
 function getClient(provider: string, apiKey: string): OpenAI {
   return new OpenAI({
@@ -77,6 +175,7 @@ async function runOpenAIAgenticLoop(
   messages: OpenAI.ChatCompletionMessageParam[],
   agent: Agent,
   taskId: string,
+  signal: AbortSignal,
   depth = 0,
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
@@ -84,6 +183,7 @@ async function runOpenAIAgenticLoop(
   let iterations = 0;
 
   while (iterations < MAX_TOOL_ITERATIONS) {
+    if (signal.aborted) return '(task cancelled by user)';
     iterations++;
 
     const completion = await client.chat.completions.create({
@@ -93,6 +193,10 @@ async function runOpenAIAgenticLoop(
       max_tokens: agent.config.maxTokens ?? 2000,
       ...(formattedTools.length > 0 ? { tools: formattedTools, tool_choice: 'auto' } : {}),
     });
+
+    if (completion.usage) {
+      recordUsage(taskId, agent.id, agent.provider, model, completion.usage.prompt_tokens, completion.usage.completion_tokens);
+    }
 
     const choice = completion.choices[0];
     const message = choice.message;
@@ -106,6 +210,23 @@ async function runOpenAIAgenticLoop(
     for (const toolCall of message.tool_calls) {
       const { serverName, toolName } = parseToolName(toolCall.function.name);
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+
+      if (agent.config.approvalMode && DESTRUCTIVE_TOOLS.has(toolCall.function.name)) {
+        persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${toolCall.function.name}`, 'warn'));
+        const approved = await requestApproval(taskId, agent.id, toolCall.function.name, args);
+        if (!approved) {
+          persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" denied by user`, 'warn'));
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: '(tool execution denied by user)' });
+          continue;
+        }
+      }
+
+      if (agent.config.dryRun && !isReadOnlyTool(toolName)) {
+        const simulated = `(DRY-RUN) Would have called ${toolCall.function.name} with args: ${JSON.stringify(args)}`;
+        persistLog(makeLog(taskId, agent.id, `[DRY-RUN] Skipping tool "${toolCall.function.name}" with args: ${JSON.stringify(args)}`));
+        messages.push({ role: 'tool', tool_call_id: toolCall.id, content: simulated });
+        continue;
+      }
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${toolCall.function.name}`));
 
@@ -165,6 +286,7 @@ async function runAnthropicAgenticLoop(
   userInput: string,
   agent: Agent,
   taskId: string,
+  signal: AbortSignal,
   depth = 0,
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
@@ -177,6 +299,7 @@ async function runAnthropicAgenticLoop(
   let iterations = 0;
 
   while (iterations < MAX_TOOL_ITERATIONS) {
+    if (signal.aborted) return '(task cancelled by user)';
     iterations++;
 
     const requestParams: Anthropic.MessageCreateParamsNonStreaming = {
@@ -192,6 +315,8 @@ async function runAnthropicAgenticLoop(
 
     const response = await anthropic.messages.create(requestParams);
 
+    recordUsage(taskId, agent.id, 'anthropic', model, response.usage.input_tokens, response.usage.output_tokens);
+
     if (response.stop_reason !== 'tool_use') {
       const textBlock = response.content.find(b => b.type === 'text');
       return textBlock && textBlock.type === 'text' ? textBlock.text : '(no response)';
@@ -206,6 +331,23 @@ async function runAnthropicAgenticLoop(
 
       const { serverName, toolName } = parseToolName(block.name);
       const args = block.input as Record<string, unknown>;
+
+      if (agent.config.approvalMode && DESTRUCTIVE_TOOLS.has(block.name)) {
+        persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${block.name}`, 'warn'));
+        const approved = await requestApproval(taskId, agent.id, block.name, args);
+        if (!approved) {
+          persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" denied by user`, 'warn'));
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: '(tool execution denied by user)' });
+          continue;
+        }
+      }
+
+      if (agent.config.dryRun && !isReadOnlyTool(toolName)) {
+        const simulated = `(DRY-RUN) Would have called ${block.name} with args: ${JSON.stringify(args)}`;
+        persistLog(makeLog(taskId, agent.id, `[DRY-RUN] Skipping tool "${block.name}" with args: ${JSON.stringify(args)}`));
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: simulated });
+        continue;
+      }
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${block.name}`));
 
@@ -274,6 +416,9 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
     createdAt: now,
   };
 
+  const controller = new AbortController();
+  activeTaskControllers.set(taskId, controller);
+
   createTask(task);
   updateAgentStatus(agent.id, 'running');
   agentEvents.emit('task:start', task);
@@ -334,6 +479,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         userInput,
         agent,
         taskId,
+        controller.signal,
         depth,
       );
     } else {
@@ -342,9 +488,10 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         { role: 'system', content: fullSystemPrompt },
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, depth);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth);
     }
 
+    activeTaskControllers.delete(taskId);
     persistLog(makeLog(taskId, agent.id, `Task completed successfully.`));
     updateTaskStatus(taskId, 'completed', output);
     updateAgentStatus(agent.id, 'idle');
@@ -359,6 +506,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
     return completedTask;
 
   } catch (err) {
+    activeTaskControllers.delete(taskId);
     const errorMessage = err instanceof Error ? err.message : String(err);
     persistLog(makeLog(taskId, agent.id, `Task failed: ${errorMessage}`, 'error'));
     updateTaskStatus(taskId, 'failed', undefined, errorMessage);

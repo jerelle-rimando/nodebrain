@@ -1,7 +1,15 @@
 import { create } from 'zustand';
 import type { Agent, Task, TaskLog, Credential, ChatMessage } from '@shared/types';
 
-type ActiveTab = 'dashboard' | 'graph' | 'vault' | 'integrations';
+export interface ToolApprovalRequest {
+  taskId: string;
+  agentId: string;
+  approvalId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics';
 
 interface AppState {
   agents: Agent[];
@@ -12,6 +20,8 @@ interface AppState {
 
   activeTab: ActiveTab;
   selectedAgentId: string | null;
+  logsFilterAgentId: string | null;
+  pendingApprovals: ToolApprovalRequest[];
 
   setAgents: (agents: Agent[]) => void;
   addAgent: (agent: Agent) => void;
@@ -34,6 +44,9 @@ interface AppState {
 
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedAgent: (id: string | null) => void;
+  setLogsFilterAgentId: (id: string | null) => void;
+  addPendingApproval: (req: ToolApprovalRequest) => void;
+  removePendingApproval: (approvalId: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -44,6 +57,8 @@ export const useStore = create<AppState>((set) => ({
   chatMessages: [],
   activeTab: 'dashboard',
   selectedAgentId: null,
+  logsFilterAgentId: null,
+  pendingApprovals: [],
 
   setAgents: (agents) => set({ agents }),
   addAgent: (agent) => set((s) => ({ agents: [agent, ...s.agents] })),
@@ -67,4 +82,7 @@ export const useStore = create<AppState>((set) => ({
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setSelectedAgent: (selectedAgentId) => set({ selectedAgentId }),
+  setLogsFilterAgentId: (logsFilterAgentId) => set({ logsFilterAgentId }),
+  addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
+  removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
 }));

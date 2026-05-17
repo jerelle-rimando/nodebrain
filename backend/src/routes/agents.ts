@@ -9,6 +9,7 @@ import {
   deleteAgent,
 } from '../db/agentRepository';
 import { executeAgentTask } from '../agents/agentEngine';
+import { listMemories, deleteMemory, clearAgentMemory } from '../rag/ragEngine';
 import { scheduleAgent, unscheduleAgent } from '../scheduler/scheduler';
 import type { Agent } from '../../shared-types';
 import { deleteConnectionsForAgent } from '../db/agentConnectionRepository';
@@ -113,6 +114,37 @@ router.delete('/:id', (req, res) => {
     const deleted = deleteAgent(req.params.id);
     if (!deleted) return res.status(404).json({ success: false, error: 'Agent not found' });
     res.json({ success: true, data: { id: req.params.id } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// GET /api/agents/:id/memory
+router.get('/:id/memory', async (req, res) => {
+  try {
+    const memories = await listMemories(req.params.id);
+    res.json({ success: true, data: memories });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// DELETE /api/agents/:id/memory/:memoryId
+router.delete('/:id/memory/:memoryId', async (req, res) => {
+  try {
+    const deleted = await deleteMemory(req.params.memoryId);
+    if (!deleted) return res.status(404).json({ success: false, error: 'Memory item not found' });
+    res.json({ success: true, data: { id: req.params.memoryId } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// DELETE /api/agents/:id/memory
+router.delete('/:id/memory', async (req, res) => {
+  try {
+    const count = await clearAgentMemory(req.params.id);
+    res.json({ success: true, data: { deleted: count } });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }

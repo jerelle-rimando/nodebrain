@@ -130,6 +130,18 @@ export async function initDb(): Promise<void> {
       target_agent_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS usage_records (
+      id TEXT PRIMARY KEY,
+      task_id TEXT,
+      agent_id TEXT,
+      provider TEXT,
+      model TEXT,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      total_tokens INTEGER,
+      estimated_cost_usd REAL,
+      timestamp TEXT
+    );
   `);
   persist();
 }

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useStore } from '../stores/appStore';
+import type { ToolApprovalRequest } from '../stores/appStore';
 import type { TaskLog, Task, Agent } from '@shared/types';
 
 export function useLiveSync() {
@@ -29,6 +30,16 @@ export function useLiveSync() {
       es.addEventListener('task:failed', (e) => {
         const task: Task = JSON.parse((e as MessageEvent).data);
         useStore.getState().updateTask(task);
+      });
+
+      es.addEventListener('task:cancelled', (e) => {
+        const task: Task = JSON.parse((e as MessageEvent).data);
+        useStore.getState().updateTask(task);
+      });
+
+      es.addEventListener('tool:approval_needed', (e) => {
+        const req: ToolApprovalRequest = JSON.parse((e as MessageEvent).data);
+        useStore.getState().addPendingApproval(req);
       });
 
       es.addEventListener('agent:created', (e) => {

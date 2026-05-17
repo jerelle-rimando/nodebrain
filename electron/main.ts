@@ -10,6 +10,7 @@ import { autoUpdater } from 'electron-updater';
 interface StoreSchema {
   setupComplete: boolean;
   vaultSecret: string;
+  onboardingComplete: boolean;
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -471,6 +472,12 @@ function registerIpcHandlers(): void {
     else mainWindow?.maximize();
   });
   ipcMain.handle('window-close', () => { mainWindow?.hide(); });
+
+  ipcMain.handle('is_onboarding_complete', () => store.get('onboardingComplete') ?? false);
+
+  ipcMain.handle('complete_onboarding', () => {
+    store.set('onboardingComplete', true);
+  });
 
   ipcMain.handle('load-main-app', async () => {
     log('load-main-app called');

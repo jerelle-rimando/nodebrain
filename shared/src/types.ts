@@ -1,7 +1,7 @@
 // Shared types between frontend and backend
 
 export type AgentStatus = 'idle' | 'running' | 'error' | 'stopped';
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ModelProvider = 'openai' | 'anthropic' | 'groq' | 'gemini' | 'ollama' | 'mistral' | 'together' | 'fireworks' | 'custom';
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
@@ -24,6 +24,9 @@ export interface AgentConfig {
   temperature?: number;
   maxTokens?: number;
   credentialIds?: string[];
+  approvalMode?: boolean;
+  approvedToolTypes?: string[];
+  dryRun?: boolean;
 }
 
 export interface Task {
