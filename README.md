@@ -2,6 +2,9 @@
 <img width="3174" height="633" alt="Transparent_Github_Readme_Logo" src="https://github.com/user-attachments/assets/60c2952b-3f3d-4a88-83e3-2d23e7765fcd" />
 
 NodeBrain™ is a local-first (with potential for web deployment) system for building and running AI agents that actually do things.
+
+> ⚠️ **Windows users:** NodeBrain is currently unsigned. Windows SmartScreen may show a warning on first install. Click "More info" → "Run anyway" to proceed. NodeBrain is fully open source — you can review every line of code on GitHub.
+
 Agents are created from chat and turned into persistent nodes in a visual graph. They can execute tasks on schedule, interact with external tools, and run structured workflows while you monitor everything in real time.
 
 ---
@@ -19,6 +22,9 @@ The system revolves around persistent AI agents that can:
 - remember context across tasks using local RAG (Retrieval-Augmented Generation)
 - run structured workflows
 - be monitored and modified in real time
+- delegate tasks to other connected agents (up to 3 levels deep, unlimited width)
+- pause before destructive actions when Approval Mode is enabled
+- run in Dry-Run mode to simulate tool calls without side effects
 
 Everything runs **locally by default**, giving users full control over their environment and data.
 
@@ -32,7 +38,7 @@ Everything runs **locally by default**, giving users full control over their env
 - An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.)
 
 ### Installation (Recommended)
-NodeBrain uses **SignPath Foundation** for code signing. Download from the **Releases** tab
+NodeBrain is currently unsigned. Windows may show a SmartScreen warning — click "More info" → "Run anyway" to proceed. The full source code is on GitHub if you want to verify it yourself. Download from the **Releases** tab.
 
 - **NodeBrain Setup 0.2.0.exe**  
   Installs NodeBrain on your system.
@@ -81,42 +87,9 @@ Open your browser and go to:
 http://localhost:5173
 ```
 
-### Running 24/7 (Background Mode)
-
-To keep NodeBrain running permanently in the background:
-```bash
-cd backend
-npm run start:prod
-```
-
-**Check status:**
-```bash
-npm run status
-```
-
-**View live logs:**
-```bash
-npm run logs
-```
-
-**Stop:**
-```bash
-npm run stop
-```
-
-**Restart after changes:**
-```bash
-npm run restart
-```
-
-> ⚠️ Do not run `npm run dev` from root and `npm run start:prod` at the same time — they conflict on port 3001.
-
-> ⏳ First start downloads a ~25MB embedding model. Wait 60 seconds.
-
 ### First Time Setup
 
-> ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model on startup. 
-> This only happens once. If the backend seems slow to start, wait 30-60 seconds — it's normal.
+> ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model in the background on first launch. The app starts immediately — the model loads quietly behind the scenes. This only happens once.
 > MCP integrations also download their servers on first use, which may take a moment.
 
 1. Click the **Vault** tab (shield icon) and add your API key for your preferred provider
@@ -146,7 +119,7 @@ NodeBrain is model-agnostic and works with any of the following out of the box:
 - `VAULT_SECRET` is auto-generated with 32 cryptographically random bytes on first run
 - All API keys are encrypted with AES-256 before being stored locally
 - No data ever leaves your machine except for the API calls you explicitly make
-- The database is stored at `backend/data/nodebrain.db` and is excluded from git
+- The database is stored at `%APPDATA%\NodeBrain\data\nodebrain.db` (Windows) or `~/Library/Application Support/NodeBrain/data/nodebrain.db` (Mac). It is never inside the install directory.
 - Never commit your `.env` file — it is already in `.gitignore`
 
 ### ⚠️ Local Filesystem Integration Warning
@@ -170,10 +143,16 @@ Create and control agents through chat. Click any agent in the Active Agents lis
 Visualize agents and their execution status in a live graph interface. Click any node to open a detail panel showing agent configuration, task history, and a direct run interface. Node border colors reflect live status — purple for running, red for error.
 
 ### Credential Vault 🔒
-Securely store and manage encrypted API keys for AI providers and integrations.
+Securely store and manage encrypted API keys for AI providers and integrations. Use the Settings section at the bottom to enable launch at startup or reset all data.
 
 ### Integrations 🔌
 Connect external services so your agents can take action in the world. Each integration shows connection status, what tools it unlocks, and step-by-step setup instructions.
+
+### Templates 📋
+Install curated agent teams with one click, or import your own agent configurations as JSON files. Export any agent or team from the NodeGraph as a shareable template.
+
+### Analytics 📊
+Track token usage, estimated cost per agent, task success rates, and activity over time. Helps you monitor spend and identify which agents run most frequently.
 
 ---
 
@@ -270,8 +249,9 @@ Future versions may support web or hosted environments — see [Security & Archi
 
 - **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
-- **No multi-agent coordination yet** — agents cannot communicate with or spawn each other. Planned for a future version.
-- **Local only** — no cloud deployment, no mobile, no collaboration features yet.
+- **Agent delegation depth** — agents can delegate to sub-agents up to 3 levels deep. Wider delegation (1 parent to many children) is unlimited.
+- **Local only** — no cloud deployment, no mobile, no collaboration features yet. Cloud version is planned.
+- **Scheduled agents require the app to be running** — use the "Launch at startup" toggle in Vault settings so agents run automatically after reboot.
 - **Dependency supply chain risk** — NodeBrain relies on third party npm packages 
   including MCP SDK, OpenAI SDK, and Anthropic SDK. In the event of a supply chain 
   attack on any dependency (similar to the LiteLLM PyPI compromise of March 2026), 
@@ -290,7 +270,7 @@ NodeBrain's local-first architecture mitigates many of these risks by design:
 - Every MCP server runs on your own machine with your own credentials
 - There is no central server or shared infrastructure, significantly reducing the external attack surface
 - Your agents only have access to what you explicitly connect in the Vault
-- CORS restricts browser-based access to localhost, adding an additional layer of protection
+- - CORS restricts browser-based access to localhost only (any port) — no external origins can reach the backend, adding an additional layer of protection
 
 This isn't just a v0.1 limitation — it's a deliberate architectural choice. MCP is still evolving, and the security model for multi-user, web-based deployments is not yet fully mature.
 
