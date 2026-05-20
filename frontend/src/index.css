@@ -14,8 +14,8 @@
   }
 
   body {
-    background-color: #0a0a0f;
-    color: #e2e8f0;
+    background-color: #06070b;
+    color: #e4e6f0;
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -26,22 +26,22 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #12121a;
+    background: #0f1118;
   }
   ::-webkit-scrollbar-thumb {
-    background: #1e1e2e;
+    background: #1f2235;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #374151;
+    background: #2a2e47;
   }
 }
 
 @layer components {
   .glass {
-    background: rgba(18, 18, 26, 0.8);
+    background: rgba(15, 17, 24, 0.8);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(30, 30, 46, 0.8);
+    border: 1px solid rgba(31, 34, 53, 0.8);
   }
 
   .status-dot {
@@ -52,9 +52,9 @@
   }
 
   .status-idle    { background-color: #374151; }
-  .status-running { background-color: #6366f1; animation: pulse 1.5s ease-in-out infinite; }
+  .status-running { background-color: #2dd4bf; animation: pulse 1.5s ease-in-out infinite; }
   .status-error   { background-color: #ef4444; }
-  .status-stopped { background-color: #94a3b8; }
+  .status-stopped { background-color: #9094ab; }
   .status-completed { background-color: #10b981; }
   .status-pending { background-color: #f59e0b; }
   .status-failed  { background-color: #ef4444; }
@@ -62,46 +62,46 @@
 
 /* React Flow overrides */
 .react-flow__background {
-  background-color: #0a0a0f !important;
+  background-color: #06070b !important;
 }
 .react-flow__edge-path {
-  stroke: #374151 !important;
+  stroke: #1f2235 !important;
 }
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #6366f1 !important;
+  stroke: #2dd4bf !important;
 }
 .react-flow__controls {
-  background: #12121a !important;
-  border: 1px solid #1e1e2e !important;
+  background: #0f1118 !important;
+  border: 1px solid #1f2235 !important;
   border-radius: 8px !important;
   overflow: hidden;
 }
 .react-flow__controls-button {
-  background: #12121a !important;
+  background: #0f1118 !important;
   border: none !important;
-  border-bottom: 1px solid #1e1e2e !important;
-  fill: #94a3b8 !important;
+  border-bottom: 1px solid #1f2235 !important;
+  fill: #9094ab !important;
 }
 .react-flow__controls-button:hover {
-  background: #1e1e2e !important;
+  background: #1f2235 !important;
 }
 .react-flow__minimap {
-  background: #12121a !important;
-  border: 1px solid #1e1e2e !important;
+  background: #0f1118 !important;
+  border: 1px solid #1f2235 !important;
   border-radius: 8px !important;
 }
 
 /* Chat markdown */
 .chat-content code {
   font-family: 'JetBrains Mono', monospace;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(45, 212, 191, 0.1);
+  border: 1px solid rgba(45, 212, 191, 0.2);
   padding: 0.1em 0.4em;
   border-radius: 4px;
   font-size: 0.85em;
 }
 .chat-content strong {
-  color: #e2e8f0;
+  color: #e4e6f0;
   font-weight: 600;
 }
 .chat-content ul {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -594,9 +594,16 @@ export function NodeGraph() {
     }
   }, [agents]);
 
-  useEffect(() => {
-    const positions: Record<string, {x: number, y: number}> = {};
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, _node: Node) => {
+    const positions: Record<string, { x: number; y: number }> = {};
     nodes.forEach((n) => { positions[n.id] = n.position; });
+    localStorage.setItem('nodebrain-positions', JSON.stringify(positions));
+  }, [nodes]);
+
+  const onNodesDelete = useCallback((deletedNodes: Node[]) => {
+    const deletedIds = new Set(deletedNodes.map((n) => n.id));
+    const positions: Record<string, { x: number; y: number }> = {};
+    nodes.filter((n) => !deletedIds.has(n.id)).forEach((n) => { positions[n.id] = n.position; });
     localStorage.setItem('nodebrain-positions', JSON.stringify(positions));
   }, [nodes]);
 
@@ -620,12 +627,14 @@ export function NodeGraph() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChangeWithSync}
         onConnect={onConnect}
+        onNodeDragStop={onNodeDragStop}
+        onNodesDelete={onNodesDelete}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1e1e2e" />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={2} color="#2a2e47" />
         <Controls />
         <MiniMap
           nodeColor={(n) => {

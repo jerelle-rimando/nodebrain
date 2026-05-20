@@ -7,7 +7,7 @@ const LEVEL_COLORS: Record<string, string> = {
   info: '#94a3b8',
   warn: '#f59e0b',
   error: '#ef4444',
-  debug: '#6366f1',
+  debug: '#2dd4bf',
 };
 
 function formatTime(timestamp: string): string {
@@ -22,7 +22,6 @@ export function LogsPanel() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [agentFilter, setAgentFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState('');
-  const [search, setSearch] = useState('');
 
   useEffect(() => {
     const id = useStore.getState().logsFilterAgentId;
@@ -35,7 +34,6 @@ export function LogsPanel() {
   const filteredLogs = logs.filter((log) => {
     if (agentFilter && log.agentId !== agentFilter) return false;
     if (levelFilter && log.level !== levelFilter) return false;
-    if (search && !log.message.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -73,27 +71,20 @@ export function LogsPanel() {
         <select
           value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value)}
-          className="w-24 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text focus:outline-none focus:border-brain-accent"
+          className="w-36 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text focus:outline-none focus:border-brain-accent"
         >
           <option value="">All levels</option>
-          <option value="info">info</option>
-          <option value="warn">warn</option>
-          <option value="error">error</option>
-          <option value="debug">debug</option>
+          <option value="info">Info</option>
+          <option value="warn">Warn</option>
+          <option value="error">Error</option>
+          <option value="debug">Debug</option>
         </select>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search…"
-          className="flex-1 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent"
-        />
       </div>
       <div className="px-3 py-1.5 border-b border-brain-border flex-shrink-0 flex items-center justify-between">
         <span className="text-xs text-brain-text-dim">Showing {filteredLogs.length} of {logs.length} logs</span>
-        {(agentFilter || levelFilter || search) && (
+        {(agentFilter || levelFilter) && (
           <button
-            onClick={() => { setAgentFilter(''); setLevelFilter(''); setSearch(''); }}
+            onClick={() => { setAgentFilter(''); setLevelFilter(''); }}
             className="text-xs text-brain-accent hover:underline"
           >
             Clear filters

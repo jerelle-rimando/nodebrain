@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useEffect } from 'react';
+import type { ComponentType } from 'react';
 import {
   Plug,
   CheckCircle,
@@ -12,6 +13,14 @@ import {
   Trash2,
   Server,
 } from 'lucide-react';
+import {
+  SiTelegram,
+  SiGoogle,
+  SiGithub,
+  SiSlack,
+  SiNotion,
+  SiBrave,
+} from 'react-icons/si';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { toast } from '../shared/Toast';
@@ -28,12 +37,14 @@ interface Integration {
   tools: string[];
   setupSteps: string[];
   docsUrl?: string;
+  icon?: ComponentType<{ size?: number; className?: string }>;
 }
 
 const INTEGRATIONS: Integration[] = [
   {
     id: 'telegram',
     label: 'Telegram',
+    icon: SiTelegram,
     description: 'Send messages, receive commands, and interact via a Telegram bot.',
     credentialProvider: 'telegram',
     credentialPlaceholder: 'bot123456:ABC-DEF...',
@@ -50,6 +61,7 @@ const INTEGRATIONS: Integration[] = [
   {
     id: 'google',
     label: 'Google Workspace',
+    icon: SiGoogle,
     description: 'Access Gmail, Google Docs, Sheets, Drive, and Calendar.',
     credentialProvider: 'google',
     credentialPlaceholder: 'Connects via OAuth',
@@ -69,6 +81,7 @@ const INTEGRATIONS: Integration[] = [
   {
     id: 'github',
     label: 'GitHub',
+    icon: SiGithub,
     description: 'Read repos, create issues, open pull requests, and manage code.',
     credentialProvider: 'github',
     credentialPlaceholder: 'ghp_...',
@@ -86,6 +99,7 @@ const INTEGRATIONS: Integration[] = [
   {
     id: 'slack',
     label: 'Slack',
+    icon: SiSlack,
     description: 'Send messages and interact with Slack workspaces.',
     credentialProvider: 'slack',
     credentialPlaceholder: 'xoxb-...',
@@ -103,6 +117,7 @@ const INTEGRATIONS: Integration[] = [
   {
     id: 'notion',
     label: 'Notion',
+    icon: SiNotion,
     description: 'Read and write Notion pages and databases.',
     credentialProvider: 'notion',
     credentialPlaceholder: 'ntn_...',
@@ -121,6 +136,7 @@ const INTEGRATIONS: Integration[] = [
   {
     id: 'brave',
     label: 'Brave Search',
+    icon: SiBrave,
     description: 'Give agents the ability to search the web.',
     credentialProvider: 'brave',
     credentialPlaceholder: 'BSA...',
@@ -178,7 +194,7 @@ function ConnectSection(props: ConnectSectionProps) {
     return (
       <button
         onClick={() => onOAuth(integration.oauthProvider as string)}
-        className="w-full py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors"
+        className="w-full py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim text-white rounded-lg transition-colors"
       >
         Connect {integration.label} via OAuth
       </button>
@@ -197,7 +213,7 @@ function ConnectSection(props: ConnectSectionProps) {
       <button
         onClick={() => onConnect(integration)}
         disabled={!tokenInputs[integration.id]?.trim() || saving === integration.id}
-        className="px-4 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+        className="px-4 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
       >
         {saving === integration.id ? 'Saving...' : 'Connect'}
       </button>
@@ -367,7 +383,7 @@ export function IntegrationsPage() {
             </div>
             <button
               onClick={() => mcp.setShowAddForm(!mcp.showAddForm)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim text-white rounded-lg transition-colors"
             >
               <Plus size={12} />
               Add MCP Server
@@ -427,7 +443,7 @@ export function IntegrationsPage() {
       <button
         onClick={mcp.addServer}
         disabled={mcp.saving || !mcp.name.trim() || !mcp.installCommand.trim()}
-        className="flex-1 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+        className="flex-1 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
       >
         {mcp.saving ? 'Connecting...' : 'Connect'}
       </button>
@@ -470,6 +486,7 @@ export function IntegrationsPage() {
           const connected = isConnected(integration);
           const testResult = testResults[integration.id];
           const isExpanded = expanded === integration.id;
+          const Icon = integration.icon ?? Plug;
 
           return (
             <div
@@ -483,6 +500,7 @@ export function IntegrationsPage() {
               <div className="flex items-center gap-3 p-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
+                    <Icon size={20} className="text-brain-text flex-shrink-0" />
                     <p className="text-sm font-medium text-brain-text">{integration.label}</p>
                     {connected ? (
                       <span className="flex items-center gap-1 text-xs text-brain-success">

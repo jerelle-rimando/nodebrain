@@ -71,13 +71,61 @@ const DEFAULT_MODELS: Record<string, string> = {
   custom: 'gpt-4o-mini',
 };
 
-// Prices in USD per million tokens { input, output }
+// Prices are local estimates used only for cost display — not real billing data.
+// Any model not in this table will show $0.00 cost even though token counts remain accurate.
+// Prices in USD per million tokens { input, output }.
+export const PRICING_LAST_VERIFIED = '2026-05-20';
+
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4o-mini':              { input: 0.15, output: 0.60  },
-  'gpt-4o':                   { input: 2.50, output: 10.00 },
-  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
-  'llama-3.3-70b-versatile':  { input: 0.59, output: 0.79  },
-  'gemini-2.0-flash':         { input: 0.10, output: 0.40  },
+  // ── OpenAI ────────────────────────────────────────────────────────────────
+  'gpt-4o-mini':   { input:  0.15,  output:  0.60 }, // verified: multiple sources May 2026
+  'gpt-4o':        { input:  2.50,  output: 10.00 }, // verified: multiple sources May 2026
+  'gpt-4-turbo':   { input: 10.00,  output: 30.00 }, // helicone.ai + lmmarketcap.com (official page 403; pricepertoken.com shows $5/$15)
+  'gpt-4':         { input: 30.00,  output: 60.00 }, // verified: multiple sources
+  'gpt-3.5-turbo': { input:  0.50,  output:  1.50 }, // gpt-3.5-turbo-0125 pricing; official page blocked
+  'o1':            { input: 15.00,  output: 60.00 }, // verified: multiple sources May 2026
+  'o1-mini':       { input:  1.10,  output:  4.40 }, // helicone.ai May 2026
+  'o3-mini':       { input:  1.10,  output:  4.40 }, // verified: multiple sources May 2026
+
+  // ── Anthropic ─────────────────────────────────────────────────────────────
+  'claude-opus-4-20250514':     { input: 15.00, output: 75.00 }, // official docs (deprecated Jun 2026)
+  'claude-sonnet-4-20250514':   { input:  3.00, output: 15.00 }, // official docs (deprecated Jun 2026)
+  'claude-3-5-sonnet-20241022': { input:  3.00, output: 15.00 }, // retired; not on current pricing page
+  'claude-3-5-haiku-20241022':  { input:  0.80, output:  4.00 }, // official docs (retired; Bedrock/Vertex only)
+  'claude-3-opus-20240229':     { input: 15.00, output: 75.00 }, // retired; not on current pricing page
+  'claude-3-sonnet-20240229':   { input:  3.00, output: 15.00 }, // retired; not on current pricing page
+  'claude-3-haiku-20240307':    { input:  0.25, output:  1.25 }, // retired; not on current pricing page
+
+  // ── Groq ──────────────────────────────────────────────────────────────────
+  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 }, // official groq.com/pricing
+  'llama-3.1-70b-versatile': { input: 0.59, output: 0.79 }, // deprecated on Groq; last known price
+  'llama-3.1-8b-instant':    { input: 0.05, output: 0.08 }, // official groq.com/pricing
+  'mixtral-8x7b-32768':      { input: 0.24, output: 0.24 }, // deprecated on Groq; last known price
+  'gemma2-9b-it':            { input: 0.20, output: 0.20 }, // helicone.ai (Groq)
+
+  // ── Gemini (Google AI) ────────────────────────────────────────────────────
+  'gemini-2.0-flash':    { input: 0.10,   output: 0.40  }, // official ai.google.dev/pricing (deprecated Jun 2026)
+  'gemini-1.5-flash':    { input: 0.075,  output: 0.30  }, // retired from Google AI pricing page; last known price
+  'gemini-1.5-flash-8b': { input: 0.0375, output: 0.15  }, // retired from Google AI pricing page; last known price
+  'gemini-1.5-pro':      { input: 1.25,   output: 5.00  }, // retired from Google AI pricing page; last known price
+
+  // ── Mistral ───────────────────────────────────────────────────────────────
+  'mistral-small-latest':  { input: 0.10, output: 0.30 }, // aicostcheck.com (Mistral Small 3.2)
+  'mistral-medium-latest': { input: 1.50, output: 7.50 }, // aicostcheck.com (Mistral Medium 3.5)
+  'mistral-large-latest':  { input: 0.50, output: 1.50 }, // aicostcheck.com (Mistral Large 3)
+  'codestral-latest':      { input: 0.30, output: 0.90 }, // verified: multiple sources
+
+  // ── Together AI ───────────────────────────────────────────────────────────
+  'meta-llama/Llama-3-70b-chat-hf':                { input: 0.88, output: 0.88 }, // together.ai
+  'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo':  { input: 0.88, output: 0.88 }, // together.ai
+  'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo': { input: 3.50, output: 3.50 }, // aipricing.guru May 2026
+  'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo':   { input: 0.18, output: 0.18 }, // together.ai
+
+  // ── Fireworks ─────────────────────────────────────────────────────────────
+  'accounts/fireworks/models/llama-v3-70b-instruct':    { input: 0.90, output: 0.90 }, // docs.fireworks.ai (>16B tier)
+  'accounts/fireworks/models/llama-v3p1-70b-instruct':  { input: 0.90, output: 0.90 }, // docs.fireworks.ai (>16B tier)
+  'accounts/fireworks/models/llama-v3p1-405b-instruct': { input: 3.00, output: 3.00 }, // aipricing.guru May 2026
+  'accounts/fireworks/models/llama-v3p1-8b-instruct':   { input: 0.20, output: 0.20 }, // docs.fireworks.ai (4B–16B tier)
 };
 
 const FREE_PROVIDERS = new Set(['ollama', 'custom']);

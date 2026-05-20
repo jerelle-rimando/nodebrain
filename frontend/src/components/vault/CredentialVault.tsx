@@ -101,7 +101,7 @@ export function CredentialVault() {
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-3 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim text-white rounded-lg transition-colors"
           >
             <Plus size={13} />
             Add Credential
@@ -186,7 +186,7 @@ export function CredentialVault() {
               <button
                 onClick={handleCreate}
                 disabled={!name.trim() || !value.trim() || submitting}
-                className="flex-1 py-2 text-sm bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+                className="flex-1 py-2 text-sm bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
               >
                 {submitting ? 'Encrypting...' : 'Save Credential'}
               </button>

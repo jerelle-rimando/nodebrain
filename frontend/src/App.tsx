@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3 } from 'lucide-react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -85,7 +85,7 @@ export default function App() {
       <aside className="w-14 flex flex-col items-center py-4 gap-2 border-r border-brain-border bg-brain-surface flex-shrink-0">
         {/* Logo */}
         <div className="w-8 h-8 rounded-lg bg-brain-accent flex items-center justify-center mb-3">
-          <span className="text-white text-xs font-bold">JR</span>
+          <User size={16} className="text-white" />
         </div>
 
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => (

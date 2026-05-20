@@ -6,6 +6,7 @@ import {
   getCostByAgent,
   getTasksPerDay,
 } from '../db/usageRepository';
+import { PRICING_LAST_VERIFIED } from '../agents/agentEngine';
 
 const router = Router();
 
@@ -85,6 +86,7 @@ router.get('/', (_req, res) => {
         costByAgent,
         tasksPerDay,
         topExpensiveTasks,
+        pricingLastVerified: PRICING_LAST_VERIFIED,
       },
     });
   } catch (err) {

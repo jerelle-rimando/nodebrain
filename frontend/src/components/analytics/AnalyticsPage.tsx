@@ -210,8 +210,16 @@ export function AnalyticsPage() {
     display: fmtCost(a.totalCostUsd),
   }));
 
+  const pricingDate = new Date(data.pricingLastVerified + 'T00:00:00').toLocaleDateString('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric',
+  });
+
   return (
     <div className="h-full overflow-y-auto p-5 space-y-4">
+
+      <p className="text-xs text-brain-text-dim">
+        Costs are local estimates based on token counts × pricing table. Prices last verified {pricingDate}.
+      </p>
 
       {/* ── Stat Cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">

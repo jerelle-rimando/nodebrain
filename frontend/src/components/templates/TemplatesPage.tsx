@@ -262,7 +262,7 @@ function CreateTemplateModal({ agents, onClose, onSave }: CreateModalProps) {
           <button
             onClick={handleGenerate}
             disabled={!name.trim() || selectedIds.size === 0 || generating}
-            className="w-full flex items-center justify-center gap-2 py-2 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
           >
             {generating ? (
               <><Loader2 size={11} className="animate-spin" /> Generating…</>
@@ -321,7 +321,7 @@ function FeaturedTemplateCard({ template, onInstall, installing, installed }: Fe
         <button
           onClick={() => onInstall(template)}
           disabled={installing || installed}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-60 text-white rounded-lg transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-60 text-white rounded-lg transition-colors"
         >
           {installing ? <><Loader2 size={11} className="animate-spin" />Installing…</> :
            installed  ? <><CheckCircle size={11} />Installed</> :
@@ -395,7 +395,7 @@ function TemplateCard({ template, onInstall, onDelete, installed }: TemplateCard
         <button
           onClick={() => onInstall(template)}
           disabled={installed}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-60 text-white rounded-lg transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-60 text-white rounded-lg transition-colors"
         >
           {installed ? <><CheckCircle size={11} />Installed</> : <><Plus size={11} />Install</>}
         </button>

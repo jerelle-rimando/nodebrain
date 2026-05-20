@@ -109,5 +109,6 @@ export const api = {
         agentId: string | null;
         model: string | null;
       }[];
+      pricingLastVerified: string;
     }>('/analytics'),
 };
