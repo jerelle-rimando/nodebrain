@@ -66,7 +66,7 @@ const GOALS: Goal[] = [
   {
     id: 'build-own',
     title: 'Build Your Own',
-    description: 'Describe what you need and we'll configure the agents for you.',
+    description: "Describe what you need and we'll configure the agents for you.",
     icon: Bot,
     iconColor: 'text-brain-accent',
     iconBg: 'bg-brain-accent/10 group-hover:bg-brain-accent/20',
