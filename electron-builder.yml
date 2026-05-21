@@ -38,7 +38,6 @@ extraResources:
 win:
   icon: electron/assets/icon.ico
   sign: false
-  signAndEditExecutable: false
   target:
     - target: nsis
       arch: x64

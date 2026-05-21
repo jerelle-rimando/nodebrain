@@ -222,6 +222,12 @@ function serveStaticFrontend(): Promise<void> {
       }
       
       if (!fs.existsSync(filePath)) {
+        const requestedExt = path.extname(decodedUrl);
+        if (requestedExt) {
+          res.writeHead(404);
+          res.end('Not found');
+          return;
+        }
         filePath = path.join(frontendPath, 'index.html');
       }
       const ext = path.extname(filePath);
