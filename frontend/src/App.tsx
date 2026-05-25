@@ -115,9 +115,8 @@ export default function App() {
           <span className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider">
             {NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
-          <div className="ml-auto flex items-center gap-2 text-xs text-brain-text-dim font-mono">
-             <img src="/newnodebrainlogodashboard.png" alt="" className="w-7 h-7 object-contain" />
-            <span>NodeBrain v0.1.0</span>
+          <div className="ml-auto text-xs text-brain-text-dim font-mono">
+            v0.3.0
           </div>
         </header>
 

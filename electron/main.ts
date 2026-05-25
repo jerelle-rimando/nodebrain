@@ -206,8 +206,8 @@ function serveStaticFrontend(): Promise<void> {
       
       let filePath: string;
       
-      // Reject path traversal attempts, null bytes, absolute paths
-      if (decodedUrl.includes('..') || decodedUrl.includes('\0') || path.isAbsolute(decodedUrl)) {
+      // Reject path traversal attempts and null bytes
+      if (decodedUrl.includes('..') || decodedUrl.includes('\0')) {
         filePath = path.join(frontendPath, 'index.html');
       } else {
         const resolvedFrontend = path.resolve(frontendPath);
@@ -224,7 +224,7 @@ function serveStaticFrontend(): Promise<void> {
       if (!fs.existsSync(filePath)) {
         const requestedExt = path.extname(decodedUrl);
         if (requestedExt) {
-          res.writeHead(404);
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('Not found');
           return;
         }
@@ -242,7 +242,7 @@ function serveStaticFrontend(): Promise<void> {
       };
       const contentType = mimeTypes[ext] ?? 'application/octet-stream';
       fs.readFile(filePath, (err, data) => {
-        if (err) { res.writeHead(404); res.end('Not found'); return; }
+        if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
         res.writeHead(200, { 'Content-Type': contentType });
         res.end(data);
       });
