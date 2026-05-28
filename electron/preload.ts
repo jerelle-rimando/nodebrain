@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowClose: () => ipcRenderer.invoke('window-close'),
   isOnboardingComplete: () => ipcRenderer.invoke('is_onboarding_complete'),
   completeOnboarding: () => ipcRenderer.invoke('complete_onboarding'),
+  getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
+  setBackendUrl: (url: string) => ipcRenderer.invoke('set-backend-url', url),
 });

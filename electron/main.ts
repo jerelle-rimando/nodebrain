@@ -11,6 +11,7 @@ interface StoreSchema {
   setupComplete: boolean;
   vaultSecret: string;
   onboardingComplete: boolean;
+  backendUrl?: string;
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -175,12 +176,25 @@ function serveStaticFrontend(): Promise<void> {
     log(`Serving frontend from: ${frontendPath}`);
     log(`Frontend dist exists: ${fs.existsSync(frontendPath)}`);
 
+    const rawBackendUrl = (store.get('backendUrl') as string | undefined) || 'http://localhost:3001';
+    let backendHost: string;
+    let backendProxyPort: number;
+    try {
+      const parsed = new URL(rawBackendUrl);
+      backendHost = parsed.hostname || '127.0.0.1';
+      backendProxyPort = parseInt(parsed.port, 10) || BACKEND_PORT;
+    } catch {
+      backendHost = '127.0.0.1';
+      backendProxyPort = BACKEND_PORT;
+    }
+    log(`Proxy target: ${backendHost}:${backendProxyPort}`);
+
     const server = http.createServer((req, res) => {
       if (req.url?.startsWith('/api')) {
         const proxyReq = http.request(
           {
-            hostname: '127.0.0.1',
-            port: BACKEND_PORT,
+            hostname: backendHost,
+            port: backendProxyPort,
             path: req.url,
             method: req.method,
             headers: req.headers,
@@ -483,6 +497,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('complete_onboarding', () => {
     store.set('onboardingComplete', true);
+  });
+
+  ipcMain.handle('get-backend-url', () => {
+    return (store.get('backendUrl') as string | undefined) || 'http://localhost:3001';
+  });
+
+  ipcMain.handle('set-backend-url', (_event: Electron.IpcMainInvokeEvent, url: string) => {
+    store.set('backendUrl', url || 'http://localhost:3001');
   });
 
   ipcMain.handle('load-main-app', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User } from 'lucide-react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Server } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -9,6 +9,7 @@ import { useLiveSync } from './hooks/useLiveSync';
 import { api } from './utils/api';
 import { IntegrationsPage } from './components/integrations/IntegrationsPage';
 import { AnalyticsPage } from './components/analytics/AnalyticsPage';
+import { ServersPage } from './components/servers/ServersPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
 export default function App() {
   const { activeTab, setActiveTab, agents, setAgents, setCredentials, setTasks, setLogs } = useStore();
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [showServers, setShowServers] = useState(false);
   const [agentsLoaded, setAgentsLoaded] = useState(false);
   useLiveSync();
 
@@ -91,10 +93,10 @@ export default function App() {
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => { setShowServers(false); setActiveTab(id); }}
             title={label}
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-              activeTab === id
+              !showServers && activeTab === id
                 ? 'bg-brain-accent/20 border border-brain-accent/30 text-brain-accent'
                 : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border'
             }`}
@@ -102,6 +104,18 @@ export default function App() {
             <Icon size={18} />
           </button>
         ))}
+
+        <button
+          onClick={() => setShowServers(true)}
+          title="Servers"
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+            showServers
+              ? 'bg-brain-accent/20 border border-brain-accent/30 text-brain-accent'
+              : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border'
+          }`}
+        >
+          <Server size={18} />
+        </button>
 
         <div className="mt-auto">
           <StatusDot />
@@ -113,26 +127,27 @@ export default function App() {
         {/* Top bar */}
         <header className="h-10 flex items-center px-4 border-b border-brain-border bg-brain-surface flex-shrink-0">
           <span className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider">
-            {NAV_ITEMS.find((n) => n.id === activeTab)?.label}
+            {showServers ? 'Servers' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
           <div className="ml-auto text-xs text-brain-text-dim font-mono">
-            v0.3.0
+            v0.3.1
           </div>
         </header>
 
         {/* Content + Logs */}
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 overflow-hidden">
-            {activeTab === 'dashboard' && <Dashboard />}
-            {activeTab === 'graph' && <NodeGraph />}
-            {activeTab === 'templates' && <TemplatesPage />}
-            {activeTab === 'vault' && <CredentialVault />}
-            {activeTab === 'integrations' && <IntegrationsPage />}
-            {activeTab === 'analytics' && <AnalyticsPage />}
+            {showServers && <ServersPage />}
+            {!showServers && activeTab === 'dashboard' && <Dashboard />}
+            {!showServers && activeTab === 'graph' && <NodeGraph />}
+            {!showServers && activeTab === 'templates' && <TemplatesPage />}
+            {!showServers && activeTab === 'vault' && <CredentialVault />}
+            {!showServers && activeTab === 'integrations' && <IntegrationsPage />}
+            {!showServers && activeTab === 'analytics' && <AnalyticsPage />}
           </main>
 
           {/* Logs panel only in dashboard */}
-          {activeTab === 'dashboard' && (
+          {!showServers && activeTab === 'dashboard' && (
             <div className="w-80 flex-shrink-0 border-l border-brain-border p-3 overflow-hidden">
               <LogsPanel />
             </div>
