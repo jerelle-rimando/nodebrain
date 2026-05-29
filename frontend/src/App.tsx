@@ -130,7 +130,7 @@ export default function App() {
             {showServers ? 'Servers' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
           <div className="ml-auto text-xs text-brain-text-dim font-mono">
-            v0.3.1
+            v0.3.2
           </div>
         </header>
 

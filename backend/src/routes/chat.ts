@@ -105,7 +105,7 @@ router.post('/message', async (req, res) => {
           name: cfg.name!,
           description: (cfg.description ?? '').slice(0, 80),
           provider: detectedProvider as ModelProvider,
-          model: cfg.model ?? 'gpt-4o-mini',
+          model: cfg.model ?? (detectedProvider === 'ollama' ? 'llama3.2' : 'gpt-4o-mini'),
           systemPrompt: cfg.systemPrompt ?? 'You are a helpful AI assistant.',
           schedule: cfg.schedule
             ? (parseNaturalSchedule(cfg.schedule).cron ?? cfg.schedule)
@@ -180,10 +180,10 @@ router.post('/message', async (req, res) => {
 
       for (const p of providerPriority) {
         const key = getCredentialForProvider(p);
-        if (key) { apiKey = key; chosenProvider = p; break; }
+        if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
       }
 
-      if (!apiKey) {
+      if (!apiKey && chosenProvider !== 'ollama') {
         assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
       } else {
         const baseURLs: Record<string, string> = {
@@ -205,7 +205,7 @@ router.post('/message', async (req, res) => {
 
         const { default: OpenAI } = await import('openai');
         const client = new OpenAI({
-          apiKey,
+          apiKey: apiKey || 'ollama',
           baseURL: baseURLs[chosenProvider] ?? baseURLs.openai,
         });
 
