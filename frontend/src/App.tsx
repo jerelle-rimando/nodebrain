@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Server } from 'lucide-react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -114,7 +114,7 @@ export default function App() {
               : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border'
           }`}
         >
-          <Server size={18} />
+          <Cloud size={18} />
         </button>
 
         <div className="mt-auto">
@@ -130,7 +130,7 @@ export default function App() {
             {showServers ? 'Servers' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
           <div className="ml-auto text-xs text-brain-text-dim font-mono">
-            v0.3.2
+            v0.3.3
           </div>
         </header>
 
