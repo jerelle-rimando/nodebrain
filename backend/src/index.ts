@@ -23,6 +23,7 @@ import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
 
 const PORT = process.env.PORT ?? 3001;
+const BIND_HOST = process.env.NODEBRAIN_BIND_HOST ?? '127.0.0.1';
 const app = express();
 
 app.use(cors({
@@ -98,8 +99,8 @@ async function main() {
     startScheduler();
     console.log('✅ Scheduler ready');
 
-    app.listen(PORT, () => {
-      console.log(`\n🧠 NodeBrain backend running at http://localhost:${PORT}`);
+    app.listen(PORT, BIND_HOST, () => {
+      console.log(`\n🧠 NodeBrain backend running at http://${BIND_HOST}:${PORT}`);
       console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
       console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
     });
