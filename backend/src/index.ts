@@ -22,7 +22,7 @@ import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
 
-const PORT = process.env.PORT ?? 3001;
+const PORT = Number(process.env.PORT) || 3001;
 const BIND_HOST = process.env.NODEBRAIN_BIND_HOST ?? '127.0.0.1';
 const app = express();
 
