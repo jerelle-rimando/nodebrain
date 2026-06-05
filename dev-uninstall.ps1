@@ -30,11 +30,11 @@ if ($netstatLine) {
             Write-Host "  Stopping NodeBrain backend (node.exe PID $backendPid, port 3001)..." -ForegroundColor Yellow
             Stop-Process -Id ([int]$backendPid) -Force
         } elseif ($proc) {
-            Write-Warning "  Port 3001 is held by '$($proc.Name)' (PID $backendPid) — not node.exe, skipping."
+            Write-Warning "  Port 3001 is held by '$($proc.Name)' (PID $backendPid) -- not node.exe, skipping."
         }
     }
 } else {
-    Write-Host "  NodeBrain backend (port 3001) not running — skipping." -ForegroundColor Cyan
+    Write-Host "  NodeBrain backend (port 3001) not running -- skipping." -ForegroundColor Cyan
 }
 
 # --- Remove vault secret from Windows Credential Manager (keytar service "NodeBrain", account "vault-secret") ---
