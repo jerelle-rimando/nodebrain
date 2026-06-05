@@ -171,19 +171,41 @@ function isReadOnlyTool(toolName: string): boolean {
 }
 
 const DESTRUCTIVE_TOOLS = new Set([
-  'gmail__send_email',
-  'telegram__send_message',
-  'slack__send_message',
+  // telegram (@iqai/mcp-telegram) — tools/send-message.js, forward-message.js, pin-message.js
+  'telegram__SEND_MESSAGE',
+  'telegram__FORWARD_MESSAGE',
+  'telegram__PIN_MESSAGE',
+  // slack (@modelcontextprotocol/server-slack) — dist/index.js
+  'slack__slack_post_message',
+  'slack__slack_reply_to_thread',
+  'slack__slack_add_reaction',
+  // github (@modelcontextprotocol/server-github) — dist/index.js
+  'github__create_or_update_file',
+  'github__create_repository',
+  'github__push_files',
   'github__create_issue',
   'github__create_pull_request',
+  'github__fork_repository',
+  'github__create_branch',
+  'github__update_issue',
+  'github__add_issue_comment',
+  'github__create_pull_request_review',
+  'github__merge_pull_request',
+  'github__update_pull_request_branch',
+  // filesystem (@modelcontextprotocol/server-filesystem) — dist/index.js
   'filesystem__write_file',
-  'filesystem__delete_file',
-  'notion__create_page',
-  'notion__update_page',
-  'google_drive__upload_file',
-  'google_docs__create_document',
-  'google_sheets__update_values',
-  'google_calendar__create_event',
+  'filesystem__edit_file',
+  'filesystem__create_directory',
+  'filesystem__move_file',
+  // notion (@notionhq/notion-mcp-server) — tools derive names from OpenAPI operationIds
+  // proxy.ts builds names as `API-{operationId}`; confirmed from scripts/notion-openapi.json
+  'notion__API-post-page',
+  'notion__API-patch-page',
+  'notion__API-create-a-comment',
+  'notion__API-delete-a-block',
+  'notion__API-update-a-block',
+  'notion__API-patch-block-children',
+  'notion__API-move-page',
 ]);
 
 function getClient(provider: string, apiKey: string): OpenAI {
@@ -514,7 +536,10 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       ? `\n\nRelevant context:\n${relevantContext.join('\n---\n')}`
       : '';
 
-    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext;
+    const telegramHint = agent.config.telegramChatId
+      ? `\n\nWhen sending Telegram messages, use chat ID ${agent.config.telegramChatId} unless explicitly told otherwise.`
+      : '';
+    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext + telegramHint;
 
     let output = '';
 

@@ -265,6 +265,25 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
                 />
               </button>
             </div>
+            <div className="flex flex-col gap-1 pt-1 border-t border-brain-border">
+              <span className="text-brain-text-dim text-xs">Telegram chat ID</span>
+              <input
+                type="text"
+                defaultValue={agent.config.telegramChatId ?? ''}
+                placeholder="e.g. 8769725315"
+                onBlur={async (e) => {
+                  const val = e.target.value.trim() || undefined;
+                  try {
+                    await api.updateAgent(agent.id, {
+                      config: { ...agent.config, telegramChatId: val },
+                    });
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className="w-full bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+              />
+            </div>
           </div>
           {agent.description && (
             <p className="text-xs text-brain-text-dim leading-relaxed">{agent.description}</p>

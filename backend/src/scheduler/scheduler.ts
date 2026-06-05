@@ -51,7 +51,7 @@ export function scheduleAgent(agent: Agent): void {
 
   const task = cron.schedule(agent.schedule, async () => {
     console.log(`[Scheduler] Running scheduled task for agent "${agent.name}"`);
-    await executeAgentTask(agent, `Scheduled execution: ${agent.description}`);
+    await executeAgentTask(agent, agent.systemPrompt);
   });
 
   scheduledJobs.set(agent.id, { agentId: agent.id, task });

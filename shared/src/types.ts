@@ -27,6 +27,7 @@ export interface AgentConfig {
   approvalMode?: boolean;
   approvedToolTypes?: string[];
   dryRun?: boolean;
+  telegramChatId?: string;
 }
 
 export interface Task {

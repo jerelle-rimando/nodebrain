@@ -60,17 +60,6 @@ export default function App() {
       .catch(console.error)
       .finally(() => setAgentsLoaded(true));
 
-    const params = new URLSearchParams(window.location.search);
-    const authStatus = params.get('auth');
-    const provider = params.get('provider');
-    if (authStatus === 'success' && provider) {
-      toast.success('Google Workspace connected successfully');
-      window.history.replaceState({}, '', '/');
-      setActiveTab('integrations');
-    } else if (authStatus === 'error' && provider) {
-      toast.error('Google connection failed. Check your .env and try again.');
-      window.history.replaceState({}, '', '/');
-    }
   }, [setAgents, setCredentials, setTasks, setLogs, setActiveTab]);
 
   if (onboardingComplete === null || !agentsLoaded) return null;
@@ -130,7 +119,7 @@ export default function App() {
             {showServers ? 'Servers' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
           <div className="ml-auto text-xs text-brain-text-dim font-mono">
-            v0.3.4
+            v0.3.5
           </div>
         </header>
 

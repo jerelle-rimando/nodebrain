@@ -1,4 +1,4 @@
-import { connectToServer, getAllAvailableTools, disconnectAll, type MCPServer, type MCPToolWithServer } from './mcpClient';
+import { connectToServer, getAllAvailableTools, disconnectAll, getConnectedServers, getConnectionError, type MCPServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { getAllCustomMCPServers } from '../db/mcpServerRepository';
@@ -19,27 +19,8 @@ const SERVER_CONFIGS: ServerConfig[] = [
       name: 'telegram',
       command: 'npx',
       args: ['-y', '@iqai/mcp-telegram'],
-      env: { TELEGRAM_BOT_TOKEN: token },
+      env: { TELEGRAM_BOT_TOKEN: token, SAMPLING_ENABLED: '' },
     }),
-  },
-  {
-    name: 'google',
-    credentialProvider: 'google',
-    buildServer: (tokenJson) => {
-      let accessToken = tokenJson;
-      try {
-        const parsed = JSON.parse(tokenJson) as { access_token?: string };
-        accessToken = parsed.access_token ?? tokenJson;
-      } catch {
-        // use raw value if not JSON
-      }
-      return {
-        name: 'google',
-        command: 'gws',
-        args: ['mcp'],
-        env: { GOOGLE_OAUTH_TOKEN: accessToken },
-      };
-    },
   },
   {
     name: 'github',
@@ -98,19 +79,31 @@ const SERVER_CONFIGS: ServerConfig[] = [
   },
 ];
 
+type DiagEntry = { name: string; status: 'connected' | 'failed' | 'skipped'; detail: string };
+
 export async function initializeToolRegistry(): Promise<void> {
   console.log('[ToolRegistry] Checking available integrations...');
+
+  const diag: DiagEntry[] = [];
 
   for (const config of SERVER_CONFIGS) {
     const credential = getCredentialForProvider(config.credentialProvider);
 
-    if (!credential && config.credentialProvider !== 'google') {
+    if (!credential) {
       console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
+      diag.push({ name: config.name, status: 'skipped', detail: 'no credential in vault' });
       continue;
     }
 
     const server = config.buildServer(credential ?? '');
     await connectToServer(server);
+
+    if (getConnectedServers().includes(config.name)) {
+      diag.push({ name: config.name, status: 'connected', detail: '' }); // tool count filled below
+    } else {
+      const reason = getConnectionError(config.name) ?? 'unknown error';
+      diag.push({ name: config.name, status: 'failed', detail: reason });
+    }
   }
 
   // Load custom MCP servers from DB
@@ -129,6 +122,29 @@ export async function initializeToolRegistry(): Promise<void> {
   }
 
   const tools = await getAllAvailableTools();
+
+  // Fill in tool counts for connected entries
+  const countByServer = new Map<string, number>();
+  for (const t of tools) {
+    countByServer.set(t.serverName, (countByServer.get(t.serverName) ?? 0) + 1);
+  }
+  for (const entry of diag) {
+    if (entry.status === 'connected') {
+      const n = countByServer.get(entry.name) ?? 0;
+      entry.detail = `${n} tool${n !== 1 ? 's' : ''}`;
+    }
+  }
+
+  // Boot diagnostic table
+  const nameW = Math.max(...diag.map(d => d.name.length), 4);
+  const divider = '─'.repeat(nameW + 36);
+  console.log(`\n[MCP] ${divider}`);
+  for (const { name, status, detail } of diag) {
+    const tag = status === 'connected' ? 'CONNECTED' : status === 'failed' ? 'FAILED   ' : 'SKIPPED  ';
+    console.log(`[MCP]   ${name.padEnd(nameW)}  ${tag}  ${detail}`);
+  }
+  console.log(`[MCP] ${divider}\n`);
+
   console.log(`[ToolRegistry] Ready — ${tools.length} tools available`);
 }
 

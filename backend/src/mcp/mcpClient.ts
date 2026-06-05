@@ -30,6 +30,11 @@ interface ActiveConnection {
 }
 
 const activeConnections = new Map<string, ActiveConnection>();
+const connectionErrors = new Map<string, string>();
+
+export function getConnectionError(name: string): string | undefined {
+  return connectionErrors.get(name);
+}
 
 export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
   try {
@@ -61,6 +66,8 @@ export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
 
     return tools;
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    connectionErrors.set(server.name, msg);
     console.error(`[MCP] Failed to connect to "${server.name}":`, err);
     return [];
   }
@@ -89,6 +96,8 @@ export async function connectToSSEServer(server: MCPSSEServer): Promise<MCPTool[
 
     return tools;
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    connectionErrors.set(server.name, msg);
     console.error(`[MCP] Failed to connect to SSE server "${server.name}":`, err);
     return [];
   }

@@ -16,7 +16,11 @@ export function encryptValue(plaintext: string): string {
 }
 
 export function decryptValue(ciphertext: string): string {
-  return CryptoJS.AES.decrypt(ciphertext, getEncryptionKey()).toString(CryptoJS.enc.Utf8);
+  const plaintext = CryptoJS.AES.decrypt(ciphertext, getEncryptionKey()).toString(CryptoJS.enc.Utf8);
+  if (!plaintext) {
+    throw new Error('Failed to decrypt credential — VAULT_SECRET may have changed.');
+  }
+  return plaintext;
 }
 
 interface CredentialRow {

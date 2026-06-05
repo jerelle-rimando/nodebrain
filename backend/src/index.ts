@@ -16,7 +16,6 @@ import credentialRouter from './routes/credentials';
 import chatRouter from './routes/chat';
 import eventsRouter from './routes/events';
 import integrationsRouter from './routes/integrations';
-import authRouter from './routes/auth';
 import { parseNaturalSchedule } from './utils/parseSchedule';
 import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
@@ -62,27 +61,35 @@ app.use('/api/credentials', credentialRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/events', eventsRouter);
 app.use('/api/integrations', limiter, integrationsRouter);
-app.use('/api/auth', limiter, authRouter);
 app.use('/api/mcp-servers', mcpServersRouter);
 app.use('/api/agent-connections', agentConnectionsRouter);
 app.use('/api/analytics', analyticsRouter);
 
 async function main() {
   try {
-    /**
-     * SAFE VAULT_SECRET HANDLING
-     * - No overwriting .env during runtime under PM2
-     * - Only generates in-memory if missing
-     * - Logs warning instead of mutating files
-     */
     if (!process.env.VAULT_SECRET) {
       const secret = crypto.randomBytes(32).toString('hex');
       process.env.VAULT_SECRET = secret;
 
-      console.warn(
-        '⚠️ VAULT_SECRET not found in .env. Using generated value in memory only. ' +
-        'Persist it manually in .env to avoid regeneration on restart.'
-      );
+      const envPath = path.resolve(process.cwd(), '.env');
+      let envContents = '';
+      try {
+        envContents = fs.readFileSync(envPath, 'utf8');
+      } catch {
+        // .env doesn't exist yet — appendFileSync will create it
+      }
+
+      if (/^VAULT_SECRET=/m.test(envContents)) {
+        // Line exists but dotenv didn't populate it (blank or invalid value)
+        console.warn(
+          '⚠️ VAULT_SECRET is defined in .env but was not loaded — check for a blank or invalid value. ' +
+          'Credentials encrypted in this session will not survive a restart until it is fixed.'
+        );
+      } else {
+        const line = envContents.length > 0 ? `\nVAULT_SECRET=${secret}\n` : `VAULT_SECRET=${secret}\n`;
+        fs.appendFileSync(envPath, line, 'utf8');
+        console.log(`✅ VAULT_SECRET generated and written to ${envPath}`);
+      }
     }
 
     // Verify pdfjs-dist loads correctly

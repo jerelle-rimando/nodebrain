@@ -97,7 +97,6 @@ const TAG_COLORS: Record<string, string> = {
 
 const INTEGRATION_COLORS: Record<string, string> = {
   Gmail: 'bg-red-500/10 text-red-400 border-red-500/30',
-  'Google Calendar': 'bg-blue-500/10 text-blue-400 border-blue-500/30',
   GitHub: 'bg-gray-500/10 text-gray-300 border-gray-500/30',
   Slack: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
   Filesystem: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
@@ -105,7 +104,7 @@ const INTEGRATION_COLORS: Record<string, string> = {
 };
 
 const REQUIRED_INTEGRATIONS: Record<string, string[]> = {
-  'Morning Briefing Team': ['Google Calendar', 'Gmail'],
+  'Morning Briefing Team': ['Gmail'],
   'GitHub PR Watcher': ['GitHub', 'Slack'],
   'File Manager Team': ['Filesystem'],
   'Daily Standup': ['Slack'],

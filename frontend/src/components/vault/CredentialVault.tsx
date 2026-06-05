@@ -13,7 +13,6 @@ const PROVIDERS = [
   { id: 'together', label: 'Together AI', placeholder: 'Enter key...' },
   { id: 'fireworks', label: 'Fireworks AI', placeholder: 'Enter key...' },
   { id: 'telegram', label: 'Telegram Bot', placeholder: 'bot123456:ABC...' },
-  { id: 'google', label: 'Google Workspace', placeholder: 'OAuth token' },
   { id: 'github', label: 'GitHub', placeholder: 'ghp_...' },
   { id: 'slack', label: 'Slack', placeholder: 'xoxb-...' },
   { id: 'notion', label: 'Notion', placeholder: 'secret_...' },

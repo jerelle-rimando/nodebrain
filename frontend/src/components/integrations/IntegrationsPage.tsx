@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import {
   SiTelegram,
-  SiGoogle,
   SiGithub,
   SiSlack,
   SiNotion,
@@ -32,7 +31,6 @@ interface Integration {
   description: string;
   credentialProvider: string;
   credentialPlaceholder: string;
-  oauthProvider?: string;
   isSecret?: boolean;
   tools: string[];
   setupSteps: string[];
@@ -57,26 +55,6 @@ const INTEGRATIONS: Integration[] = [
       'Paste it below and click Connect',
     ],
     docsUrl: 'https://core.telegram.org/bots',
-  },
-  {
-    id: 'google',
-    label: 'Google Workspace',
-    icon: SiGoogle,
-    description: 'Access Gmail, Google Docs, Sheets, Drive, and Calendar.',
-    credentialProvider: 'google',
-    credentialPlaceholder: 'Connects via OAuth',
-    isSecret: true,
-    oauthProvider: 'google',
-    tools: ['Read/send Gmail', 'Create/edit Docs', 'Read/write Sheets', 'List Drive files', 'Create Calendar events'],
-    setupSteps: [
-      'Create a Google Cloud project at console.cloud.google.com',
-      'Enable Gmail, Drive, Docs, Sheets, and Calendar APIs',
-      'Create OAuth credentials (Web application type)',
-      'Add redirect URI: http://localhost:3001/api/auth/google/callback',
-      'Copy Client ID and Secret into your .env file',
-      'Restart NodeBrain then click Connect Google below',
-    ],
-    docsUrl: 'https://workspace.google.com',
   },
   {
     id: 'github',
@@ -173,11 +151,10 @@ interface ConnectSectionProps {
   onTokenChange: (id: string, value: string) => void;
   onConnect: (integration: Integration) => void;
   onDisconnect: (integration: Integration) => void;
-  onOAuth: (provider: string) => void;
 }
 
 function ConnectSection(props: ConnectSectionProps) {
-  const { integration, connected, saving, tokenInputs, onTokenChange, onConnect, onDisconnect, onOAuth } = props;
+  const { integration, connected, saving, tokenInputs, onTokenChange, onConnect, onDisconnect } = props;
 
   if (connected) {
     return (
@@ -186,17 +163,6 @@ function ConnectSection(props: ConnectSectionProps) {
         className="w-full py-2 text-xs border border-brain-error/30 text-brain-error hover:bg-brain-error/10 rounded-lg transition-colors"
       >
         Disconnect {integration.label}
-      </button>
-    );
-  }
-
-  if (integration.oauthProvider) {
-    return (
-      <button
-        onClick={() => onOAuth(integration.oauthProvider as string)}
-        className="w-full py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim text-white rounded-lg transition-colors"
-      >
-        Connect {integration.label} via OAuth
       </button>
     );
   }
@@ -348,10 +314,6 @@ export function IntegrationsPage() {
           toast.error('Failed to disconnect. Try again.');
           console.error(err);
     }
-  }
-
-  function handleOAuth(provider: string) {
-    window.location.href = 'http://localhost:3001/api/auth/' + provider;
   }
 
   function handleTokenChange(id: string, value: string) {
@@ -559,7 +521,6 @@ export function IntegrationsPage() {
                   onTokenChange={handleTokenChange}
                   onConnect={handleConnect}
                   onDisconnect={handleDisconnect}
-                  onOAuth={handleOAuth}
                 />
               )}
             </div>

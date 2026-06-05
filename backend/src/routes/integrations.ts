@@ -128,25 +128,6 @@ router.get('/:provider/test', async (req, res) => {
       return;
     }
 
-    if (provider === 'google') {
-      const response = await fetch(
-        'https://www.googleapis.com/oauth2/v1/tokeninfo',
-        { headers: { Authorization: `Bearer ${credential}` } },
-      );
-      if (response.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: 'Google connection verified' },
-        });
-      } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'Invalid or expired Google token' },
-        });
-      }
-      return;
-    }
-
     // Unknown provider — just confirm credential exists
     res.json({
       success: true,

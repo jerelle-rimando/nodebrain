@@ -180,7 +180,7 @@ export function AnalyticsPage() {
 
   const agentName = (id: string | null) => {
     if (!id) return '—';
-    return agents.find(a => a.id === id)?.name ?? `${id.slice(0, 8)}…`;
+    return agents.find(a => a.id === id)?.name ?? 'Deleted agent';
   };
 
   if (loading) {
