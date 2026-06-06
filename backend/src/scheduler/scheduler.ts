@@ -10,6 +10,14 @@ interface ScheduledJob {
 
 const scheduledJobs = new Map<string, ScheduledJob>();
 
+// node-cron stores every task in global.scheduledTasks keyed by a UUID.
+// task.stop() only clears the setTimeout — it does not remove the entry.
+// Call this after stop() to fully deregister and allow GC.
+function deregisterFromCron(task: cron.ScheduledTask): void {
+  const name = (task as unknown as { options?: { name?: string } }).options?.name;
+  if (name) cron.getTasks().delete(name);
+}
+
 export function startScheduler(): void {
   console.log('[Scheduler] Starting agent scheduler...');
   refreshSchedules();
@@ -23,6 +31,7 @@ export function refreshSchedules(): void {
     const agent = agents.find(a => a.id === agentId);
     if (!agent || !agent.schedule) {
       job.task.stop();
+      deregisterFromCron(job.task);
       scheduledJobs.delete(agentId);
       console.log(`[Scheduler] Removed schedule for agent ${agentId}`);
     }
@@ -62,6 +71,7 @@ export function unscheduleAgent(agentId: string): void {
   const existing = scheduledJobs.get(agentId);
   if (existing) {
     existing.task.stop();
+    deregisterFromCron(existing.task);
     scheduledJobs.delete(agentId);
   }
 }

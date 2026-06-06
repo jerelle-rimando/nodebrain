@@ -27,6 +27,7 @@ export interface MCPToolWithServer extends MCPTool {
 interface ActiveConnection {
   client: Client;
   tools: MCPTool[];
+  fingerprint: string;
 }
 
 const activeConnections = new Map<string, ActiveConnection>();
@@ -36,7 +37,7 @@ export function getConnectionError(name: string): string | undefined {
   return connectionErrors.get(name);
 }
 
-export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
+export async function connectToServer(server: MCPServer, fingerprint = ''): Promise<MCPTool[]> {
   try {
     const transport = new StdioClientTransport({
       command: server.command,
@@ -61,7 +62,7 @@ export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
       inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
     }));
 
-    activeConnections.set(server.name, { client, tools });
+    activeConnections.set(server.name, { client, tools, fingerprint });
     console.log(`[MCP] Connected to "${server.name}" — ${tools.length} tools available`);
 
     return tools;
@@ -73,7 +74,7 @@ export async function connectToServer(server: MCPServer): Promise<MCPTool[]> {
   }
 }
 
-export async function connectToSSEServer(server: MCPSSEServer): Promise<MCPTool[]> {
+export async function connectToSSEServer(server: MCPSSEServer, fingerprint = ''): Promise<MCPTool[]> {
   try {
     const transport = new SSEClientTransport(new URL(server.url));
 
@@ -91,7 +92,7 @@ export async function connectToSSEServer(server: MCPSSEServer): Promise<MCPTool[
       inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
     }));
 
-    activeConnections.set(server.name, { client, tools });
+    activeConnections.set(server.name, { client, tools, fingerprint });
     console.log(`[MCP] Connected to SSE server "${server.name}" — ${tools.length} tools available`);
 
     return tools;
@@ -101,6 +102,18 @@ export async function connectToSSEServer(server: MCPSSEServer): Promise<MCPTool[
     console.error(`[MCP] Failed to connect to SSE server "${server.name}":`, err);
     return [];
   }
+}
+
+export async function disconnectServer(name: string): Promise<void> {
+  const conn = activeConnections.get(name);
+  if (!conn) return;
+  try { await conn.client.close(); } catch { /* ignore */ }
+  activeConnections.delete(name);
+  console.log(`[MCP] Disconnected from "${name}"`);
+}
+
+export function getCredentialFingerprint(name: string): string | undefined {
+  return activeConnections.get(name)?.fingerprint;
 }
 
 export async function callTool(
@@ -119,10 +132,16 @@ export async function callTool(
   });
 
   const content = result.content as Array<{ type: string; text?: string }>;
-  return content
+  const text = content
     .filter(c => c.type === 'text')
     .map(c => c.text ?? '')
     .join('\n');
+
+  if (result.isError) {
+    throw new Error(text || `Tool "${toolName}" on server "${serverName}" returned an error`);
+  }
+
+  return text;
 }
 
 export async function getAllAvailableTools(): Promise<MCPToolWithServer[]> {

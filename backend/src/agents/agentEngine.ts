@@ -62,11 +62,11 @@ const BASE_URLS: Record<string, string> = {
 const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   groq: 'llama-3.3-70b-versatile',
-  anthropic: 'claude-sonnet-4-20250514',
+  anthropic: 'claude-sonnet-4-6',
   gemini: 'gemini-2.0-flash',
   ollama: 'llama3.2',
   mistral: 'mistral-small-latest',
-  together: 'meta-llama/Llama-3-70b-chat-hf',
+  together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
   fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
   custom: 'gpt-4o-mini',
 };
@@ -74,7 +74,7 @@ const DEFAULT_MODELS: Record<string, string> = {
 // Prices are local estimates used only for cost display — not real billing data.
 // Any model not in this table will show $0.00 cost even though token counts remain accurate.
 // Prices in USD per million tokens { input, output }.
-export const PRICING_LAST_VERIFIED = '2026-05-20';
+export const PRICING_LAST_VERIFIED = '2026-06-05';
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // ── OpenAI ────────────────────────────────────────────────────────────────
@@ -88,10 +88,15 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'o3-mini':       { input:  1.10,  output:  4.40 }, // verified: multiple sources May 2026
 
   // ── Anthropic ─────────────────────────────────────────────────────────────
-  'claude-opus-4-20250514':     { input: 15.00, output: 75.00 }, // official docs (deprecated Jun 2026)
-  'claude-sonnet-4-20250514':   { input:  3.00, output: 15.00 }, // official docs (deprecated Jun 2026)
+  'claude-opus-4-8':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
+  'claude-opus-4-7':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
+  'claude-opus-4-6':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
+  'claude-sonnet-4-6':          { input:  3.00, output: 15.00 }, // official docs (verified Jun 2026)
+  'claude-haiku-4-5':           { input:  1.00, output:  5.00 }, // official docs (verified Jun 2026)
+  'claude-opus-4-20250514':     { input: 15.00, output: 75.00 }, // retired alias; last known price
+  'claude-sonnet-4-20250514':   { input:  3.00, output: 15.00 }, // retiring Jun 15 2026; use claude-sonnet-4-6
   'claude-3-5-sonnet-20241022': { input:  3.00, output: 15.00 }, // retired; not on current pricing page
-  'claude-3-5-haiku-20241022':  { input:  0.80, output:  4.00 }, // official docs (retired; Bedrock/Vertex only)
+  'claude-3-5-haiku-20241022':  { input:  0.80, output:  4.00 }, // retired; Bedrock/Vertex only
   'claude-3-opus-20240229':     { input: 15.00, output: 75.00 }, // retired; not on current pricing page
   'claude-3-sonnet-20240229':   { input:  3.00, output: 15.00 }, // retired; not on current pricing page
   'claude-3-haiku-20240307':    { input:  0.25, output:  1.25 }, // retired; not on current pricing page
@@ -116,7 +121,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'codestral-latest':      { input: 0.30, output: 0.90 }, // verified: multiple sources
 
   // ── Together AI ───────────────────────────────────────────────────────────
-  'meta-llama/Llama-3-70b-chat-hf':                { input: 0.88, output: 0.88 }, // together.ai
+  'meta-llama/Llama-3.3-70B-Instruct-Turbo':        { input: 0.88, output: 0.88 }, // together.ai (verified Jun 2026)
+  'meta-llama/Llama-3-70b-chat-hf':                { input: 0.88, output: 0.88 }, // together.ai (legacy)
   'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo':  { input: 0.88, output: 0.88 }, // together.ai
   'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo': { input: 3.50, output: 3.50 }, // aipricing.guru May 2026
   'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo':   { input: 0.18, output: 0.18 }, // together.ai
@@ -247,6 +253,7 @@ async function runOpenAIAgenticLoop(
   taskId: string,
   signal: AbortSignal,
   depth = 0,
+  destructiveFailRef: { value: boolean } = { value: false },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForOpenAI(tools);
@@ -300,7 +307,8 @@ async function runOpenAIAgenticLoop(
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${toolCall.function.name}`));
 
-      let toolResult: string;
+      let toolResult = '';
+      let toolFailed = false;
       try {
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
@@ -334,8 +342,13 @@ async function runOpenAIAgenticLoop(
         }
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" completed`));
       } catch (err) {
-        toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        toolResult = `[TOOL ERROR] ${err instanceof Error ? err.message : String(err)}`;
+        toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" failed: ${toolResult}`, 'error'));
+      }
+
+      if (toolFailed && DESTRUCTIVE_TOOLS.has(toolCall.function.name)) {
+        destructiveFailRef.value = true;
       }
 
       messages.push({
@@ -358,6 +371,7 @@ async function runAnthropicAgenticLoop(
   taskId: string,
   signal: AbortSignal,
   depth = 0,
+  destructiveFailRef: { value: boolean } = { value: false },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForAnthropic(tools);
@@ -421,7 +435,8 @@ async function runAnthropicAgenticLoop(
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${block.name}`));
 
-      let toolResult: string;
+      let toolResult = '';
+      let toolFailed = false;
       try {
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
@@ -456,13 +471,19 @@ async function runAnthropicAgenticLoop(
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" completed`));
       } catch (err) {
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" failed: ${toolResult}`, 'error'));
+      }
+
+      if (toolFailed && DESTRUCTIVE_TOOLS.has(block.name)) {
+        destructiveFailRef.value = true;
       }
 
       toolResults.push({
         type: 'tool_result',
         tool_use_id: block.id,
         content: toolResult,
+        ...(toolFailed ? { is_error: true } : {}),
       });
     }
 
@@ -541,6 +562,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       : '';
     const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext + telegramHint;
 
+    const destructiveFailRef = { value: false };
     let output = '';
 
     if (agent.provider === 'anthropic') {
@@ -554,6 +576,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         taskId,
         controller.signal,
         depth,
+        destructiveFailRef,
       );
     } else {
       const client = getClient(agent.provider, apiKey);
@@ -561,10 +584,21 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         { role: 'system', content: fullSystemPrompt },
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth, destructiveFailRef);
     }
 
     activeTaskControllers.delete(taskId);
+
+    if (destructiveFailRef.value) {
+      const errorMessage = 'A required action could not be completed — a destructive tool call failed.';
+      persistLog(makeLog(taskId, agent.id, `Task failed: ${errorMessage}`, 'error'));
+      updateTaskStatus(taskId, 'failed', undefined, errorMessage);
+      updateAgentStatus(agent.id, 'error');
+      const failedTask = { ...task, status: 'failed' as const, error: errorMessage };
+      agentEvents.emit('task:failed', failedTask);
+      return failedTask;
+    }
+
     persistLog(makeLog(taskId, agent.id, `Task completed successfully.`));
     updateTaskStatus(taskId, 'completed', output);
     updateAgentStatus(agent.id, 'idle');
@@ -592,7 +626,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
 }
 
 export async function parseAgentFromChat(userMessage: string): Promise<Partial<Agent>[] | null> {
-  const providerPriority = ['openai', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'ollama', 'custom'];
+  const providerPriority = ['openai', 'anthropic', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'ollama', 'custom'];
 
   let apiKey = '';
   let provider = 'openai';

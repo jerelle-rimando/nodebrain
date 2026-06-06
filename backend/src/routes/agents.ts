@@ -94,11 +94,13 @@ router.patch('/:id', (req, res) => {
     const updated = updateAgent(req.params.id, patch);
     if (!updated) return res.status(404).json({ success: false, error: 'Agent not found' });
 
-    // Re-schedule if schedule changed
-    if (updated.schedule) {
-      scheduleAgent(updated);
-    } else {
-      unscheduleAgent(updated.id);
+    // Re-schedule only when the schedule expression actually changed
+    if (updated.schedule !== existing.schedule) {
+      if (updated.schedule) {
+        scheduleAgent(updated);
+      } else {
+        unscheduleAgent(updated.id);
+      }
     }
 
     res.json({ success: true, data: updated });

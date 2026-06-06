@@ -1,8 +1,7 @@
-import { connectToServer, getAllAvailableTools, disconnectAll, getConnectedServers, getConnectionError, type MCPServer, type MCPToolWithServer } from './mcpClient';
+import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { getAllCustomMCPServers } from '../db/mcpServerRepository';
-import { connectToSSEServer } from './mcpClient';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 
 interface ServerConfig {
@@ -96,7 +95,7 @@ export async function initializeToolRegistry(): Promise<void> {
     }
 
     const server = config.buildServer(credential ?? '');
-    await connectToServer(server);
+    await connectToServer(server, credential ?? '');
 
     if (getConnectedServers().includes(config.name)) {
       diag.push({ name: config.name, status: 'connected', detail: '' }); // tool count filled below
@@ -110,14 +109,14 @@ export async function initializeToolRegistry(): Promise<void> {
   const customServers = getAllCustomMCPServers();
   for (const server of customServers) {
     if (server.transport === 'sse' && server.url) {
-      await connectToSSEServer({ name: server.name, url: server.url });
+      await connectToSSEServer({ name: server.name, url: server.url }, server.url);
     } else if (server.transport === 'stdio' && server.command) {
       await connectToServer({
         name: server.name,
         command: server.command,
         args: server.args,
         env: server.envVars,
-      });
+      }, `${server.command}|${server.args.join('|')}`);
     }
   }
 
@@ -232,8 +231,83 @@ export function formatToolsForAnthropic(tools: MCPToolWithServer[]): Array<{
     }));
   }
 
-  export async function reloadToolRegistry(): Promise<void> {
-    console.log('[ToolRegistry] Reloading integrations...');
-    await disconnectAll();
-    await initializeToolRegistry();
+type DesiredEntry =
+  | { type: 'stdio'; server: MCPServer; fingerprint: string }
+  | { type: 'sse'; server: MCPSSEServer; fingerprint: string };
+
+async function syncConnections(): Promise<void> {
+  const desired = new Map<string, DesiredEntry>();
+
+  for (const config of SERVER_CONFIGS) {
+    const credential = getCredentialForProvider(config.credentialProvider);
+    if (!credential) continue;
+    desired.set(config.name, {
+      type: 'stdio',
+      server: config.buildServer(credential),
+      fingerprint: credential,
+    });
   }
+
+  for (const cs of getAllCustomMCPServers()) {
+    if (cs.transport === 'sse' && cs.url) {
+      desired.set(cs.name, {
+        type: 'sse',
+        server: { name: cs.name, url: cs.url },
+        fingerprint: cs.url,
+      });
+    } else if (cs.transport === 'stdio' && cs.command) {
+      desired.set(cs.name, {
+        type: 'stdio',
+        server: { name: cs.name, command: cs.command, args: cs.args, env: cs.envVars },
+        fingerprint: `${cs.command}|${cs.args.join('|')}`,
+      });
+    }
+  }
+
+  const currentNames = new Set(getConnectedServers());
+
+  // Disconnect servers that are no longer desired
+  for (const name of currentNames) {
+    if (!desired.has(name)) {
+      await disconnectServer(name);
+    }
+  }
+
+  // Connect new servers and reconnect any whose credential changed
+  for (const [name, entry] of desired.entries()) {
+    const existing = getCredentialFingerprint(name);
+    if (existing !== undefined && existing === entry.fingerprint) {
+      continue; // already connected with the same credential — leave it alone
+    }
+    if (currentNames.has(name)) {
+      await disconnectServer(name); // credential changed — tear down old connection only
+    }
+    if (entry.type === 'sse') {
+      await connectToSSEServer(entry.server, entry.fingerprint);
+    } else {
+      await connectToServer(entry.server, entry.fingerprint);
+    }
+  }
+}
+
+let reloadInProgress = false;
+let reloadQueued = false;
+
+export async function reloadToolRegistry(): Promise<void> {
+  if (reloadInProgress) {
+    reloadQueued = true; // collapse concurrent calls into one follow-up
+    return;
+  }
+  reloadInProgress = true;
+  try {
+    console.log('[ToolRegistry] Reloading integrations...');
+    await syncConnections();
+    if (reloadQueued) {
+      reloadQueued = false;
+      console.log('[ToolRegistry] Processing queued reload...');
+      await syncConnections();
+    }
+  } finally {
+    reloadInProgress = false;
+  }
+}
