@@ -17,6 +17,7 @@ import chatRouter from './routes/chat';
 import eventsRouter from './routes/events';
 import integrationsRouter from './routes/integrations';
 import { parseNaturalSchedule } from './utils/parseSchedule';
+import { AVAILABLE_MODELS } from './agents/agentEngine';
 import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
@@ -39,6 +40,10 @@ app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
+});
+
+app.get('/api/models', (_req, res) => {
+  res.json({ success: true, data: AVAILABLE_MODELS });
 });
 
 app.get('/api/schedule/parse', (req, res) => {

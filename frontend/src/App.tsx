@@ -27,7 +27,7 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-  const { activeTab, setActiveTab, agents, setAgents, setCredentials, setTasks, setLogs } = useStore();
+  const { activeTab, setActiveTab, agents, setAgents, setCredentials, setTasks, setLogs, setAvailableModels } = useStore();
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [showServers, setShowServers] = useState(false);
   const [agentsLoaded, setAgentsLoaded] = useState(false);
@@ -50,12 +50,14 @@ export default function App() {
       api.getCredentials(),
       api.getTasks(),
       api.getLogs(),
+      api.getModels(),
     ])
-      .then(([agents, credentials, tasks, logs]) => {
+      .then(([agents, credentials, tasks, logs, models]) => {
         setAgents(agents);
         setCredentials(credentials);
         setTasks(tasks);
         setLogs(logs);
+        setAvailableModels(models);
       })
       .catch(console.error)
       .finally(() => setAgentsLoaded(true));

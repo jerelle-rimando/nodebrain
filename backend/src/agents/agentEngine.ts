@@ -71,6 +71,26 @@ const DEFAULT_MODELS: Record<string, string> = {
   custom: 'gpt-4o-mini',
 };
 
+// NOTE for later (do not implement now): post-launch, replace this static
+// list with a live fetch from each provider's /v1/models endpoint using the
+// user's key, so the list never goes stale.
+export const AVAILABLE_MODELS: Record<string, string[]> = {
+  openai:    ['gpt-4o', 'gpt-4o-mini'],
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+  groq: [
+    'openai/gpt-oss-120b',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'meta-llama/llama-4-maverick-17b-128e-instruct',
+    'llama-3.3-70b-versatile',
+  ],
+  gemini:    ['gemini-2.0-flash'],
+  mistral:   ['mistral-small-latest'],
+  ollama:    ['llama3.2'],
+  together:  ['meta-llama/Llama-3.3-70B-Instruct-Turbo'],
+  fireworks: ['accounts/fireworks/models/llama-v3-70b-instruct'],
+  custom:    ['gpt-4o-mini'],
+};
+
 // Prices are local estimates used only for cost display — not real billing data.
 // Any model not in this table will show $0.00 cost even though token counts remain accurate.
 // Prices in USD per million tokens { input, output }.
@@ -560,7 +580,8 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
     const telegramHint = agent.config.telegramChatId
       ? `\n\nWhen sending Telegram messages, use chat ID ${agent.config.telegramChatId} unless explicitly told otherwise.`
       : '';
-    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext + telegramHint;
+    const toolNudge = '\n\nYou have real, working tools available to you (file access, messaging, and more). When a task requires reading files, sending messages, or taking actions, you MUST call the appropriate tool directly. Never tell the user to do it themselves, and never write example code instead of calling a tool.';
+    const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext + telegramHint + toolNudge;
 
     const destructiveFailRef = { value: false };
     let output = '';

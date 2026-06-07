@@ -17,11 +17,14 @@ interface AppState {
   logs: TaskLog[];
   credentials: Credential[];
   chatMessages: ChatMessage[];
+  availableModels: Record<string, string[]>;
 
   activeTab: ActiveTab;
   selectedAgentId: string | null;
   logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
+
+  setAvailableModels: (models: Record<string, string[]>) => void;
 
   setAgents: (agents: Agent[]) => void;
   addAgent: (agent: Agent) => void;
@@ -55,11 +58,13 @@ export const useStore = create<AppState>((set) => ({
   logs: [],
   credentials: [],
   chatMessages: [],
+  availableModels: {},
   activeTab: 'dashboard',
   selectedAgentId: null,
   logsFilterAgentId: null,
   pendingApprovals: [],
 
+  setAvailableModels: (availableModels) => set({ availableModels }),
   setAgents: (agents) => set({ agents }),
   addAgent: (agent) => set((s) => ({ agents: [agent, ...s.agents] })),
   updateAgent: (agent) =>

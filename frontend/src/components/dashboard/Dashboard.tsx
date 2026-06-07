@@ -3,6 +3,7 @@ import { Send, Bot, User, Loader2, Zap, ArrowLeft } from 'lucide-react';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
+import { ModelSelect } from '../ModelSelect';
 
 function formatContent(content: string): string {
   return content
@@ -11,13 +12,18 @@ function formatContent(content: string): string {
 }
 
 export function Dashboard() {
-  const { chatMessages, setChatMessages, addChatMessage, agents, logs } = useStore();
+  const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels } = useStore();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? 'groq');
+  const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'llama-3.3-70b-versatile');
+
+  useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
+  useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
 
   useEffect(() => {
     api.getChatHistory().then((messages) => {
@@ -141,17 +147,48 @@ export function Dashboard() {
                   DRY-RUN
                 </span>
               )}
-              <span className="ml-auto text-xs text-brain-text-dim font-mono capitalize">
-                {selectedAgent.model}
-              </span>
+              <ModelSelect
+                provider={selectedAgent.provider}
+                model={selectedAgent.model}
+                availableModels={availableModels}
+                onChange={async (model) => {
+                  try {
+                    const updated = await api.updateAgent(selectedAgent.id, { model });
+                    storeUpdateAgent(updated);
+                    setSelectedAgent(updated);
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className="ml-auto"
+              />
             </>
           ) : (
             <>
               <div className="w-2 h-2 rounded-full bg-brain-accent animate-pulse-slow" />
               <h2 className="text-sm font-semibold text-brain-text">Agent Studio</h2>
               <span className="ml-auto text-xs text-brain-text-dim font-mono">
-                {agents.length} agents active
+                {agents.length} active
               </span>
+              <select
+                value={defaultProvider}
+                onChange={(e) => {
+                  const p = e.target.value;
+                  setDefaultProvider(p);
+                  setDefaultModel(availableModels[p]?.[0] ?? '');
+                }}
+                className="text-xs font-mono bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 text-brain-text cursor-pointer focus:outline-none hover:border-brain-accent"
+              >
+                {Object.keys(availableModels).map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <ModelSelect
+                provider={defaultProvider}
+                model={defaultModel}
+                availableModels={availableModels}
+                onChange={setDefaultModel}
+              />
             </>
           )}
         </div>

@@ -89,6 +89,8 @@ export const api = {
   parseSchedule: (input: string) =>
     request<{ cron: string | null; human: string | null }>(`/schedule/parse?input=${encodeURIComponent(input)}`),
 
+  getModels: () => request<Record<string, string[]>>('/models'),
+
   getAnalytics: () =>
     request<{
       totalCost: number;

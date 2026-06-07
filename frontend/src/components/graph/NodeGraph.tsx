@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { ModelSelect } from '../ModelSelect';
 import ReactFlow, {
   Background,
   Controls,
@@ -56,7 +57,7 @@ interface AgentPanelProps {
 type MemoryItem = { id: string; text: string; source: string; timestamp: string };
 
 function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
-  const { setActiveTab, setLogsFilterAgentId } = useStore();
+  const { setActiveTab, setLogsFilterAgentId, updateAgent: storeUpdateAgent, availableModels } = useStore();
   const [tab, setTab] = useState<'config' | 'tasks' | 'memory'>('config');
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -201,9 +202,21 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
               <span className="text-brain-text-dim">Provider</span>
               <span className="text-brain-text font-mono capitalize">{agent.provider}</span>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-xs items-center">
               <span className="text-brain-text-dim">Model</span>
-              <span className="text-brain-text font-mono truncate max-w-36">{agent.model}</span>
+              <ModelSelect
+                provider={agent.provider}
+                model={agent.model}
+                availableModels={availableModels}
+                onChange={async (model) => {
+                  try {
+                    const updated = await api.updateAgent(agent.id, { model });
+                    storeUpdateAgent(updated);
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+              />
             </div>
             {agent.schedule && (
               <div className="flex justify-between text-xs">
