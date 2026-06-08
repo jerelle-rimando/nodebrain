@@ -26,7 +26,7 @@ The system revolves around persistent AI agents that can:
 - pause before destructive actions when Approval Mode is enabled
 - run in Dry-Run mode to simulate tool calls without side effects
 
-Everything runs **locally by default**, giving users full control over their environment and data.
+**What "local-first" means here:** the NodeBrain app, your agent definitions, your encrypted credentials, your task history, and your RAG memory all live on your machine — there is no NodeBrain server in the middle. However, the *AI reasoning itself* runs on whichever model provider you configure. If you use a hosted provider (OpenAI, Groq, Anthropic, Gemini, Mistral, Together, Fireworks), your prompts and any file or task content the agent processes are sent to that provider's API to be processed, exactly as if you used their app directly. If you want inference to stay entirely on your machine, use **Ollama**, which runs locally with no external API calls. See [Security & Architecture Philosophy](#security--architecture-philosophy-) for the full data-flow picture.
 
 ---
 
@@ -35,22 +35,22 @@ Everything runs **locally by default**, giving users full control over their env
 ### Prerequisites
 
 - Node.js v18 or higher — download from [nodejs.org](https://nodejs.org) (LTS version)
-- An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.)
+- An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.), or [Ollama](https://ollama.com) for fully local inference
 
 ### Installation (Recommended)
 NodeBrain is currently unsigned. Windows may show a SmartScreen warning — click "More info" → "Run anyway" to proceed. The full source code is on GitHub if you want to verify it yourself. Download from the **Releases** tab.
 
-- **NodeBrain Setup 0.2.0.exe**  
+- **NodeBrain Setup 0.3.5.exe**  
   Installs NodeBrain on your system.
 
-- **NodeBrain-0.2.0-portable.exe**  
+- **NodeBrain-0.3.5-portable.exe**  
   Run instantly without installation.
 
 ### Installation (Development)
 
 Clone the repository and install dependencies for all three parts of the project.
 ```bash
-git clone https://github.com/YOURUSERNAME/nodebrain.git
+git clone https://github.com/jerelle-rimando/nodebrain.git
 cd nodebrain
 ```
 ```bash
@@ -83,20 +83,21 @@ npm run dev
 This starts both the backend (port 3001) and frontend (port 5173) simultaneously.
 
 Open your browser and go to:
-```
+
 http://localhost:5173
-```
 
 ### First Time Setup
 
 > ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model in the background on first launch. The app starts immediately — the model loads quietly behind the scenes. This only happens once.
-> MCP integrations also download their servers on first use, which may take a moment.
+> MCP integrations also download their servers from npm on first use, which may take a moment and requires an internet connection the first time each integration is used.
 
 1. Click the **Vault** tab (shield icon) and add your API key for your preferred provider
 2. Click the **Integrations** tab (plug icon) to connect external services like Telegram, GitHub, Slack, Notion, and more
 3. Go to the **Dashboard** tab and type something like "Create an agent that summarizes news every morning"
 4. Click your agent in the Active Agents list to chat with it directly
 5. Switch to the **NodeGraph** tab to see your agent as a node, view task history, and run tasks visually
+
+> 💡 **Note on running actions:** NodeBrain currently performs tool actions (sending messages, reading files, etc.) through **agents**. Create an agent for the task, or open an existing agent and give it the task directly. Typing a one-off command into the general Dashboard chat will hold a conversation but does not yet execute tools on its own — this is a known limitation being addressed in an upcoming release.
 
 ### Supported AI Providers
 
@@ -111,14 +112,14 @@ NodeBrain is model-agnostic and works with any of the following out of the box:
 - Fireworks AI
 - Ollama (fully local, no API key needed)
 
-> 💡 **For best tool calling performance**, OpenAI GPT-4o or Anthropic Claude Opus 4.6 are recommended. 
+> 💡 **For best tool calling performance**, OpenAI GPT-4o or Anthropic Claude are recommended.
 > Groq works but may require more explicit prompts for complex tool use.
 
 ### Security Notes
 
 - `VAULT_SECRET` is auto-generated with 32 cryptographically random bytes on first run
 - All API keys are encrypted with AES-256 before being stored locally
-- No data ever leaves your machine except for the API calls you explicitly make
+- Your agent definitions, credentials, task history, and RAG memory are stored only on your machine. The one exception is the AI inference itself: when you use a hosted provider, the content your agents process is sent to that provider's API. Integrations also send data outward to their own services (e.g. a Telegram message goes to Telegram's API). Use Ollama if you need inference to stay fully local.
 - The database is stored at `%APPDATA%\NodeBrain\data\nodebrain.db` (Windows) or `~/Library/Application Support/NodeBrain/data/nodebrain.db` (Mac). It is never inside the install directory.
 - Never commit your `.env` file — it is already in `.gitignore`
 
@@ -134,7 +135,7 @@ NodeBrain is provided **as-is** with no warranty of any kind, express or implied
 
 ## Core Interface 🤖
 
-NodeBrain is built around four primary systems:
+NodeBrain is built around several primary systems:
 
 ### Dashboard ⚙️
 Create and control agents through chat. Click any agent in the Active Agents list to open a dedicated chat with that agent directly — no need to reference it by name.
@@ -158,23 +159,27 @@ Track token usage, estimated cost per agent, task success rates, and activity ov
 
 ## Integrations
 
-NodeBrain supports **11 integrations** with **50+ agent-accessible tools**:
+NodeBrain supports the following integrations and their agent-accessible tools:
 
-| Integration | Tools |
-|---|---|
-| Telegram | Send messages, photos, documents, get chat info |
-| GitHub | List repos, create issues, open PRs, read files |
-| Slack | Send messages, list channels, upload files |
-| Notion | Read/write pages, query databases |
-| Brave Search | Web search, news search, image search |
-| Local Filesystem | Read/write files, list directories |
-| Gmail | Read and send email |
-| Google Drive | List and manage files |
-| Google Docs | Create and edit documents |
-| Google Sheets | Read and write spreadsheets |
-| Google Calendar | Create and manage events |
+| Integration | Tools | Status |
+|---|---|---|
+| Telegram | Send messages, photos, documents, get chat info | Ready |
+| GitHub | List repos, create issues, open PRs, read files | Ready |
+| Slack | Send messages, list channels, upload files | Ready |
+| Notion | Read/write pages, query databases | Ready |
+| Brave Search | Web search, news search, image search | Ready |
+| Local Filesystem | Read/write files, list directories | Ready |
+| Gmail | Read and send email | Requires Google Cloud setup |
+| Google Drive | List and manage files | Requires Google Cloud setup |
+| Google Docs | Create and edit documents | Requires Google Cloud setup |
+| Google Sheets | Read and write spreadsheets | Requires Google Cloud setup |
+| Google Calendar | Create and manage events | Requires Google Cloud setup |
 
-> Google Workspace integration requires setting up your own Google Cloud project. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md) for instructions.
+You can also connect **any custom MCP server** via the Integrations tab by providing its install command.
+
+> Google Workspace integrations require setting up your own Google Cloud project and OAuth credentials. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md) for instructions.
+
+> ⚠️ **Windows note:** When an integration connects, its MCP server starts as a child process and may briefly open a console window. **Do not close these windows** — closing one terminates that integration's server, and the integration will stop working until you reconnect it or restart NodeBrain. Hiding these windows automatically is a known issue being worked on.
 
 ---
 
@@ -188,12 +193,12 @@ When an agent runs a task, relevant context is automatically retrieved from its 
 
 ## MCP Tool Calling
 
-NodeBrain implements the **Model Context Protocol (MCP)** for tool execution. When an integration is connected, NodeBrain spawns the MCP server as a child process and discovers its available tools automatically.
+NodeBrain implements the **Model Context Protocol (MCP)** for tool execution. When an integration is connected, NodeBrain spawns the MCP server as a local child process (over stdio) and discovers its available tools automatically. The MCP transport is entirely local — servers run on your machine, not on any remote host.
 
-During task execution, the agent runs in an agentic loop:
-1. Query RAG for relevant context
-2. Call the AI model with available tools listed
-3. Execute any tool calls the model requests via MCP
+When an agent runs a task, it executes in an agentic loop:
+1. Query local RAG for relevant context
+2. Call the configured AI model with the available tools listed
+3. Execute any tool calls the model requests, via the local MCP server
 4. Feed results back to the model
 5. Repeat until the model returns a final answer
 
@@ -210,6 +215,8 @@ Agents can be scheduled using plain English. NodeBrain converts natural language
 - "every Monday" → `0 9 * * 1`
 - "every weekday at 8am" → `0 8 * * 1-5`
 - "every 30 minutes" → `*/30 * * * *`
+
+Scheduled agents run only while NodeBrain is running. Use the "Launch at startup" toggle in Vault settings so agents resume automatically after a reboot.
 
 ---
 
@@ -239,24 +246,22 @@ Open sourcing the project provides several important benefits:
 
 ## Local-First Architecture 📍
 
-NodeBrain runs entirely on your machine and does not require a hosted service. Users connect their preferred AI models via the Credential Vault and choose their own infrastructure.
+NodeBrain's orchestration runs entirely on your machine and does not require a hosted NodeBrain service: your agents, credentials, task history, scheduling, MCP servers, and RAG memory are all local. What is *not* necessarily local is AI inference — that runs on whichever model provider you connect in the Credential Vault. With a hosted provider, prompt and task content is sent to that provider; with Ollama, inference stays on your machine too.
 
-Future versions may support web or hosted environments — see [Security & Architecture Philosophy](#security--architecture-philosophy) for the reasoning behind starting local-first.
+Future versions may support web or hosted environments — see [Security & Architecture Philosophy](#security--architecture-philosophy-) for the reasoning behind starting local-first.
 
 ---
 
 ## Known Limitations 🚧
 
+- **Direct chat actions** — tool actions currently run through agents (created or directly invoked). One-off commands typed into the general Dashboard chat do not yet trigger tools on their own. Use an agent for action tasks. This is being addressed in an upcoming release.
+- **Windows console windows** — connecting an integration may open a console window for its MCP server process; closing it stops that integration. Automatic hiding of these windows is not yet implemented.
 - **Google Workspace** — requires manual setup of a Google Cloud project and the `@googleworkspace/cli` installed globally. Not recommended for non-technical users yet. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md).
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
 - **Agent delegation depth** — agents can delegate to sub-agents up to 3 levels deep. Wider delegation (1 parent to many children) is unlimited.
 - **Local only** — no cloud deployment, no mobile, no collaboration features yet. Cloud version is planned.
 - **Scheduled agents require the app to be running** — use the "Launch at startup" toggle in Vault settings so agents run automatically after reboot.
-- **Dependency supply chain risk** — NodeBrain relies on third party npm packages 
-  including MCP SDK, OpenAI SDK, and Anthropic SDK. In the event of a supply chain 
-  attack on any dependency (similar to the LiteLLM PyPI compromise of March 2026), 
-  users should rotate all credentials stored in the vault immediately. 
-  Monitor dependency advisories and keep packages updated via Dependabot.
+- **Dependency and supply-chain risk** — NodeBrain relies on third-party npm packages (including the MCP SDK, OpenAI SDK, and Anthropic SDK) and launches integration MCP servers via `npx`, which fetches packages from npm. A compromise of any upstream package could expose data or credentials. If you ever suspect a dependency has been compromised, rotate all credentials stored in the Vault immediately, and keep dependencies updated and monitored (e.g. via Dependabot and npm advisories).
 - **Deprecated Slack package** — still works but will be replaced when Slack's official stdio MCP server is available.
 
 ---
@@ -267,10 +272,16 @@ MCP introduces real security concerns in centralized deployments — unauthorize
 
 NodeBrain's local-first architecture mitigates many of these risks by design:
 
-- Every MCP server runs on your own machine with your own credentials
-- There is no central server or shared infrastructure, significantly reducing the external attack surface
+- Every MCP server runs on your own machine with your own credentials, over a local stdio connection — there is no remote MCP host
+- There is no central NodeBrain server or shared infrastructure, significantly reducing the external attack surface
 - Your agents only have access to what you explicitly connect in the Vault
-- - CORS restricts browser-based access to localhost only (any port) — no external origins can reach the backend, adding an additional layer of protection
+- CORS restricts browser-based access to localhost only (any port) — no external origins can reach the backend, adding an additional layer of protection
+
+**Where your data goes (be aware):**
+
+- **AI inference** — with a hosted provider, your prompts and the content your agents process are sent to that provider's API. With Ollama, inference is fully local.
+- **Integrations** — by design, integrations send data outward to their own services (Telegram messages to Telegram, commits to GitHub, etc.) using the tokens you provide.
+- **Integration servers** — integration MCP servers are downloaded and run from npm via `npx` on first use. NodeBrain ships integrations from well-known publishers, but these are third-party packages executing on your machine with access to the environment they're given. Only connect integrations you intend to use, and only add custom MCP servers from sources you trust.
 
 This isn't just a v0.1 limitation — it's a deliberate architectural choice. MCP is still evolving, and the security model for multi-user, web-based deployments is not yet fully mature.
 
@@ -280,7 +291,7 @@ When MCP security patterns for web deployments mature, NodeBrain is designed to 
 
 For now, local-first prioritizes control and safety: your keys, your machine, your agents.
 
-> ⚠️ **Third party MCP servers:** NodeBrain only ships integrations from verified publishers (Anthropic, Notion, GitHub, IQAi). Third party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
+> ⚠️ **Third-party MCP servers:** NodeBrain only ships integrations from well-known publishers (Anthropic, Notion, GitHub, IQAi, Brave). Third-party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
 
 > ⚠️ **Network deployment:** NodeBrain is designed for localhost use only. Deploying to a networked environment without authentication, rate limiting, and input sanitization introduces significant security risks.
 
