@@ -283,6 +283,10 @@ async function runOpenAIAgenticLoop(
     if (signal.aborted) return '(task cancelled by user)';
     iterations++;
 
+    if (process.env.NODEBRAIN_DEBUG_TOOLS) {
+      console.log('[DEBUG:TOOLS] Pre-call | model:', model, '| tools:', formattedTools.length, '|', formattedTools.map((t: { function: { name: string } }) => t.function.name));
+    }
+
     const completion = await client.chat.completions.create({
       model,
       messages,
@@ -297,6 +301,10 @@ async function runOpenAIAgenticLoop(
 
     const choice = completion.choices[0];
     const message = choice.message;
+
+    if (process.env.NODEBRAIN_DEBUG_TOOLS) {
+      console.log('[DEBUG:TOOLS] Post-call | finish_reason:', choice.finish_reason, '| tool_calls:', message.tool_calls?.length ?? 0, message.tool_calls?.map(tc => tc.function.name) ?? []);
+    }
 
     if (!message.tool_calls || message.tool_calls.length === 0) {
       return message.content ?? '(no response)';
@@ -326,6 +334,9 @@ async function runOpenAIAgenticLoop(
       }
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${toolCall.function.name}`));
+      if (process.env.NODEBRAIN_DEBUG_TOOLS) {
+        console.log('[DEBUG:TOOLS] Executing tool:', toolCall.function.name, '| args:', JSON.stringify(args));
+      }
 
       let toolResult = '';
       let toolFailed = false;
@@ -361,10 +372,16 @@ async function runOpenAIAgenticLoop(
           toolResult = await callTool(serverName, toolName, args);
         }
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" completed`));
+        if (process.env.NODEBRAIN_DEBUG_TOOLS) {
+          console.log('[DEBUG:TOOLS] Tool succeeded:', toolCall.function.name);
+        }
       } catch (err) {
         toolResult = `[TOOL ERROR] ${err instanceof Error ? err.message : String(err)}`;
         toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" failed: ${toolResult}`, 'error'));
+        if (process.env.NODEBRAIN_DEBUG_TOOLS) {
+          console.log('[DEBUG:TOOLS] Tool FAILED:', toolCall.function.name, '| error:', toolResult);
+        }
       }
 
       if (toolFailed && DESTRUCTIVE_TOOLS.has(toolCall.function.name)) {

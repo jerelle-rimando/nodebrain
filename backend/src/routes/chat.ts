@@ -6,6 +6,7 @@ import { dbRun, dbAll } from '../db/database';
 import { parseAgentFromChat, executeAgentTask } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
+import { scheduleAgent } from '../scheduler/scheduler';
 import type { Agent, ChatMessage, ModelProvider } from '../../shared-types';
 
 const router = Router();
@@ -117,6 +118,7 @@ router.post('/message', async (req, res) => {
           updatedAt: now,
         }));
         createdAgents.forEach(createAgent);
+        createdAgents.filter((a) => a.schedule).forEach(scheduleAgent);
 
         // Pass 2: resolve connectsTo by case-insensitive name within this batch
         const madeConnections: string[] = [];
