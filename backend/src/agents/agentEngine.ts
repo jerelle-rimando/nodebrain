@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
-import { getCredentialForProvider } from '../vault/credentialVault';
+import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/credentialVault';
 import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
 import { dbRun } from '../db/database';
 import { updateAgentStatus } from '../db/agentRepository';
@@ -48,7 +48,7 @@ function requestApproval(
   });
 }
 
-const BASE_URLS: Record<string, string> = {
+export const BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   groq: 'https://api.groq.com/openai/v1',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
@@ -234,10 +234,10 @@ const DESTRUCTIVE_TOOLS = new Set([
   'notion__API-move-page',
 ]);
 
-function getClient(provider: string, apiKey: string): OpenAI {
+function getClient(provider: string, apiKey: string, customBaseUrl?: string): OpenAI {
   return new OpenAI({
     apiKey: apiKey || 'ollama',
-    baseURL: BASE_URLS[provider] ?? BASE_URLS.openai,
+    baseURL: customBaseUrl || (BASE_URLS[provider] ?? BASE_URLS.openai),
   });
 }
 
@@ -554,6 +554,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
 
   try {
     const apiKey = getCredentialForProvider(agent.provider) ?? '';
+    const customBaseUrl = getBaseUrlForProvider(agent.provider) ?? undefined;
 
     if (!apiKey && agent.provider !== 'ollama') {
       throw new Error(`No API key found for provider "${agent.provider}". Add one in the Credential Vault.`);
@@ -617,7 +618,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         destructiveFailRef,
       );
     } else {
-      const client = getClient(agent.provider, apiKey);
+      const client = getClient(agent.provider, apiKey, customBaseUrl);
       const messages: OpenAI.ChatCompletionMessageParam[] = [
         { role: 'system', content: fullSystemPrompt },
         { role: 'user', content: userInput },

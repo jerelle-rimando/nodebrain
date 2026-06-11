@@ -56,7 +56,7 @@ export const api = {
   getAgentLogs: (agentId: string) => request<import('@shared/types').TaskLog[]>(`/logs/agent/${agentId}`),
 
   getCredentials: () => request<import('@shared/types').Credential[]>('/credentials'),
-  createCredential: (data: { name: string; provider: string; value: string; description?: string }) =>
+  createCredential: (data: { name: string; provider: string; value: string; description?: string; baseUrl?: string }) =>
     request<import('@shared/types').Credential>('/credentials', { method: 'POST', body: JSON.stringify(data) }),
   updateCredential: (id: string, value: string) =>
     request<{ id: string; updated: boolean }>(`/credentials/${id}`, { method: 'PUT', body: JSON.stringify({ value }) }),

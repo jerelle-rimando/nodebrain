@@ -63,6 +63,24 @@ export async function initDb(): Promise<void> {
     _db = new SQL.Database();
   }
 
+  // Safe migration: inspect current credentials columns and add base_url if absent.
+  // ALTER TABLE … ADD COLUMN never drops or recreates rows — existing rows get NULL.
+  // getBaseUrlForProvider returns null for NULL, which falls back to the hardcoded
+  // BASE_URLS default, so existing credentials continue to work byte-for-byte.
+  {
+    const stmt = _db.prepare('PRAGMA table_info(credentials)');
+    const cols: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { name: string };
+      cols.push(row.name);
+    }
+    stmt.free();
+    if (!cols.includes('base_url')) {
+      _db.run('ALTER TABLE credentials ADD COLUMN base_url TEXT');
+      persist();
+    }
+  }
+
   _db.run(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,

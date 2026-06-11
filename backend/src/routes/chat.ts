@@ -1,9 +1,9 @@
 import { parseNaturalSchedule } from '../utils/parseSchedule';
-import { getCredentialForProvider } from '../vault/credentialVault';
+import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/credentialVault';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
-import { parseAgentFromChat, executeAgentTask } from '../agents/agentEngine';
+import { BASE_URLS, parseAgentFromChat, executeAgentTask } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
 import { scheduleAgent } from '../scheduler/scheduler';
@@ -188,14 +188,7 @@ router.post('/message', async (req, res) => {
       if (!apiKey && chosenProvider !== 'ollama') {
         assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
       } else {
-        const baseURLs: Record<string, string> = {
-          openai: 'https://api.openai.com/v1',
-          groq: 'https://api.groq.com/openai/v1',
-          ollama: 'http://localhost:11434/v1',
-          mistral: 'https://api.mistral.ai/v1',
-          together: 'https://api.together.xyz/v1',
-          fireworks: 'https://api.fireworks.ai/inference/v1',
-        };
+        const customBaseUrl = getBaseUrlForProvider(chosenProvider);
         const defaultModels: Record<string, string> = {
           openai: 'gpt-4o-mini',
           groq: 'llama-3.3-70b-versatile',
@@ -208,7 +201,7 @@ router.post('/message', async (req, res) => {
         const { default: OpenAI } = await import('openai');
         const client = new OpenAI({
           apiKey: apiKey || 'ollama',
-          baseURL: baseURLs[chosenProvider] ?? baseURLs.openai,
+          baseURL: customBaseUrl || (BASE_URLS[chosenProvider] ?? BASE_URLS.openai),
         });
 
         const agents = getAllAgents();

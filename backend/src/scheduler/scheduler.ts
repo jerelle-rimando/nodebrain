@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getAllAgents } from '../db/agentRepository';
+import { getAllAgents, getAgentById } from '../db/agentRepository';
 import { executeAgentTask } from '../agents/agentEngine';
 import type { Agent } from '../../shared-types';
 
@@ -58,9 +58,12 @@ export function scheduleAgent(agent: Agent): void {
   // Remove existing job if any
   unscheduleAgent(agent.id);
 
+  const agentId = agent.id;
   const task = cron.schedule(agent.schedule, async () => {
-    console.log(`[Scheduler] Running scheduled task for agent "${agent.name}"`);
-    await executeAgentTask(agent, agent.systemPrompt);
+    const fresh = getAgentById(agentId);
+    if (!fresh) return;
+    console.log(`[Scheduler] Running scheduled task for agent "${fresh.name}"`);
+    await executeAgentTask(fresh, fresh.systemPrompt);
   });
 
   scheduledJobs.set(agent.id, { agentId: agent.id, task });

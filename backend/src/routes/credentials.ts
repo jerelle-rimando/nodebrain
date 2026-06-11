@@ -14,8 +14,9 @@ const router = Router();
 const CreateCredentialSchema = z.object({
   name: z.string().min(1),
   provider: z.string().min(1),
-  value: z.string().min(1),
+  value: z.string().default(''),
   description: z.string().optional(),
+  baseUrl: z.string().optional(),
 });
 
 router.get('/', (_req, res) => {
@@ -44,8 +45,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, error: parsed.error.message });
     }
 
-    const { name, provider, value, description } = parsed.data;
-    const credential = createCredential(name, provider, value, description);
+    const { name, provider, value, description, baseUrl } = parsed.data;
+    const credential = createCredential(name, provider, value, description, baseUrl);
 
     // Reload tool registry so newly added integration activates immediately
     reloadToolRegistry().catch(console.error);

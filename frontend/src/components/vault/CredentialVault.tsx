@@ -31,6 +31,7 @@ export function CredentialVault() {
   const [value, setValue] = useState('');
   const [description, setDescription] = useState('');
   const [showValue, setShowValue] = useState(false);
+  const [baseUrl, setBaseUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const isElectron = !!(window as any).electronAPI;
@@ -55,14 +56,21 @@ export function CredentialVault() {
   }
 
   async function handleCreate() {
-    if (!name.trim() || !value.trim()) return;
+    if (!name.trim() || (requiresKey && !value.trim())) return;
     setSubmitting(true);
     try {
-      const cred = await api.createCredential({ name, provider, value, description: description || undefined });
+      const cred = await api.createCredential({
+        name,
+        provider,
+        value: value || '',
+        description: description || undefined,
+        baseUrl: baseUrl.trim() || undefined,
+      });
       addCredential(cred);
       setSaved(cred.id);
       setName('');
       setValue('');
+      setBaseUrl('');
       setDescription('');
       setShowForm(false);
       setTimeout(() => setSaved(null), 3000);
@@ -82,6 +90,7 @@ export function CredentialVault() {
     }
   }
 
+  const requiresKey = provider !== 'ollama' && provider !== 'custom';
   const selectedProvider = PROVIDERS.find((p) => p.id === provider);
 
   return (
@@ -143,29 +152,56 @@ export function CredentialVault() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs text-brain-text-dim mb-1">
-                {provider === 'filesystem' ? 'Folder Path' : 'API Key'}
-              </label>
-              <div className="relative">
+            {provider === 'ollama' ? (
+              <div>
+                <label className="block text-xs text-brain-text-dim mb-1">Base URL (optional)</label>
                 <input
-                  type={showValue || provider === 'filesystem' ? 'text' : 'password'}
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  placeholder={selectedProvider?.placeholder ?? 'Enter key...'}
-                  className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 pr-10 text-sm text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="http://localhost:11434/v1"
+                  className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-sm text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
                 />
-                {provider !== 'filesystem' && (
-                  <button
-                    type="button"
-                    onClick={() => setShowValue(!showValue)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-brain-text-dim hover:text-brain-text"
-                  >
-                    {showValue ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </button>
-                )}
               </div>
-            </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs text-brain-text-dim mb-1">
+                    {provider === 'filesystem' ? 'Folder Path' : provider === 'custom' ? 'API Key (optional)' : 'API Key'}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showValue || provider === 'filesystem' ? 'text' : 'password'}
+                      value={value}
+                      onChange={(e) => setValue(e.target.value)}
+                      placeholder={selectedProvider?.placeholder ?? 'Enter key...'}
+                      className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 pr-10 text-sm text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+                    />
+                    {provider !== 'filesystem' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowValue(!showValue)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-brain-text-dim hover:text-brain-text"
+                      >
+                        {showValue ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {provider === 'custom' && (
+                  <div>
+                    <label className="block text-xs text-brain-text-dim mb-1">Base URL (optional)</label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder="https://your-endpoint.com/v1"
+                      className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-sm text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
             <div>
               <label className="block text-xs text-brain-text-dim mb-1">Description (optional)</label>
@@ -184,7 +220,7 @@ export function CredentialVault() {
               </button>
               <button
                 onClick={handleCreate}
-                disabled={!name.trim() || !value.trim() || submitting}
+                disabled={!name.trim() || (requiresKey && !value.trim()) || submitting}
                 className="flex-1 py-2 text-sm bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
               >
                 {submitting ? 'Encrypting...' : 'Save Credential'}

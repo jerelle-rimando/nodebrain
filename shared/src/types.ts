@@ -59,6 +59,7 @@ export interface Credential {
   provider: string;
   description?: string;
   createdAt: string;
+  baseUrl?: string;
   // raw value never sent to frontend
 }
 
