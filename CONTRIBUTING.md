@@ -20,7 +20,9 @@ Contributions are welcome! Here's how to get started:
 
 ## CLA
 
-By submitting a pull request, you agree that your contributions will be licensed under the same [AGPL-3.0 license](LICENSE) as this project.
+By submitting a pull request, you agree to the [Contributor License Agreement](CLA.md). On your first PR, the CLA bot will ask you to sign it with a comment.
+
+In short: you keep full copyright of your contribution, and you grant the project owner a license to use it as part of NodeBrain and its derivative works, including commercial versions.
 
 ## Questions?
 
