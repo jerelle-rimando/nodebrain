@@ -356,14 +356,32 @@ async function createWindow(): Promise<void> {
   } else {
     log('Waiting for backend...');
     try {
-      await waitForBackend(30000);
+      await waitForBackend(120000);
       log(`Loading frontend at http://localhost:${ACTIVE_FRONTEND_PORT}`);
       await mainWindow.loadURL(`http://localhost:${ACTIVE_FRONTEND_PORT}`);
       log('Frontend loaded');
     } catch (err) {
       log(`Backend wait failed: ${err}`);
-      // Show error page
-      await mainWindow.loadURL(`data:text/html,<body style="background:#0a0a0f;color:#e2e8f0;font-family:sans-serif;padding:40px"><h2>NodeBrain failed to start</h2><p>Check the log at AppData/Roaming/NodeBrain/nodebrain-log.txt</p></body>`);
+      // Backend is still coming up — show a waiting page and recover automatically once it's ready
+      await mainWindow.loadURL(
+        `data:text/html,<body style="background:#0a0a0f;color:#e2e8f0;font-family:sans-serif;padding:40px">` +
+        `<h2>NodeBrain is still starting…</h2>` +
+        `<p>The backend is taking longer than usual. The app will load automatically once it's ready.</p>` +
+        `<p style="color:#94a3b8;font-size:0.875rem">If this persists, check the log at AppData/Roaming/NodeBrain/nodebrain-log.txt</p></body>`
+      );
+      log('Backend wait timed out — starting recovery poller');
+      const recoveryInterval = setInterval(() => {
+        http.get(`http://localhost:${BACKEND_PORT}/api/health`, (res) => {
+          if (res.statusCode === 200) {
+            clearInterval(recoveryInterval);
+            log('Backend became ready after wait timeout — loading app');
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.loadURL(`http://localhost:${ACTIVE_FRONTEND_PORT}`)
+                .catch(e => log(`Recovery loadURL failed: ${e}`));
+            }
+          }
+        }).on('error', () => { /* backend not yet ready */ });
+      }, 2000);
     }
   }
 
@@ -510,7 +528,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('load-main-app', async () => {
     log('load-main-app called');
     try {
-      await waitForBackend(30000);
+      await waitForBackend(120000);
       log(`Loading main app at http://localhost:${ACTIVE_FRONTEND_PORT}`);
       await mainWindow?.loadURL(`http://localhost:${ACTIVE_FRONTEND_PORT}`);
       log('Main app loaded');

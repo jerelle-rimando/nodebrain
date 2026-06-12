@@ -105,9 +105,6 @@ async function main() {
     await initDb();
     console.log('✅ Database ready');
 
-    await initializeToolRegistry();
-    console.log('✅ Tool registry ready');
-
     startScheduler();
     console.log('✅ Scheduler ready');
 
@@ -116,6 +113,10 @@ async function main() {
       console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
       console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
     });
+
+    initializeToolRegistry()
+      .then(() => console.log('✅ Tool registry ready'))
+      .catch(err => console.warn('[ToolRegistry] Failed to initialize:', err));
 
     initRag()
       .then(() => console.log('✅ RAG engine ready'))

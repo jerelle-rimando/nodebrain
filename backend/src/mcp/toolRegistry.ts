@@ -80,71 +80,82 @@ const SERVER_CONFIGS: ServerConfig[] = [
 
 type DiagEntry = { name: string; status: 'connected' | 'failed' | 'skipped'; detail: string };
 
+let resolveRegistryReady!: () => void;
+export const toolRegistryReady: Promise<void> = new Promise(resolve => {
+  resolveRegistryReady = resolve;
+});
+
+const REGISTRY_READY_TIMEOUT_MS = 30_000;
+
 export async function initializeToolRegistry(): Promise<void> {
-  console.log('[ToolRegistry] Checking available integrations...');
+  try {
+    console.log('[ToolRegistry] Checking available integrations...');
 
-  const diag: DiagEntry[] = [];
+    const diag: DiagEntry[] = [];
 
-  for (const config of SERVER_CONFIGS) {
-    const credential = getCredentialForProvider(config.credentialProvider);
+    for (const config of SERVER_CONFIGS) {
+      const credential = getCredentialForProvider(config.credentialProvider);
 
-    if (!credential) {
-      console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
-      diag.push({ name: config.name, status: 'skipped', detail: 'no credential in vault' });
-      continue;
+      if (!credential) {
+        console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
+        diag.push({ name: config.name, status: 'skipped', detail: 'no credential in vault' });
+        continue;
+      }
+
+      const server = config.buildServer(credential ?? '');
+      await connectToServer(server, credential ?? '');
+
+      if (getConnectedServers().includes(config.name)) {
+        diag.push({ name: config.name, status: 'connected', detail: '' }); // tool count filled below
+      } else {
+        const reason = getConnectionError(config.name) ?? 'unknown error';
+        diag.push({ name: config.name, status: 'failed', detail: reason });
+      }
     }
 
-    const server = config.buildServer(credential ?? '');
-    await connectToServer(server, credential ?? '');
-
-    if (getConnectedServers().includes(config.name)) {
-      diag.push({ name: config.name, status: 'connected', detail: '' }); // tool count filled below
-    } else {
-      const reason = getConnectionError(config.name) ?? 'unknown error';
-      diag.push({ name: config.name, status: 'failed', detail: reason });
+    // Load custom MCP servers from DB
+    const customServers = getAllCustomMCPServers();
+    for (const server of customServers) {
+      if (server.transport === 'sse' && server.url) {
+        await connectToSSEServer({ name: server.name, url: server.url }, server.url);
+      } else if (server.transport === 'stdio' && server.command) {
+        await connectToServer({
+          name: server.name,
+          command: server.command,
+          args: server.args,
+          env: server.envVars,
+        }, `${server.command}|${server.args.join('|')}`);
+      }
     }
-  }
 
-  // Load custom MCP servers from DB
-  const customServers = getAllCustomMCPServers();
-  for (const server of customServers) {
-    if (server.transport === 'sse' && server.url) {
-      await connectToSSEServer({ name: server.name, url: server.url }, server.url);
-    } else if (server.transport === 'stdio' && server.command) {
-      await connectToServer({
-        name: server.name,
-        command: server.command,
-        args: server.args,
-        env: server.envVars,
-      }, `${server.command}|${server.args.join('|')}`);
+    const tools = await getAllAvailableTools();
+
+    // Fill in tool counts for connected entries
+    const countByServer = new Map<string, number>();
+    for (const t of tools) {
+      countByServer.set(t.serverName, (countByServer.get(t.serverName) ?? 0) + 1);
     }
-  }
-
-  const tools = await getAllAvailableTools();
-
-  // Fill in tool counts for connected entries
-  const countByServer = new Map<string, number>();
-  for (const t of tools) {
-    countByServer.set(t.serverName, (countByServer.get(t.serverName) ?? 0) + 1);
-  }
-  for (const entry of diag) {
-    if (entry.status === 'connected') {
-      const n = countByServer.get(entry.name) ?? 0;
-      entry.detail = `${n} tool${n !== 1 ? 's' : ''}`;
+    for (const entry of diag) {
+      if (entry.status === 'connected') {
+        const n = countByServer.get(entry.name) ?? 0;
+        entry.detail = `${n} tool${n !== 1 ? 's' : ''}`;
+      }
     }
-  }
 
-  // Boot diagnostic table
-  const nameW = Math.max(...diag.map(d => d.name.length), 4);
-  const divider = '─'.repeat(nameW + 36);
-  console.log(`\n[MCP] ${divider}`);
-  for (const { name, status, detail } of diag) {
-    const tag = status === 'connected' ? 'CONNECTED' : status === 'failed' ? 'FAILED   ' : 'SKIPPED  ';
-    console.log(`[MCP]   ${name.padEnd(nameW)}  ${tag}  ${detail}`);
-  }
-  console.log(`[MCP] ${divider}\n`);
+    // Boot diagnostic table
+    const nameW = Math.max(...diag.map(d => d.name.length), 4);
+    const divider = '─'.repeat(nameW + 36);
+    console.log(`\n[MCP] ${divider}`);
+    for (const { name, status, detail } of diag) {
+      const tag = status === 'connected' ? 'CONNECTED' : status === 'failed' ? 'FAILED   ' : 'SKIPPED  ';
+      console.log(`[MCP]   ${name.padEnd(nameW)}  ${tag}  ${detail}`);
+    }
+    console.log(`[MCP] ${divider}\n`);
 
-  console.log(`[ToolRegistry] Ready — ${tools.length} tools available`);
+    console.log(`[ToolRegistry] Ready — ${tools.length} tools available`);
+  } finally {
+    resolveRegistryReady();
+  }
 }
 
 const PDF_TOOL: MCPToolWithServer = {
@@ -184,6 +195,10 @@ const DELEGATE_TOOL: MCPToolWithServer = {
 };
 
 export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithServer[]> {
+  await Promise.race([
+    toolRegistryReady,
+    new Promise<void>(resolve => setTimeout(resolve, REGISTRY_READY_TIMEOUT_MS)),
+  ]);
   const mcpTools = await getAllAvailableTools();
   const tools: MCPToolWithServer[] = [...mcpTools, PDF_TOOL];
   if (agentId) {
