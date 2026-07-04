@@ -3,12 +3,31 @@ import { dbRun, dbGet, dbAll } from '../db/database';
 import { v4 as uuidv4 } from 'uuid';
 import type { Credential } from '../../shared-types';
 
+let cachedSecret: string | null = null;
+
+export function initVaultKey(): void {
+  if (cachedSecret !== null) return;
+  const secret = process.env.VAULT_SECRET;
+  if (!secret) {
+    throw new Error('VAULT_SECRET is not set. NodeBrain cannot start without it.');
+  }
+  cachedSecret = secret;
+  delete process.env.VAULT_SECRET;
+}
+
 function getEncryptionKey(): string {
+  if (cachedSecret !== null) {
+    return CryptoJS.SHA256(cachedSecret).toString();
+  }
+  // Defensive fallback: initVaultKey() should have been called before any decrypt.
+  // If reached, cache-and-delete now so this path can only fire once.
   const envKey = process.env.VAULT_SECRET;
   if (!envKey) {
     throw new Error('VAULT_SECRET is not set. NodeBrain cannot start without it.');
   }
-  return CryptoJS.SHA256(envKey).toString();
+  cachedSecret = envKey;
+  delete process.env.VAULT_SECRET;
+  return CryptoJS.SHA256(cachedSecret).toString();
 }
 
 export function encryptValue(plaintext: string): string {

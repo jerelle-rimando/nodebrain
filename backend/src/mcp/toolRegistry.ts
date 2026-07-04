@@ -10,6 +10,10 @@ interface ServerConfig {
   buildServer: (credential: string) => MCPServer;
 }
 
+// Versions are pinned deliberately — do NOT automate updates or remove the @version suffix.
+// Pinning prevents silent supply-chain re-resolution: without a version, npx re-checks the
+// npm registry on every reconnect and may silently pull a newer (potentially malicious) release.
+// To upgrade a server, manually verify the new release and update the version string here.
 const SERVER_CONFIGS: ServerConfig[] = [
   {
     name: 'telegram',
@@ -17,7 +21,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'telegram',
       command: 'npx',
-      args: ['-y', '@iqai/mcp-telegram'],
+      args: ['-y', '@iqai/mcp-telegram@0.1.4'],
       env: { TELEGRAM_BOT_TOKEN: token, SAMPLING_ENABLED: '' },
     }),
   },
@@ -27,7 +31,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'github',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-github'],
+      args: ['-y', '@modelcontextprotocol/server-github@2025.4.8'],
       env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
     }),
   },
@@ -37,7 +41,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'slack',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-slack'],
+      args: ['-y', '@modelcontextprotocol/server-slack@2025.4.25'],
       env: { SLACK_BOT_TOKEN: token },
     }),
   },
@@ -47,7 +51,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'notion',
       command: 'npx',
-      args: ['-y', '@notionhq/notion-mcp-server'],
+      args: ['-y', '@notionhq/notion-mcp-server@2.4.1'],
       env: {
         OPENAPI_MCP_HEADERS: JSON.stringify({
           Authorization: 'Bearer ' + token,
@@ -62,7 +66,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (allowedPath) => ({
       name: 'filesystem',
       command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+      args: ['-y', '@modelcontextprotocol/server-filesystem@2026.1.14', allowedPath],
       env: {},
     }),
   },
@@ -72,7 +76,7 @@ const SERVER_CONFIGS: ServerConfig[] = [
     buildServer: (token) => ({
       name: 'brave-search',
       command: 'npx',
-      args: ['-y', '@brave/brave-search-mcp-server'],
+      args: ['-y', '@brave/brave-search-mcp-server@2.0.85'],
       env: { BRAVE_API_KEY: token },
     }),
   },

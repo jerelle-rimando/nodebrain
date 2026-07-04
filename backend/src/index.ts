@@ -10,6 +10,7 @@ import { startScheduler } from './scheduler/scheduler';
 import { initRag } from './rag/ragEngine';
 import { initializeToolRegistry } from './mcp/toolRegistry';
 import { disconnectAll } from './mcp/mcpClient';
+import { initVaultKey } from './vault/credentialVault';
 import agentRouter from './routes/agents';
 import { taskRouter, logsRouter } from './routes/tasks';
 import credentialRouter from './routes/credentials';
@@ -21,6 +22,16 @@ import { AVAILABLE_MODELS } from './agents/agentEngine';
 import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
+
+// Windows: the MCP SDK only sets windowsHide when it detects Electron
+// (via 'type' in process). This backend runs as a standalone Node process,
+// so that check fails and a cmd.exe window flashes on every MCP server spawn.
+// Mimicking Electron's process.type here flips windowsHide on. Verified
+// side-effect-free in this process (no live consumer reads process.type
+// except the `debug` package, which checks === 'renderer').
+if (process.platform === 'win32') {
+  (process as any).type = 'browser';
+}
 
 const PORT = Number(process.env.PORT) || 3001;
 const BIND_HOST = process.env.NODEBRAIN_BIND_HOST ?? '127.0.0.1';
@@ -96,6 +107,15 @@ async function main() {
         console.log(`✅ VAULT_SECRET generated and written to ${envPath}`);
       }
     }
+
+    // Cache the raw vault secret and remove it from process.env here — before initDb(),
+    // startScheduler(), or initializeToolRegistry() runs. This is the proven-safe point:
+    // VAULT_SECRET is guaranteed present (generated above if missing), nothing has been
+    // spawned yet, and no MCP server can inherit it from the environment after this line.
+    // NODEBRAIN_DATA_DIR is deleted for the same reason; database.ts and ragEngine.ts
+    // already captured it into module-level constants at import time.
+    initVaultKey();
+    delete process.env.NODEBRAIN_DATA_DIR;
 
     // Verify pdfjs-dist loads correctly
     import('pdfjs-dist/legacy/build/pdf.mjs').catch((err) => {
