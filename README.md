@@ -296,7 +296,7 @@ When MCP security patterns for web deployments mature, NodeBrain is designed to 
 
 For now, local-first prioritizes control and safety: your keys, your machine, your agents.
 
-> ⚠️ **Third-party MCP servers:** NodeBrain only ships integrations from well-known publishers (Anthropic, Notion, GitHub, IQAi, Brave). Third-party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
+> ⚠️ **Third-party MCP servers:** NodeBrain ships integrations from official vendor packages (Notion, Brave) and Anthropic's reference MCP servers (GitHub, Slack, Filesystem), plus one third-party community package (IQAi's Telegram server, which is unofficial). All run locally on your machine. Third-party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
 
 > ⚠️ **Network deployment:** NodeBrain is designed for localhost use only. Deploying to a networked environment without authentication, rate limiting, and input sanitization introduces significant security risks.
 
