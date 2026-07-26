@@ -1,7 +1,7 @@
 # 🧠 NodeBrain — AI Agent Command Center
 <img width="3174" height="633" alt="Transparent_Github_Readme_Logo" src="https://github.com/user-attachments/assets/60c2952b-3f3d-4a88-83e3-2d23e7765fcd" />
 
-NodeBrain™ is a local-first (with potential for web deployment) system for building and running AI agents that actually do things.
+NodeBrain™ is a free, open-source, and local-first (with potential for web deployment) desktop platform for building and running AI agents that actually do things.
 
 > ⚠️ **Windows users:** NodeBrain is currently unsigned. Windows SmartScreen may show a warning on first install. Click "More info" → "Run anyway" to proceed. NodeBrain is fully open source — you can review every line of code on GitHub.
 
