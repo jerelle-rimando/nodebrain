@@ -169,7 +169,7 @@ NodeBrain supports the following integrations and their agent-accessible tools:
 | GitHub | List repos, create issues, open PRs, read files | Ready |
 | Slack | Send messages, list channels, upload files | Ready |
 | Notion | Read/write pages, query databases | Ready |
-| Brave Search | Web search, news search, image search | Ready |
+| Web Search | Web search, fetch article content (no API key required) | Ready |
 | Local Filesystem | Read/write files, list directories | Ready |
 | Gmail | Read and send email | Requires Google Cloud setup |
 | Google Drive | List and manage files | Requires Google Cloud setup |
@@ -296,7 +296,7 @@ When MCP security patterns for web deployments mature, NodeBrain is designed to 
 
 For now, local-first prioritizes control and safety: your keys, your machine, your agents.
 
-> ⚠️ **Third-party MCP servers:** NodeBrain ships integrations from official vendor packages (Notion, Brave) and Anthropic's reference MCP servers (GitHub, Slack, Filesystem), plus one third-party community package (IQAi's Telegram server, which is unofficial). All run locally on your machine. Third-party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
+> ⚠️ **Third-party MCP servers:** NodeBrain ships integrations from an official vendor package (Notion) and Anthropic's reference MCP servers (GitHub, Slack, Filesystem), plus third-party community packages: IQAi's Telegram server (unofficial) and the web search server (an unofficial package that scrapes public search engines locally — no API key or account required). All run locally on your machine. Third-party MCP servers added by users or contributors are not audited. Only use MCP servers from sources you trust.
 
 > ⚠️ **Network deployment:** NodeBrain is designed for localhost use only. Deploying to a networked environment without authentication, rate limiting, and input sanitization introduces significant security risks.
 
