@@ -18,8 +18,8 @@ import {
   SiGithub,
   SiSlack,
   SiNotion,
-  SiBrave,
 } from 'react-icons/si';
+import { FiGlobe } from 'react-icons/fi';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { toast } from '../shared/Toast';
@@ -32,6 +32,7 @@ interface Integration {
   credentialProvider: string;
   credentialPlaceholder: string;
   isSecret?: boolean;
+  requiresCredential?: boolean;
   tools: string[];
   setupSteps: string[];
   docsUrl?: string;
@@ -112,21 +113,19 @@ const INTEGRATIONS: Integration[] = [
     docsUrl: 'https://www.notion.so/my-integrations',
   },
   {
-    id: 'brave',
-    label: 'Brave Search',
-    icon: SiBrave,
-    description: 'Give agents the ability to search the web.',
-    credentialProvider: 'brave',
-    credentialPlaceholder: 'BSA...',
-    isSecret: true,
-    tools: ['Web search', 'News search', 'Image search'],
+    id: 'open-websearch',
+    label: 'Web Search',
+    icon: FiGlobe,
+    description: 'Search the web — no API key needed. Runs on your machine.',
+    credentialProvider: 'open-websearch',
+    credentialPlaceholder: '',
+    requiresCredential: false,
+    tools: ['Web search', 'Fetch article content'],
     setupSteps: [
-      'Go to brave.com/search/api',
-      'Sign up for a free API key (2000 queries/month free)',
-      'Copy your API key',
-      'Paste it below and click Connect',
+      'No API key required — this runs locally on your machine',
+      'Click Enable to start the local search server',
+      'Results come from scraping public search engines (DuckDuckGo, Bing)',
     ],
-    docsUrl: 'https://brave.com/search/api/',
   },
   {
     id: 'filesystem',
@@ -151,10 +150,11 @@ interface ConnectSectionProps {
   onTokenChange: (id: string, value: string) => void;
   onConnect: (integration: Integration) => void;
   onDisconnect: (integration: Integration) => void;
+  onEnable: (integration: Integration) => void;
 }
 
 function ConnectSection(props: ConnectSectionProps) {
-  const { integration, connected, saving, tokenInputs, onTokenChange, onConnect, onDisconnect } = props;
+  const { integration, connected, saving, tokenInputs, onTokenChange, onConnect, onDisconnect, onEnable } = props;
 
   if (connected) {
     return (
@@ -163,6 +163,18 @@ function ConnectSection(props: ConnectSectionProps) {
         className="w-full py-2 text-xs border border-brain-error/30 text-brain-error hover:bg-brain-error/10 rounded-lg transition-colors"
       >
         Disconnect {integration.label}
+      </button>
+    );
+  }
+
+  if (integration.requiresCredential === false) {
+    return (
+      <button
+        onClick={() => onEnable(integration)}
+        disabled={saving === integration.id}
+        className="w-full py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
+      >
+        {saving === integration.id ? 'Enabling...' : 'Enable'}
       </button>
     );
   }
@@ -247,6 +259,7 @@ export function IntegrationsPage() {
   const [testResults, setTestResults] = useState<Record<string, 'ok' | 'fail'>>({});
   const [tokenInputs, setTokenInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
+  const [serverStatus, setServerStatus] = useState<Record<string, boolean>>({});
   const mcp = useMcpServers();
 
   useEffect(() => {
@@ -255,7 +268,22 @@ export function IntegrationsPage() {
       .catch(console.error);
   }, []);
 
+  useEffect(() => {
+    const credentialLess = INTEGRATIONS.filter((i) => i.requiresCredential === false);
+    if (credentialLess.length === 0) return;
+    Promise.all(
+      credentialLess.map((i) =>
+        api.getIntegrationStatus(i.credentialProvider).then((r) => [i.credentialProvider, r.connected] as const)
+      )
+    )
+      .then((entries) => setServerStatus(Object.fromEntries(entries)))
+      .catch(console.error);
+  }, []);
+
   function isConnected(integration: Integration): boolean {
+    if (integration.requiresCredential === false) {
+      return serverStatus[integration.credentialProvider] ?? false;
+    }
     return credentials.some((c) => c.provider === integration.credentialProvider);
   }
 
@@ -292,6 +320,24 @@ export function IntegrationsPage() {
     } catch (err) {
           toast.error('Failed to save credential. Check your input and try again.');
           console.error(err);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function handleEnable(integration: Integration) {
+    setSaving(integration.id);
+    try {
+      const result = await api.enableIntegration(integration.credentialProvider);
+      setServerStatus((prev) => ({ ...prev, [integration.credentialProvider]: result.connected }));
+      if (result.connected) {
+        toast.success(integration.label + ' connected successfully');
+      } else {
+        toast.error('Could not connect ' + integration.label + '. Try again in a moment.');
+      }
+    } catch (err) {
+      toast.error('Failed to enable ' + integration.label + '.');
+      console.error(err);
     } finally {
       setSaving(null);
     }
@@ -521,6 +567,7 @@ export function IntegrationsPage() {
                   onTokenChange={handleTokenChange}
                   onConnect={handleConnect}
                   onDisconnect={handleDisconnect}
+                  onEnable={handleEnable}
                 />
               )}
             </div>

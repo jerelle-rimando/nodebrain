@@ -61,7 +61,7 @@ export const BASE_URLS: Record<string, string> = {
 
 const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
-  groq: 'llama-3.3-70b-versatile',
+  groq: 'openai/gpt-oss-120b',
   anthropic: 'claude-sonnet-4-6',
   gemini: 'gemini-2.0-flash',
   ollama: 'llama3.2',
@@ -81,7 +81,6 @@ export const AVAILABLE_MODELS: Record<string, string[]> = {
     'openai/gpt-oss-120b',
     'meta-llama/llama-4-scout-17b-16e-instruct',
     'meta-llama/llama-4-maverick-17b-128e-instruct',
-    'llama-3.3-70b-versatile',
   ],
   gemini:    ['gemini-2.0-flash'],
   mistral:   ['mistral-small-latest'],
@@ -122,7 +121,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'claude-3-haiku-20240307':    { input:  0.25, output:  1.25 }, // retired; not on current pricing page
 
   // ── Groq ──────────────────────────────────────────────────────────────────
-  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 }, // official groq.com/pricing
+  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 }, // decommissioned on Groq; retained for historical cost display of past tasks only
   'llama-3.1-70b-versatile': { input: 0.59, output: 0.79 }, // deprecated on Groq; last known price
   'llama-3.1-8b-instant':    { input: 0.05, output: 0.08 }, // official groq.com/pricing
   'mixtral-8x7b-32768':      { input: 0.24, output: 0.24 }, // deprecated on Groq; last known price
@@ -232,6 +231,9 @@ const DESTRUCTIVE_TOOLS = new Set([
   'notion__API-update-a-block',
   'notion__API-patch-block-children',
   'notion__API-move-page',
+  // pdf-reader — reads arbitrary absolute paths; gated behind approval mode
+  // even though it's a read, since it isn't confined to the filesystem sandbox.
+  'pdf-reader__read_pdf',
 ]);
 
 function getClient(provider: string, apiKey: string, customBaseUrl?: string): OpenAI {

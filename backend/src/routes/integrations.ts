@@ -1,7 +1,25 @@
 import { Router } from 'express';
 import { getCredentialForProvider } from '../vault/credentialVault';
+import { getConnectedServers } from '../mcp/mcpClient';
+import { providerRequiresCredential, reloadToolRegistry } from '../mcp/toolRegistry';
 
 const router = Router();
+
+router.get('/:provider/status', (req, res) => {
+  const { provider } = req.params;
+  res.json({ success: true, data: { connected: getConnectedServers().includes(provider) } });
+});
+
+router.post('/:provider/enable', async (req, res) => {
+  const { provider } = req.params;
+  try {
+    await reloadToolRegistry();
+    res.json({ success: true, data: { connected: getConnectedServers().includes(provider) } });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.json({ success: true, data: { connected: false, message } });
+  }
+});
 
 router.get('/:provider/test', async (req, res) => {
   const { provider } = req.params;
@@ -9,7 +27,7 @@ router.get('/:provider/test', async (req, res) => {
   try {
     const credential = getCredentialForProvider(provider);
 
-    if (!credential) {
+    if (!credential && providerRequiresCredential(provider)) {
       res.json({
         success: true,
         data: { success: false, message: `No credential found for "${provider}"` },
@@ -77,22 +95,15 @@ router.get('/:provider/test', async (req, res) => {
       return;
     }
 
-    if (provider === 'brave') {
-      const response = await fetch(
-        'https://api.search.brave.com/res/v1/web/search?q=test&count=1',
-        { headers: { 'X-Subscription-Token': credential } },
-      );
-      if (response.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: 'Brave Search connection verified' },
-        });
-      } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'Invalid Brave Search API key' },
-        });
-      }
+    if (provider === 'open-websearch') {
+      const connected = getConnectedServers().includes('open-websearch');
+      res.json({
+        success: true,
+        data: {
+          success: connected,
+          message: connected ? 'Web Search is running and connected' : 'Web Search server is not connected',
+        },
+      });
       return;
     }
 
@@ -117,7 +128,7 @@ router.get('/:provider/test', async (req, res) => {
 
     if (provider === 'filesystem') {
       const fs = await import('fs');
-      const exists = fs.existsSync(credential);
+      const exists = fs.existsSync(credential ?? '');
       res.json({
         success: true,
         data: {

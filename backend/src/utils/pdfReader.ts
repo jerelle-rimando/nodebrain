@@ -1,8 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { getCredentialForProvider } from '../vault/credentialVault';
 
 export async function readPdfAsText(filePath: string): Promise<string> {
-  const absolutePath = path.resolve(filePath);
+  const allowedRoot = getCredentialForProvider('filesystem');
+  if (!allowedRoot) {
+    throw new Error('No filesystem folder has been authorized. Configure the Local Filesystem integration before reading files.');
+  }
+
+  const resolvedRoot = path.resolve(allowedRoot);
+  const absolutePath = path.resolve(resolvedRoot, filePath);
+
+  const isContained = absolutePath === resolvedRoot || absolutePath.startsWith(resolvedRoot + path.sep);
+  if (!isContained) {
+    throw new Error('Access denied: path is outside the authorized folder.');
+  }
 
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`File not found: ${absolutePath}`);

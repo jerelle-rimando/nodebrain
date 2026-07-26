@@ -160,6 +160,13 @@ export async function initDb(): Promise<void> {
     }
   }
 
+  // Migration: llama-3.3-70b-versatile was decommissioned on Groq. Rescue any
+  // already-stored agents pointing at it so they don't 400 on their next run.
+  // Idempotent — safe to run on every startup, no-ops once no rows match.
+  _db.run(
+    "UPDATE agents SET model = 'openai/gpt-oss-120b' WHERE model = 'llama-3.3-70b-versatile' AND provider = 'groq'",
+  );
+
   persist();
 }
 

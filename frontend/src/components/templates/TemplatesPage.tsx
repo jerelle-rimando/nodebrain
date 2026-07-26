@@ -100,7 +100,7 @@ const INTEGRATION_COLORS: Record<string, string> = {
   GitHub: 'bg-gray-500/10 text-gray-300 border-gray-500/30',
   Slack: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
   Filesystem: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
-  'Brave Search': 'bg-violet-500/10 text-violet-400 border-violet-500/30',
+  'Web Search': 'bg-violet-500/10 text-violet-400 border-violet-500/30',
 };
 
 const REQUIRED_INTEGRATIONS: Record<string, string[]> = {
@@ -108,7 +108,7 @@ const REQUIRED_INTEGRATIONS: Record<string, string[]> = {
   'GitHub PR Watcher': ['GitHub', 'Slack'],
   'File Manager Team': ['Filesystem'],
   'Daily Standup': ['Slack'],
-  'Research Assistant': ['Brave Search', 'Filesystem'],
+  'Research Assistant': ['Web Search', 'Filesystem'],
 };
 
 // ─── Create-from-agents modal ─────────────────────────────────────────────────

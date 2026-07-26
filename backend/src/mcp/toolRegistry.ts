@@ -7,6 +7,7 @@ import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 interface ServerConfig {
   name: string;
   credentialProvider: string;
+  requiresCredential?: boolean; // defaults to true when omitted
   buildServer: (credential: string) => MCPServer;
 }
 
@@ -71,16 +72,26 @@ const SERVER_CONFIGS: ServerConfig[] = [
     }),
   },
   {
-    name: 'brave-search',
-    credentialProvider: 'brave',
-    buildServer: (token) => ({
-      name: 'brave-search',
+    name: 'open-websearch',
+    credentialProvider: 'open-websearch',
+    requiresCredential: false,
+    buildServer: () => ({
+      name: 'open-websearch',
       command: 'npx',
-      args: ['-y', '@brave/brave-search-mcp-server@2.0.85'],
-      env: { BRAVE_API_KEY: token },
+      args: ['-y', 'open-websearch@2.1.11'],
+      env: {
+        MODE: 'stdio',
+        DEFAULT_SEARCH_ENGINE: 'duckduckgo',
+        ALLOWED_SEARCH_ENGINES: 'duckduckgo,bing',
+      },
     }),
   },
 ];
+
+export function providerRequiresCredential(provider: string): boolean {
+  const config = SERVER_CONFIGS.find(c => c.credentialProvider === provider);
+  return config?.requiresCredential ?? true;
+}
 
 type DiagEntry = { name: string; status: 'connected' | 'failed' | 'skipped'; detail: string };
 
@@ -98,16 +109,18 @@ export async function initializeToolRegistry(): Promise<void> {
     const diag: DiagEntry[] = [];
 
     for (const config of SERVER_CONFIGS) {
-      const credential = getCredentialForProvider(config.credentialProvider);
+      const requiresCredential = config.requiresCredential ?? true;
+      const credential = requiresCredential ? getCredentialForProvider(config.credentialProvider) : '';
 
-      if (!credential) {
+      if (requiresCredential && !credential) {
         console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
         diag.push({ name: config.name, status: 'skipped', detail: 'no credential in vault' });
         continue;
       }
 
       const server = config.buildServer(credential ?? '');
-      await connectToServer(server, credential ?? '');
+      const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
+      await connectToServer(server, fingerprint);
 
       if (getConnectedServers().includes(config.name)) {
         diag.push({ name: config.name, status: 'connected', detail: '' }); // tool count filled below
@@ -258,13 +271,12 @@ async function syncConnections(): Promise<void> {
   const desired = new Map<string, DesiredEntry>();
 
   for (const config of SERVER_CONFIGS) {
-    const credential = getCredentialForProvider(config.credentialProvider);
-    if (!credential) continue;
-    desired.set(config.name, {
-      type: 'stdio',
-      server: config.buildServer(credential),
-      fingerprint: credential,
-    });
+    const requiresCredential = config.requiresCredential ?? true;
+    const credential = requiresCredential ? getCredentialForProvider(config.credentialProvider) : '';
+    if (requiresCredential && !credential) continue;
+    const server = config.buildServer(credential ?? '');
+    const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
+    desired.set(config.name, { type: 'stdio', server, fingerprint });
   }
 
   for (const cs of getAllCustomMCPServers()) {

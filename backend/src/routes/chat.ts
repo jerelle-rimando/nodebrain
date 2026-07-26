@@ -191,7 +191,7 @@ router.post('/message', async (req, res) => {
         const customBaseUrl = getBaseUrlForProvider(chosenProvider);
         const defaultModels: Record<string, string> = {
           openai: 'gpt-4o-mini',
-          groq: 'llama-3.3-70b-versatile',
+          groq: 'openai/gpt-oss-120b',
           ollama: 'llama3.2',
           mistral: 'mistral-small-latest',
           together: 'meta-llama/Llama-3-70b-chat-hf',

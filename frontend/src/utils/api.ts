@@ -85,7 +85,11 @@ export const api = {
 
   testIntegration: (provider: string) =>
     request<{ success: boolean; message: string }>(`/integrations/${provider}/test`),
-  
+  getIntegrationStatus: (provider: string) =>
+    request<{ connected: boolean }>(`/integrations/${provider}/status`),
+  enableIntegration: (provider: string) =>
+    request<{ connected: boolean }>(`/integrations/${provider}/enable`, { method: 'POST' }),
+
   parseSchedule: (input: string) =>
     request<{ cron: string | null; human: string | null }>(`/schedule/parse?input=${encodeURIComponent(input)}`),
 

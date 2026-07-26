@@ -16,7 +16,6 @@ const PROVIDERS = [
   { id: 'github', label: 'GitHub', placeholder: 'ghp_...' },
   { id: 'slack', label: 'Slack', placeholder: 'xoxb-...' },
   { id: 'notion', label: 'Notion', placeholder: 'secret_...' },
-  { id: 'brave', label: 'Brave Search', placeholder: 'BSA...' },
   { id: 'filesystem', label: 'Local Filesystem', placeholder: 'C:\\Users\\you\\Documents' },
   { id: 'custom', label: 'Custom / Other', placeholder: 'Enter key...' },
 ];

@@ -5,8 +5,17 @@ import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 
-function formatContent(content: string): string {
+function escapeHtml(content: string): string {
   return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatContent(content: string): string {
+  return escapeHtml(content)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br/>');
 }
@@ -20,10 +29,19 @@ export function Dashboard() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? 'groq');
-  const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'llama-3.3-70b-versatile');
+  const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'openai/gpt-oss-120b');
 
   useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
   useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
+
+  // One-time migration: llama-3.3-70b-versatile was decommissioned on Groq.
+  // Users with that stale value already persisted in localStorage need it
+  // overwritten; a deliberate choice of any other model is left untouched.
+  useEffect(() => {
+    if (localStorage.getItem('nb_default_model') === 'llama-3.3-70b-versatile') {
+      setDefaultModel('openai/gpt-oss-120b');
+    }
+  }, []);
 
   useEffect(() => {
     api.getChatHistory().then((messages) => {
