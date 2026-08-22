@@ -183,7 +183,7 @@ export function Dashboard() {
             </>
           ) : (
             <>
-              <div className="w-2 h-2 rounded-full bg-brain-accent animate-pulse-slow" />
+              <div className="w-2 h-2 rounded-full bg-brain-success animate-pulse-slow" />
               <h2 className="text-sm font-semibold text-brain-text">Agent Studio</h2>
               <span className="ml-auto text-xs text-brain-text-dim font-mono">
                 {agents.length} active

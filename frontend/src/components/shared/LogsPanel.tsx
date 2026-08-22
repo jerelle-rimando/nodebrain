@@ -10,7 +10,7 @@ const LEVEL_COLORS: Record<string, string> = {
   info: '#94a3b8',
   warn: '#f59e0b',
   error: '#ef4444',
-  debug: '#2dd4bf',
+  debug: '#3b82f6',
 };
 
 // h:mm AM/PM, no seconds — for card header and timestamps
@@ -94,7 +94,7 @@ const STATUS_BADGE_CLASSES: Record<RunStatus, { label: string; className: string
   failed:   { label: 'Failed',   className: 'bg-brain-error/15 text-brain-error border-brain-error/30' },
   success:  { label: 'Done',     className: 'bg-brain-success/15 text-brain-success border-brain-success/30' },
   approval: { label: 'Approval', className: 'bg-brain-warning/15 text-brain-warning border-brain-warning/30' },
-  running:  { label: 'Running',  className: 'bg-brain-accent/15 text-brain-accent border-brain-accent/30' },
+  running:  { label: 'Running',  className: 'bg-brain-success/15 text-brain-success border-brain-success/30' },
 };
 
 function StatusBadge({ status }: { status: RunStatus }) {
@@ -110,7 +110,7 @@ const OUTCOME_CLASS: Record<RunStatus, string> = {
   failed:   'text-brain-error',
   success:  'text-brain-success',
   approval: 'text-brain-warning',
-  running:  'text-brain-accent',
+  running:  'text-brain-success',
 };
 
 const OUTCOME_LABEL: Record<RunStatus, string> = {

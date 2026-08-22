@@ -420,7 +420,7 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
                     >
                       {task.status === 'completed' && <CheckCircle size={11} className="text-brain-success flex-shrink-0" />}
                       {task.status === 'failed' && <XCircle size={11} className="text-brain-error flex-shrink-0" />}
-                      {task.status === 'running' && <Loader2 size={11} className="animate-spin text-brain-accent flex-shrink-0" />}
+                      {task.status === 'running' && <Loader2 size={11} className="animate-spin text-brain-success flex-shrink-0" />}
                       {task.status === 'pending' && <Clock size={11} className="text-brain-warning flex-shrink-0" />}
                       {task.status === 'cancelled' && <Ban size={11} className="text-brain-text-dim flex-shrink-0" />}
                       <div className="flex-1 min-w-0">

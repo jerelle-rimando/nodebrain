@@ -52,7 +52,7 @@
   }
 
   .status-idle    { background-color: #374151; }
-  .status-running { background-color: #2dd4bf; animation: pulse 1.5s ease-in-out infinite; }
+  .status-running { background-color: #10b981; animation: pulse 1.5s ease-in-out infinite; }
   .status-error   { background-color: #ef4444; }
   .status-stopped { background-color: #9094ab; }
   .status-completed { background-color: #10b981; }
@@ -68,7 +68,7 @@
   stroke: #1f2235 !important;
 }
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #2dd4bf !important;
+  stroke: #3b82f6 !important;
 }
 .react-flow__controls {
   background: #0f1118 !important;
@@ -94,8 +94,8 @@
 /* Chat markdown */
 .chat-content code {
   font-family: 'JetBrains Mono', monospace;
-  background: rgba(45, 212, 191, 0.1);
-  border: 1px solid rgba(45, 212, 191, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   padding: 0.1em 0.4em;
   border-radius: 4px;
   font-size: 0.85em;
