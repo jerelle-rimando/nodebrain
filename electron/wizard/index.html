@@ -85,6 +85,11 @@
       display: block;
     }
 
+    #screen-choose-model.active,
+    #screen-api-key.active {
+      display: flex;
+    }
+
     /* ── Screen 1: Welcome ── */
     #screen-welcome {
       position: fixed;
@@ -263,6 +268,348 @@
       to { transform: rotate(360deg); }
     }
 
+    /* ── Screen: Choose Model ── */
+    #screen-choose-model {
+      background: #060608;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      padding: 40px 24px;
+    }
+
+    .cm-header {
+      text-align: center;
+      max-width: 560px;
+      margin-bottom: 32px;
+    }
+
+    .cm-heading {
+      font-size: 24px;
+      font-weight: 600;
+      color: #e2e8f0;
+      letter-spacing: 0.01em;
+    }
+
+    .cm-subheading {
+      margin-top: 8px;
+      font-size: 14px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    .cm-cards {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 720px;
+    }
+
+    .cm-card {
+      display: flex;
+      flex-direction: column;
+      width: 320px;
+      background: #12121a;
+      border: 0.5px solid #2a2a3a;
+      border-radius: 12px;
+      padding: 24px;
+      position: relative;
+    }
+
+    .cm-card-recommended {
+      border: 2px solid #6366f1;
+    }
+
+    .cm-pill {
+      align-self: flex-start;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: #94a3b8;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 999px;
+      padding: 3px 10px;
+      margin-bottom: 14px;
+    }
+
+    .cm-pill-accent {
+      color: #6366f1;
+      background: rgba(99, 102, 241, 0.15);
+    }
+
+    .cm-card-icon {
+      color: #6366f1;
+      margin-bottom: 12px;
+    }
+
+    .cm-card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 8px;
+    }
+
+    .cm-card-body {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
+    .cm-card-details {
+      list-style: none;
+      margin-bottom: 20px;
+      flex: 1;
+    }
+
+    .cm-card-details li {
+      position: relative;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 11.5px;
+      color: #94a3b8;
+      padding-left: 14px;
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+
+    .cm-card-details li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      color: #6366f1;
+    }
+
+    .cm-btn {
+      width: 100%;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .cm-btn-primary {
+      background: #6366f1;
+      border: none;
+      color: #fff;
+    }
+
+    .cm-btn-primary:hover {
+      background: #5457e5;
+    }
+
+    .cm-btn-secondary {
+      background: transparent;
+      border: 0.5px solid #2a2a3a;
+      color: #e2e8f0;
+    }
+
+    .cm-btn-secondary:hover {
+      border-color: #6366f1;
+      color: #6366f1;
+    }
+
+    .cm-skip {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #94a3b8;
+      text-align: center;
+    }
+
+    .cm-skip-link {
+      color: #6366f1;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .cm-skip-link:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Screen: API Key Setup ── */
+    #screen-api-key {
+      background: #060608;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 20px 24px;
+    }
+
+    .ak-container {
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .ak-header {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    .ak-heading {
+      font-size: 22px;
+      font-weight: 600;
+      color: #e2e8f0;
+      letter-spacing: 0.01em;
+    }
+
+    .ak-subheading {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    .ak-steps {
+      list-style: none;
+      width: 100%;
+      margin-bottom: 14px;
+    }
+
+    .ak-steps li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .ak-step-num {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(99, 102, 241, 0.15);
+      color: #6366f1;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ak-step-text {
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.4;
+      padding-top: 1px;
+    }
+
+    .ak-btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      background: transparent;
+      border: 0.5px solid #2a2a3a;
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .ak-btn-secondary:hover {
+      border-color: #6366f1;
+      color: #6366f1;
+    }
+
+    .ak-note {
+      margin-top: 8px;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      text-align: center;
+    }
+
+    .ak-input-group {
+      width: 100%;
+      margin-top: 18px;
+    }
+
+    .ak-input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #12121a;
+      border: 0.5px solid #2a2a3a;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .ak-input::placeholder {
+      color: #6b7280;
+    }
+
+    .ak-input:focus {
+      border-color: #6366f1;
+    }
+
+    .ak-helper {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .ak-error {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #f87171;
+      display: none;
+    }
+
+    .ak-error.visible {
+      display: block;
+    }
+
+    .ak-btn-primary {
+      width: 100%;
+      margin-top: 14px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      background: #6366f1;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .ak-btn-primary:hover:not(:disabled) {
+      background: #5457e5;
+    }
+
+    .ak-btn-primary:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .ak-back {
+      margin-top: 14px;
+      text-align: center;
+    }
+
+    .ak-back-link {
+      font-size: 12px;
+      color: #94a3b8;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .ak-back-link:hover {
+      color: #6366f1;
+      text-decoration: underline;
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; }
       to { opacity: 1; }
@@ -294,7 +641,7 @@
     <img id="welcome-bg" src="welcome.png" alt="" draggable="false" />
 
     <!-- Invisible Continue button -->
-    <button id="btn-continue" onclick="goToLoading()" title=""></button>
+    <button id="btn-continue" onclick="showScreen('screen-choose-model')" title=""></button>
 
     <!-- Invisible Terms of Service link -->
     <button id="btn-tos" onclick="openLink('https://nodebrain.app/legal/terms')" title="Terms of Service"></button>
@@ -303,7 +650,100 @@
     <button id="btn-pp" onclick="openLink('https://nodebrain.app/legal/privacy')" title="Privacy Policy"></button>
   </div>
 
-  <!-- ── Screen 2: Loading ── -->
+  <!-- ── Screen 2: Choose Model ── -->
+  <div id="screen-choose-model" class="screen">
+    <div class="cm-header">
+      <h1 class="cm-heading">How should NodeBrain think?</h1>
+      <p class="cm-subheading">Your agents need an AI to run on. Pick one — you can change this later.</p>
+    </div>
+
+    <div class="cm-cards">
+      <!-- Local model card -->
+      <div class="cm-card cm-card-recommended">
+        <span class="cm-pill cm-pill-accent">Recommended</span>
+        <div class="cm-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="4" width="20" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="8" y1="21" x2="16" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <h2 class="cm-card-title">Run it on this computer</h2>
+        <p class="cm-card-body">Free forever. No account, no card. Nothing you do leaves your computer.</p>
+        <ul class="cm-card-details">
+          <li>One-time 4 GB download</li>
+          <li>Runs on your hardware, so replies take a bit longer</li>
+        </ul>
+        <button class="cm-btn cm-btn-primary" onclick="setupLocalModel()">Set it up</button>
+      </div>
+
+      <!-- Online API card -->
+      <div class="cm-card">
+        <span class="cm-pill">Faster</span>
+        <div class="cm-card-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 18a4.5 4.5 0 0 1-.4-8.98A5.5 5.5 0 0 1 17.2 8.02 4 4 0 0 1 17 16H7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h2 class="cm-card-title">Use an online AI service</h2>
+        <p class="cm-card-body">Quick to set up and much faster. Free to start with Groq.</p>
+        <ul class="cm-card-details">
+          <li>Needs a free signup</li>
+          <li>Your tasks go to their servers</li>
+        </ul>
+        <button class="cm-btn cm-btn-secondary" style="font-weight:400" onclick="setupApiKey()">Walk me through it</button>
+      </div>
+    </div>
+
+    <p class="cm-skip">Already have an API key? <a href="#" class="cm-skip-link" onclick="skipModelSetup(); return false;">Skip this</a></p>
+  </div>
+
+  <!-- ── Screen 3: API Key Setup ── -->
+  <div id="screen-api-key" class="screen">
+    <div class="ak-container">
+      <div class="ak-header">
+        <h1 class="ak-heading">Connect your AI</h1>
+        <p class="ak-subheading">Groq is free and takes about a minute. No credit card.</p>
+      </div>
+
+      <ol class="ak-steps">
+        <li>
+          <span class="ak-step-num">1</span>
+          <span class="ak-step-text">Open the Groq console and sign in with Google</span>
+        </li>
+        <li>
+          <span class="ak-step-num">2</span>
+          <span class="ak-step-text">Click <strong>Create API Key</strong> and give it any name</span>
+        </li>
+        <li>
+          <span class="ak-step-num">3</span>
+          <span class="ak-step-text">Copy the key and paste it below</span>
+        </li>
+      </ol>
+
+      <button class="ak-btn-secondary" onclick="openLink('https://console.groq.com/keys')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Open Groq console
+      </button>
+      <p class="ak-note">Groq only shows the key once — copy it before closing the tab.</p>
+
+      <div class="ak-input-group">
+        <input type="password" id="ak-key-input" class="ak-input" placeholder="gsk_..." oninput="onApiKeyInput()" autocomplete="off" spellcheck="false" />
+        <p class="ak-helper">Your key is encrypted and stored on your computer.</p>
+        <p class="ak-error" id="ak-error"></p>
+      </div>
+
+      <button class="ak-btn-primary" id="ak-connect-btn" disabled onclick="connectApiKey()">Connect</button>
+
+      <p class="ak-back"><a href="#" class="ak-back-link" onclick="showScreen('screen-choose-model'); return false;">Back</a></p>
+    </div>
+  </div>
+
+  <!-- ── Screen 4: Loading ── -->
   <div id="screen-loading" class="screen">
     <img id="loading-bg" src="loading.png" alt="" draggable="false" />
 
@@ -345,6 +785,66 @@
     function setStatus(subtitle, progress) {
       document.getElementById('loading-subtitle').textContent = subtitle;
       document.getElementById('loading-bar').style.width = progress + '%';
+    }
+
+    // ── Choose Model screen actions ──────────────────────────────────────────
+    // TODO: kick off the local model download (~4 GB) before entering the app
+    function setupLocalModel() {
+      goToLoading();
+    }
+
+    // Open the guided flow for creating/entering a free API key (e.g. Groq)
+    function setupApiKey() {
+      resetApiKeyScreen();
+      showScreen('screen-api-key');
+    }
+
+    // Skip straight to the same API key screen for users who already have a key
+    function skipModelSetup() {
+      resetApiKeyScreen();
+      showScreen('screen-api-key');
+    }
+
+    // ── API Key Setup screen actions ─────────────────────────────────────────
+    let akLastErroredKey = null;
+
+    function resetApiKeyScreen() {
+      const input = document.getElementById('ak-key-input');
+      const error = document.getElementById('ak-error');
+      const connectBtn = document.getElementById('ak-connect-btn');
+      input.value = '';
+      error.textContent = '';
+      error.classList.remove('visible');
+      connectBtn.disabled = true;
+      akLastErroredKey = null;
+    }
+
+    function onApiKeyInput() {
+      const input = document.getElementById('ak-key-input');
+      const error = document.getElementById('ak-error');
+      const connectBtn = document.getElementById('ak-connect-btn');
+      connectBtn.disabled = input.value.trim().length === 0;
+      error.textContent = '';
+      error.classList.remove('visible');
+      akLastErroredKey = null;
+    }
+
+    function connectApiKey() {
+      const input = document.getElementById('ak-key-input');
+      const error = document.getElementById('ak-error');
+      const key = input.value.trim();
+
+      // Only block once per distinct value — if they click Connect again with
+      // the same key, let it through (they may be using a different provider's key).
+      if (!key.startsWith('gsk_') && key !== akLastErroredKey) {
+        error.textContent = "That doesn't look like a Groq key — it should start with gsk_";
+        error.classList.add('visible');
+        akLastErroredKey = key;
+        return;
+      }
+
+      // TODO: save the key to the vault via the backend before proceeding
+      goToLoading();
     }
 
     // ── Flow ──────────────────────────────────────────────────────────────────
