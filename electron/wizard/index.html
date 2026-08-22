@@ -829,9 +829,10 @@
       akLastErroredKey = null;
     }
 
-    function connectApiKey() {
+    async function connectApiKey() {
       const input = document.getElementById('ak-key-input');
       const error = document.getElementById('ak-error');
+      const connectBtn = document.getElementById('ak-connect-btn');
       const key = input.value.trim();
 
       // Only block once per distinct value — if they click Connect again with
@@ -843,8 +844,42 @@
         return;
       }
 
-      // TODO: save the key to the vault via the backend before proceeding
-      goToLoading();
+      // No electronAPI (e.g. wizard opened directly in a browser for testing) —
+      // nothing to save it to, so just proceed.
+      if (!window.electronAPI || !window.electronAPI.saveCredential) {
+        goToLoading();
+        return;
+      }
+
+      const originalLabel = connectBtn.textContent;
+      connectBtn.disabled = true;
+      connectBtn.textContent = 'Connecting…';
+      error.textContent = '';
+      error.classList.remove('visible');
+
+      try {
+        const result = await window.electronAPI.saveCredential({
+          name: 'Groq',
+          provider: 'groq',
+          value: key,
+          description: 'Added via setup wizard',
+        });
+
+        if (result && result.success) {
+          goToLoading();
+          return;
+        }
+
+        error.textContent = "Couldn't save your key. Check your connection and try again.";
+        error.classList.add('visible');
+      } catch (err) {
+        console.error(err);
+        error.textContent = "Couldn't save your key. Check your connection and try again.";
+        error.classList.add('visible');
+      }
+
+      connectBtn.disabled = false;
+      connectBtn.textContent = originalLabel;
     }
 
     // ── Flow ──────────────────────────────────────────────────────────────────

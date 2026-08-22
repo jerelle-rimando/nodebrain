@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   testApiKey: (provider: string, key: string) => ipcRenderer.invoke('test-api-key', provider, key),
+  saveCredential: (payload: { name: string; provider: string; value: string; description?: string; baseUrl?: string }) =>
+    ipcRenderer.invoke('save-credential', payload),
   loadMainApp: () => ipcRenderer.invoke('load-main-app'),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   resetAllData: () => ipcRenderer.invoke('reset-all-data'),

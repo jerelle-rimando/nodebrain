@@ -477,6 +477,33 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('save-credential', async (_event: Electron.IpcMainInvokeEvent, payload: unknown) => {
+    try {
+      await waitForBackend(30000);
+    } catch {
+      log('save-credential: backend did not become ready in time');
+      return { success: false, error: "Couldn't reach NodeBrain's backend." };
+    }
+
+    try {
+      const res = await fetch(`http://localhost:${BACKEND_PORT}/api/credentials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        log(`save-credential: backend responded ${res.status}: ${text}`);
+        return { success: false, error: `Backend responded with ${res.status}` };
+      }
+      log('save-credential: credential saved');
+      return { success: true };
+    } catch (err) {
+      log(`save-credential: request failed: ${err}`);
+      return { success: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle('reset-all-data', async () => {
     log('reset-all-data: starting');
     backendProcess?.kill();
