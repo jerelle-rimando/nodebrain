@@ -32,6 +32,21 @@ extraResources:
       - "**/*"
       - "!nodebrain"
       - "!nodebrain/**"
+      - "!**/*.map"
+      - "!@types"
+      - "!@types/**"
+      - "!pm2"
+      - "!pm2/**"
+      - "!ts-node"
+      - "!ts-node/**"
+      - "!tsx"
+      - "!tsx/**"
+      - "!typescript"
+      - "!typescript/**"
+      - "!esbuild"
+      - "!esbuild/**"
+      - "!@esbuild"
+      - "!@esbuild/**"
   - from: backend/package.json
     to: backend/package.json
 
