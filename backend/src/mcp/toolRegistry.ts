@@ -3,6 +3,7 @@ import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { getAllCustomMCPServers } from '../db/mcpServerRepository';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
+import { getAgentById } from '../db/agentRepository';
 
 interface ServerConfig {
   name: string;
@@ -218,11 +219,28 @@ export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithSer
   ]);
   const mcpTools = await getAllAvailableTools();
   const tools: MCPToolWithServer[] = [...mcpTools, PDF_TOOL];
-  if (agentId) {
-    const connections = getConnectionsForAgent(agentId);
-    if (connections.length > 0) tools.push(DELEGATE_TOOL);
+
+  const toolPermissions = agentId ? getAgentById(agentId)?.toolPermissions : undefined;
+  let result = tools;
+
+  if (toolPermissions && toolPermissions.length > 0) {
+    const allowlist = new Set(toolPermissions);
+    result = tools.filter(t => allowlist.has(`${t.serverName}__${t.name}`));
+
+    console.debug(
+      `[ToolRegistry] agent ${agentId}: ${result.length}/${tools.length} tools returned ` +
+      `(${tools.length - result.length} filtered out by toolPermissions)`
+    );
   }
-  return tools;
+
+  // Delegation is granted by the connections graph, not the tool allowlist: an agent's
+  // toolPermissions scope which MCP/PDF tools it gets, but must never silently sever
+  // delegation the user already wired up via a connection.
+  if (agentId && getConnectionsForAgent(agentId).length > 0) {
+    result = [...result, DELEGATE_TOOL];
+  }
+
+  return result;
 }
 
 export function formatToolsForOpenAI(tools: MCPToolWithServer[]): Array<{
