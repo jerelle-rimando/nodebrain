@@ -14,6 +14,7 @@ import 'reactflow/dist/style.css';
 import { AgentNode } from './AgentNode';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
+import { formatCronSchedule } from '../../utils/formatSchedule';
 import type { Agent, Task } from '@shared/types';
 import {
   Bot,
@@ -221,7 +222,7 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
             {agent.schedule && (
               <div className="flex justify-between text-xs">
                 <span className="text-brain-text-dim">Schedule</span>
-                <span className="text-brain-text font-mono">{agent.schedule}</span>
+                <span className="text-brain-text font-mono">{formatCronSchedule(agent.schedule)}</span>
               </div>
             )}
             <div className="flex justify-between text-xs">

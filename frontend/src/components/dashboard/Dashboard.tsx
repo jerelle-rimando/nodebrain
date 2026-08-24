@@ -433,7 +433,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
         />
         <p className="text-xs text-brain-text-dim mt-1 opacity-60">
-          {new Date(message.timestamp).toLocaleTimeString()}
+          {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
         </p>
       </div>
     </div>
