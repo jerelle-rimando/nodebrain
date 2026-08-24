@@ -57,6 +57,11 @@ export function useLiveSync() {
         useStore.getState().removeAgent(id);
       });
 
+      es.addEventListener('chat:token', (e) => {
+        const { requestId, token } = JSON.parse((e as MessageEvent).data) as { requestId: string; token: string };
+        useStore.getState().appendStreamToken(requestId, token);
+      });
+
       es.onerror = () => {
         es.close();
         if (!unmounted) {

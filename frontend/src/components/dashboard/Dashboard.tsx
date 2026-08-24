@@ -21,9 +21,12 @@ function formatContent(content: string): string {
 }
 
 export function Dashboard() {
-  const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels } = useStore();
+  const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels, streamingMessages, clearStreamingMessage } = useStore();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [streamingRequestId, setStreamingRequestId] = useState<string | null>(null);
+  const logsMarkRef = useRef(0);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -61,11 +64,24 @@ export function Dashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, agentMessages, selectedAgent]);
 
+  // While a request is in flight, surface the latest relevant SSE log
+  // (tool calls, agent activity) as an in-progress status line.
+  useEffect(() => {
+    if (!sending) return;
+    if (logs.length <= logsMarkRef.current) return;
+    logsMarkRef.current = logs.length;
+    const latest = logs[logs.length - 1];
+    if (latest) setStatusText(latest.message);
+  }, [logs, sending]);
+
   async function handleSend() {
     if (!input.trim() || sending) return;
     const text = input.trim();
     setInput('');
+    setStatusText(null);
+    logsMarkRef.current = logs.length;
     setSending(true);
+    let requestId: string | null = null;
 
     try {
       if (selectedAgent) {
@@ -95,8 +111,18 @@ export function Dashboard() {
         }));
         api.saveMessages([userMsg, assistantMsg]).catch(console.error);
       } else {
-        const { userMessage, assistantMessage } = await api.sendChatMessage(text);
-        addChatMessage(userMessage);
+        const userMsg: ChatMessage = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: text,
+          timestamp: new Date().toISOString(),
+        };
+        addChatMessage(userMsg);
+
+        requestId = crypto.randomUUID();
+        setStreamingRequestId(requestId);
+
+        const { assistantMessage } = await api.sendChatMessage(text, requestId);
         addChatMessage(assistantMessage);
       }
     } catch (err) {
@@ -115,7 +141,10 @@ export function Dashboard() {
         addChatMessage(errorMsg);
       }
     } finally {
+      if (requestId) clearStreamingMessage(requestId);
+      setStreamingRequestId(null);
       setSending(false);
+      setStatusText(null);
       inputRef.current?.focus();
     }
   }
@@ -132,6 +161,8 @@ export function Dashboard() {
     : chatMessages;
 
   const recentLogs = logs.slice(-5);
+
+  const streamingText = streamingRequestId ? streamingMessages[streamingRequestId] : undefined;
 
   const placeholder = selectedAgent
     ? 'Ask ' + selectedAgent.name + ' anything...'
@@ -263,9 +294,19 @@ export function Dashboard() {
               <div className="w-7 h-7 rounded-lg bg-brain-accent/20 flex items-center justify-center flex-shrink-0">
                 <Bot size={14} className="text-brain-accent" />
               </div>
-              <div className="bg-brain-bg border border-brain-border rounded-xl px-4 py-3">
-                <Loader2 size={14} className="animate-spin text-brain-text-dim" />
-              </div>
+              {streamingText ? (
+                <div className="max-w-[80%] bg-brain-bg border border-brain-border rounded-xl px-4 py-3 text-sm text-brain-text-dim">
+                  <div
+                    className="chat-content leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: formatContent(streamingText) }}
+                  />
+                </div>
+              ) : (
+                <div className="bg-brain-bg border border-brain-border rounded-xl px-4 py-3 flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin text-brain-text-dim flex-shrink-0" />
+                  <span className="text-sm text-brain-text-dim">{statusText ?? 'Thinking…'}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -297,12 +338,12 @@ export function Dashboard() {
       </div>
 
       <div className="w-72 flex flex-col gap-4">
-        <div className="rounded-xl border border-brain-border bg-brain-surface p-4 flex-1">
-          <h3 className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider mb-3">Active Agents</h3>
+        <div className="rounded-xl border border-brain-border bg-brain-surface p-4 flex-1 flex flex-col min-h-0">
+          <h3 className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider mb-3 flex-shrink-0">Active Agents</h3>
           {agents.length === 0 ? (
             <p className="text-xs text-brain-text-dim text-center py-4">No agents yet</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 overflow-y-auto flex-1 min-h-0">
               {agents.map((agent) => (
                 <button
                   key={agent.id}

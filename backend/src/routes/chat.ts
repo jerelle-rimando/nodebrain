@@ -3,7 +3,7 @@ import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/creden
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
-import { BASE_URLS, parseAgentFromChat, executeAgentTask } from '../agents/agentEngine';
+import { BASE_URLS, parseAgentFromChat, executeAgentTask, agentEvents } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
 import { scheduleAgent } from '../scheduler/scheduler';
@@ -61,7 +61,7 @@ router.post('/save', (req, res) => {
 
 router.post('/message', async (req, res) => {
   try {
-    const { content } = req.body as { content?: string };
+    const { content, requestId } = req.body as { content?: string; requestId?: string };
     if (!content?.trim()) {
       return res.status(400).json({ success: false, error: 'content is required' });
     }
@@ -210,20 +210,46 @@ router.post('/message', async (req, res) => {
             ? `The user has these agents: ${agents.map((a) => a.name).join(', ')}.`
             : 'The user has no agents yet.';
 
-        const completion = await client.chat.completions.create({
-          model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`,
-            },
-            { role: 'user', content: content.trim() },
-          ],
-          temperature: 0.7,
-          max_tokens: 1000,
-        });
+        if (requestId) {
+          const stream = await client.chat.completions.create({
+            model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`,
+              },
+              { role: 'user', content: content.trim() },
+            ],
+            temperature: 0.7,
+            max_tokens: 1000,
+            stream: true,
+          });
 
-        assistantContent = completion.choices[0]?.message?.content ?? 'No response received.';
+          let accumulated = '';
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta?.content ?? '';
+            if (delta) {
+              accumulated += delta;
+              agentEvents.emit('chat:token', { requestId, token: delta });
+            }
+          }
+          assistantContent = accumulated || 'No response received.';
+        } else {
+          const completion = await client.chat.completions.create({
+            model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`,
+              },
+              { role: 'user', content: content.trim() },
+            ],
+            temperature: 0.7,
+            max_tokens: 1000,
+          });
+
+          assistantContent = completion.choices[0]?.message?.content ?? 'No response received.';
+        }
       }
     }
 

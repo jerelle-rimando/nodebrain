@@ -18,6 +18,7 @@ interface AppState {
   credentials: Credential[];
   chatMessages: ChatMessage[];
   availableModels: Record<string, string[]>;
+  streamingMessages: Record<string, string>;
 
   activeTab: ActiveTab;
   selectedAgentId: string | null;
@@ -44,6 +45,8 @@ interface AppState {
 
   setChatMessages: (msgs: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
+  appendStreamToken: (requestId: string, token: string) => void;
+  clearStreamingMessage: (requestId: string) => void;
 
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedAgent: (id: string | null) => void;
@@ -59,6 +62,7 @@ export const useStore = create<AppState>((set) => ({
   credentials: [],
   chatMessages: [],
   availableModels: {},
+  streamingMessages: {},
   activeTab: 'dashboard',
   selectedAgentId: null,
   logsFilterAgentId: null,
@@ -84,6 +88,15 @@ export const useStore = create<AppState>((set) => ({
 
   setChatMessages: (chatMessages) => set({ chatMessages }),
   addChatMessage: (msg) => set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+  appendStreamToken: (requestId, token) =>
+    set((s) => ({
+      streamingMessages: { ...s.streamingMessages, [requestId]: (s.streamingMessages[requestId] ?? '') + token },
+    })),
+  clearStreamingMessage: (requestId) =>
+    set((s) => {
+      const { [requestId]: _removed, ...rest } = s.streamingMessages;
+      return { streamingMessages: rest };
+    }),
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setSelectedAgent: (selectedAgentId) => set({ selectedAgentId }),

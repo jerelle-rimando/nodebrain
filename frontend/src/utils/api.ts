@@ -74,10 +74,10 @@ export const api = {
     request<{ id: string }>(`/mcp-servers/${id}`, { method: 'DELETE' }),
 
   getChatHistory: () => request<import('@shared/types').ChatMessage[]>('/chat/history'),
-  sendChatMessage: (content: string) =>
+  sendChatMessage: (content: string, requestId?: string) =>
     request<{ userMessage: import('@shared/types').ChatMessage; assistantMessage: import('@shared/types').ChatMessage }>(
       '/chat/message',
-      { method: 'POST', body: JSON.stringify({ content }) }
+      { method: 'POST', body: JSON.stringify({ content, requestId }) }
     ),
 
     saveMessages: (messages: import('@shared/types').ChatMessage[]) =>
