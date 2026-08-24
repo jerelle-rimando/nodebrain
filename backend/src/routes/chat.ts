@@ -83,9 +83,31 @@ router.post('/message', async (req, res) => {
 
     const safeContent = content.slice(0, 1000);
     const lowerContent = safeContent.toLowerCase();
-    const isCreateIntent = ['create', 'make', 'build', 'set up', 'new agent'].some((w) =>
-      lowerContent.includes(w),
-    );
+    const trimmedLowerContent = lowerContent.trim();
+
+    // Question words that signal "asking about" rather than "asking for".
+    // "can" is deliberately excluded: "Can you create an agent that..." is a
+    // common polite phrasing for a genuine creation request, not a question
+    // about capabilities. This means a bare "can"-led question without a "?"
+    // (e.g. "Can agents send emails") slips past this specific check, but the
+    // trailing "?" check below catches the overwhelming majority of those.
+    const QUESTION_STARTERS = [
+      'what', 'which', 'how', 'why', 'when', 'where', 'who',
+      'could', 'do', 'does', 'is', 'are', 'should', 'would',
+    ];
+    const ASKING_ABOUT_PHRASES = [
+      'what kind of', 'what type of', 'tell me about', 'explain', 'list the', 'can you tell',
+    ];
+    const isQuestion =
+      trimmedLowerContent.endsWith('?') ||
+      QUESTION_STARTERS.some((w) => trimmedLowerContent.startsWith(`${w} `)) ||
+      ASKING_ABOUT_PHRASES.some((p) => trimmedLowerContent.includes(p));
+
+    const isCreateIntent =
+      !isQuestion &&
+      ['create', 'make', 'build', 'set up', 'new agent', 'i need', 'i want'].some((w) =>
+        lowerContent.includes(w),
+      );
     const agentMatch = safeContent.match(
       /(?:ask|tell|use|run|execute)\s+["']?([^"']+?)["']?\s+(?:to|agent)/i,
     );
