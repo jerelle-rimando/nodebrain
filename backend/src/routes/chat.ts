@@ -61,10 +61,17 @@ router.post('/save', (req, res) => {
 
 router.post('/message', async (req, res) => {
   try {
-    const { content, requestId } = req.body as { content?: string; requestId?: string };
+    const { content, requestId, mode, provider: requestedProvider, model: requestedModel } = req.body as {
+      content?: string;
+      requestId?: string;
+      mode?: 'chat' | 'agent';
+      provider?: string;
+      model?: string;
+    };
     if (!content?.trim()) {
       return res.status(400).json({ success: false, error: 'content is required' });
     }
+    const isAgentMode = mode !== 'chat';
 
     const userMsg: ChatMessage = {
       id: uuidv4(),
@@ -87,7 +94,7 @@ router.post('/message', async (req, res) => {
     let assistantContent = '';
     let agentId: string | undefined;
 
-    if (isCreateIntent) {
+    if (isAgentMode && isCreateIntent) {
       const agentConfigs = await parseAgentFromChat(content);
       const validConfigs = (agentConfigs ?? []).filter((c) => c.name);
       if (validConfigs.length > 0) {
@@ -148,7 +155,7 @@ router.post('/message', async (req, res) => {
       } else {
         assistantContent = `I couldn't parse an agent configuration from that. Try: "Create an agent that summarizes news articles and sends it to me every morning in Telegram."`;
       }
-    } else if (targetAgentName) {
+    } else if (isAgentMode && targetAgentName) {
       const agents = getAllAgents();
       const targetAgent = agents.find((a) =>
         a.name.toLowerCase().includes(targetAgentName.toLowerCase()),
@@ -177,78 +184,117 @@ router.post('/message', async (req, res) => {
     } else {
       // Fall back to actual AI conversation
       const providerPriority = ['openai', 'groq', 'mistral', 'together', 'fireworks', 'ollama'];
+      const defaultModels: Record<string, string> = {
+        openai: 'gpt-4o-mini',
+        groq: 'openai/gpt-oss-120b',
+        anthropic: 'claude-sonnet-4-6',
+        ollama: 'llama3.2',
+        mistral: 'mistral-small-latest',
+        together: 'meta-llama/Llama-3-70b-chat-hf',
+        fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
+      };
+
       let apiKey = '';
       let chosenProvider = 'openai';
+      let chosenModel = '';
 
-      for (const p of providerPriority) {
-        const key = getCredentialForProvider(p);
-        if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
+      // Only honor an explicitly requested provider when it's actually usable
+      // (has a stored credential, or is ollama which needs none). Otherwise a
+      // stale/default picker selection with no matching credential would hard-fail
+      // chat instead of falling back to whatever the user does have configured.
+      const requestedApiKey = requestedProvider ? getCredentialForProvider(requestedProvider) : undefined;
+      if (requestedProvider && (requestedApiKey || requestedProvider === 'ollama')) {
+        chosenProvider = requestedProvider;
+        apiKey = requestedApiKey ?? '';
+        chosenModel = requestedModel || defaultModels[chosenProvider] || 'gpt-4o-mini';
+      } else {
+        for (const p of providerPriority) {
+          const key = getCredentialForProvider(p);
+          if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
+        }
+        chosenModel = defaultModels[chosenProvider] || 'gpt-4o-mini';
       }
 
       if (!apiKey && chosenProvider !== 'ollama') {
         assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
       } else {
-        const customBaseUrl = getBaseUrlForProvider(chosenProvider);
-        const defaultModels: Record<string, string> = {
-          openai: 'gpt-4o-mini',
-          groq: 'openai/gpt-oss-120b',
-          ollama: 'llama3.2',
-          mistral: 'mistral-small-latest',
-          together: 'meta-llama/Llama-3-70b-chat-hf',
-          fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
-        };
-
-        const { default: OpenAI } = await import('openai');
-        const client = new OpenAI({
-          apiKey: apiKey || 'ollama',
-          baseURL: customBaseUrl || (BASE_URLS[chosenProvider] ?? BASE_URLS.openai),
-        });
-
         const agents = getAllAgents();
         const agentContext =
           agents.length > 0
             ? `The user has these agents: ${agents.map((a) => a.name).join(', ')}.`
             : 'The user has no agents yet.';
+        const systemPrompt = `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`;
 
-        if (requestId) {
-          const stream = await client.chat.completions.create({
-            model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`,
-              },
-              { role: 'user', content: content.trim() },
-            ],
-            temperature: 0.7,
-            max_tokens: 1000,
-            stream: true,
-          });
+        if (chosenProvider === 'anthropic') {
+          const { default: Anthropic } = await import('@anthropic-ai/sdk');
+          const anthropic = new Anthropic({ apiKey });
 
-          let accumulated = '';
-          for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta?.content ?? '';
-            if (delta) {
+          if (requestId) {
+            const anthropicStream = anthropic.messages.stream({
+              model: chosenModel,
+              max_tokens: 1000,
+              system: systemPrompt,
+              messages: [{ role: 'user', content: content.trim() }],
+            });
+            let accumulated = '';
+            anthropicStream.on('text', (delta) => {
               accumulated += delta;
               agentEvents.emit('chat:token', { requestId, token: delta });
-            }
+            });
+            await anthropicStream.finalMessage();
+            assistantContent = accumulated || 'No response received.';
+          } else {
+            const response = await anthropic.messages.create({
+              model: chosenModel,
+              max_tokens: 1000,
+              system: systemPrompt,
+              messages: [{ role: 'user', content: content.trim() }],
+            });
+            const textBlock = response.content.find((b) => b.type === 'text');
+            assistantContent = textBlock && textBlock.type === 'text' ? textBlock.text : 'No response received.';
           }
-          assistantContent = accumulated || 'No response received.';
         } else {
-          const completion = await client.chat.completions.create({
-            model: defaultModels[chosenProvider] ?? 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`,
-              },
-              { role: 'user', content: content.trim() },
-            ],
-            temperature: 0.7,
-            max_tokens: 1000,
+          const customBaseUrl = getBaseUrlForProvider(chosenProvider);
+          const { default: OpenAI } = await import('openai');
+          const client = new OpenAI({
+            apiKey: apiKey || 'ollama',
+            baseURL: customBaseUrl || (BASE_URLS[chosenProvider] ?? BASE_URLS.openai),
           });
 
-          assistantContent = completion.choices[0]?.message?.content ?? 'No response received.';
+          if (requestId) {
+            const stream = await client.chat.completions.create({
+              model: chosenModel,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: content.trim() },
+              ],
+              temperature: 0.7,
+              max_tokens: 1000,
+              stream: true,
+            });
+
+            let accumulated = '';
+            for await (const chunk of stream) {
+              const delta = chunk.choices[0]?.delta?.content ?? '';
+              if (delta) {
+                accumulated += delta;
+                agentEvents.emit('chat:token', { requestId, token: delta });
+              }
+            }
+            assistantContent = accumulated || 'No response received.';
+          } else {
+            const completion = await client.chat.completions.create({
+              model: chosenModel,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: content.trim() },
+              ],
+              temperature: 0.7,
+              max_tokens: 1000,
+            });
+
+            assistantContent = completion.choices[0]?.message?.content ?? 'No response received.';
+          }
         }
       }
     }

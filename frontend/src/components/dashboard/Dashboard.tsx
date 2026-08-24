@@ -4,6 +4,9 @@ import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
+import { ModelPickerButton } from './ModelPickerButton';
+
+type ChatMode = 'chat' | 'agent';
 
 function escapeHtml(content: string): string {
   return content
@@ -33,9 +36,11 @@ export function Dashboard() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? 'groq');
   const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'openai/gpt-oss-120b');
+  const [chatMode, setChatMode] = useState<ChatMode>(() => (localStorage.getItem('nb_chat_mode') as ChatMode) ?? 'agent');
 
   useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
   useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
+  useEffect(() => { localStorage.setItem('nb_chat_mode', chatMode); }, [chatMode]);
 
   // One-time migration: llama-3.3-70b-versatile was decommissioned on Groq.
   // Users with that stale value already persisted in localStorage need it
@@ -122,7 +127,11 @@ export function Dashboard() {
         requestId = crypto.randomUUID();
         setStreamingRequestId(requestId);
 
-        const { assistantMessage } = await api.sendChatMessage(text, requestId);
+        const { assistantMessage } = await api.sendChatMessage(text, requestId, {
+          mode: chatMode,
+          provider: defaultProvider,
+          model: defaultModel,
+        });
         addChatMessage(assistantMessage);
       }
     } catch (err) {
@@ -166,7 +175,7 @@ export function Dashboard() {
 
   const placeholder = selectedAgent
     ? 'Ask ' + selectedAgent.name + ' anything...'
-    : 'Create an agent, run tasks, or ask questions...';
+    : 'Message NodeBrain…';
 
   return (
     <div className="flex h-full gap-4 p-4">
@@ -219,25 +228,6 @@ export function Dashboard() {
               <span className="ml-auto text-xs text-brain-text-dim font-mono">
                 {agents.length} active
               </span>
-              <select
-                value={defaultProvider}
-                onChange={(e) => {
-                  const p = e.target.value;
-                  setDefaultProvider(p);
-                  setDefaultModel(availableModels[p]?.[0] ?? '');
-                }}
-                className="text-xs font-mono bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 text-brain-text cursor-pointer focus:outline-none hover:border-brain-accent"
-              >
-                {Object.keys(availableModels).map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-              <ModelSelect
-                provider={defaultProvider}
-                model={defaultModel}
-                availableModels={availableModels}
-                onChange={setDefaultModel}
-              />
             </>
           )}
         </div>
@@ -314,25 +304,86 @@ export function Dashboard() {
         </div>
 
         <div className="p-3 border-t border-brain-border">
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              rows={1}
-              className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2.5 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none focus:border-brain-accent transition-colors font-sans"
-              style={{ minHeight: '40px', maxHeight: '120px' }}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || sending}
-              className="flex-shrink-0 w-10 h-10 rounded-lg bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-            >
-              <Send size={15} className="text-white" />
-            </button>
-          </div>
+          {selectedAgent ? (
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                rows={1}
+                className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2.5 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none focus:border-brain-accent transition-colors font-sans"
+                style={{ minHeight: '40px', maxHeight: '120px' }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || sending}
+                className="flex-shrink-0 w-10 h-10 rounded-lg bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+              >
+                <Send size={15} className="text-white" />
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-brain-border bg-brain-bg focus-within:border-brain-accent transition-colors overflow-hidden">
+              <div className="flex justify-end px-2.5 pt-2">
+                <ModelPickerButton
+                  provider={defaultProvider}
+                  model={defaultModel}
+                  availableModels={availableModels}
+                  onChange={(p, m) => {
+                    setDefaultProvider(p);
+                    setDefaultModel(m);
+                  }}
+                />
+              </div>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                rows={1}
+                className="w-full bg-transparent px-3 py-2 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none font-sans"
+                style={{ minHeight: '40px', maxHeight: '160px' }}
+              />
+              <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5">
+                <div className="flex items-center rounded-md border border-brain-border overflow-hidden text-xs font-medium flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setChatMode('chat')}
+                    className={
+                      'px-2.5 py-1 transition-colors ' +
+                      (chatMode === 'chat'
+                        ? 'bg-brain-accent text-white'
+                        : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border')
+                    }
+                  >
+                    Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChatMode('agent')}
+                    className={
+                      'px-2.5 py-1 transition-colors ' +
+                      (chatMode === 'agent'
+                        ? 'bg-brain-accent text-white'
+                        : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border')
+                    }
+                  >
+                    Agent
+                  </button>
+                </div>
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || sending}
+                  className="flex-shrink-0 w-8 h-8 rounded-lg bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                >
+                  <Send size={14} className="text-white" />
+                </button>
+              </div>
+            </div>
+          )}
           <p className="text-xs text-brain-text-dim mt-2 px-1">Enter to send · Shift+Enter for newline</p>
         </div>
       </div>
