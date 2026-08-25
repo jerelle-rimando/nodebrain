@@ -11,6 +11,10 @@ router.get('/', (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders();
+  // Small SSE writes (e.g. single chat tokens) can otherwise sit in the
+  // kernel's Nagle buffer waiting to coalesce or for a delayed ACK, which
+  // produces bursty, stuttering streaming instead of a smooth per-token flow.
+  res.socket?.setNoDelay(true);
 
   const sendEvent = (event: string, data: unknown) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

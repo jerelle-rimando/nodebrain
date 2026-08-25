@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useStore } from '../stores/appStore';
 import type { ToolApprovalRequest } from '../stores/appStore';
 import type { TaskLog, Task, Agent } from '@shared/types';
+import { pushToken } from '../utils/tokenStreamBuffer';
 
 export function useLiveSync() {
   useEffect(() => {
@@ -59,7 +60,10 @@ export function useLiveSync() {
 
       es.addEventListener('chat:token', (e) => {
         const { requestId, token } = JSON.parse((e as MessageEvent).data) as { requestId: string; token: string };
-        useStore.getState().appendStreamToken(requestId, token);
+        // Buffered, not applied to the store directly — Dashboard's
+        // useSmoothedStream drains this at a steady rate instead of
+        // re-rendering once per token.
+        pushToken(requestId, token);
       });
 
       es.onerror = () => {
