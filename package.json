@@ -1,7 +1,7 @@
 {
   "name": "nodebrain",
-  "version": "0.3.8",
-  "description": "NodeBrain - Local AI Agent System",
+  "version": "0.4.0",
+  "description": "NodeBrain - Hand Off Your Repetitive Tasks",
   "author": "Jerelle Rimando",
   "private": true,
   "main": "electron/dist/main.js",

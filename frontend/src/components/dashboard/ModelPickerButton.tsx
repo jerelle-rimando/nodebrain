@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronUp, Cpu, Search, Sparkles, Zap } from 'lucide-react';
+import { SiAnthropic, SiGooglegemini, SiMistralai, SiOllama, SiOpenai } from 'react-icons/si';
+import type { IconType } from 'react-icons';
 
 interface Props {
   provider: string;
@@ -8,16 +11,39 @@ interface Props {
   onChange: (provider: string, model: string) => void;
 }
 
+const PROVIDER_ICONS: Record<string, IconType> = {
+  openai: SiOpenai,
+  gemini: SiGooglegemini,
+  google: SiGooglegemini,
+  anthropic: SiAnthropic,
+  claude: SiAnthropic,
+  ollama: SiOllama,
+  mistral: SiMistralai,
+  groq: Zap,
+  together: Cpu,
+  fireworks: Sparkles,
+};
+
+function ProviderIcon({ provider }: { provider: string }) {
+  const Icon = PROVIDER_ICONS[provider.toLowerCase()] ?? Cpu;
+  return <Icon size={14} className="text-brain-text-dim flex-shrink-0" />;
+}
+
 export function ModelPickerButton({ provider, model, availableModels, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<{ bottom: number; right: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function onOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideButton = containerRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideButton && !insideMenu) {
         setOpen(false);
       }
     }
@@ -39,6 +65,25 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    function updatePosition() {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuPos({
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open]);
+
   const lowerQuery = query.trim().toLowerCase();
   const groups = Object.entries(availableModels)
     .map(([p, models]) => ({
@@ -52,14 +97,19 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 text-xs font-mono text-brain-text-dim hover:text-brain-text bg-brain-elevated border border-brain-border rounded-md px-2 py-1 transition-colors max-w-[220px]"
+        className="flex items-center gap-1.5 text-xs font-mono text-brain-text-dim hover:text-brain-text bg-brain-elevated border border-brain-border rounded-md px-2 py-1 transition-colors max-w-[220px]"
       >
-        <span className="truncate">{model || 'Select model'}</span>
-        <ChevronDown size={12} className="flex-shrink-0" />
+        <ProviderIcon provider={provider} />
+        <span className="truncate min-w-0 flex-1">{model || 'Select model'}</span>
+        <ChevronUp size={12} className={'flex-shrink-0 transition-transform ' + (open ? 'rotate-180' : '')} />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-72 max-h-80 flex flex-col bg-brain-elevated border border-brain-border rounded-lg shadow-xl z-20 overflow-hidden">
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', bottom: menuPos.bottom, right: menuPos.right }}
+          className="w-72 max-h-80 flex flex-col bg-brain-elevated border border-brain-border rounded-lg shadow-xl z-50 overflow-hidden"
+        >
           <div className="flex items-center gap-2 px-2.5 py-2 border-b border-brain-border flex-shrink-0">
             <Search size={13} className="text-brain-text-dim flex-shrink-0" />
             <input
@@ -90,20 +140,22 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
                         setOpen(false);
                       }}
                       className={
-                        'w-full text-left px-3 py-1.5 text-xs font-mono truncate transition-colors ' +
+                        'w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs font-mono transition-colors ' +
                         (active
                           ? 'text-brain-accent bg-brain-accent/10'
                           : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border')
                       }
                     >
-                      {m}
+                      <ProviderIcon provider={g.provider} />
+                      <span className="truncate">{m}</span>
                     </button>
                   );
                 })}
               </div>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

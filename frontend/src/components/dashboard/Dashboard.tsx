@@ -5,6 +5,7 @@ import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 import { ModelPickerButton } from './ModelPickerButton';
+import { useSmoothedStream } from '../../hooks/useSmoothedStream';
 
 type ChatMode = 'chat' | 'agent';
 
@@ -24,11 +25,12 @@ function formatContent(content: string): string {
 }
 
 export function Dashboard() {
-  const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels, streamingMessages, clearStreamingMessage } = useStore();
+  const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels } = useStore();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [streamingRequestId, setStreamingRequestId] = useState<string | null>(null);
+  const { displayedText: streamingText, flush: flushStream } = useSmoothedStream(streamingRequestId);
   const logsMarkRef = useRef(0);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -41,6 +43,16 @@ export function Dashboard() {
   useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
   useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
   useEffect(() => { localStorage.setItem('nb_chat_mode', chatMode); }, [chatMode]);
+
+  // Auto-grow the composer textarea with content, capped at maxHeight so row 2
+  // (mode toggle + send) gets pushed down instead of the box scrolling internally.
+  useEffect(() => {
+    if (selectedAgent) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }, [input, selectedAgent]);
 
   // One-time migration: llama-3.3-70b-versatile was decommissioned on Groq.
   // Users with that stale value already persisted in localStorage need it
@@ -150,7 +162,9 @@ export function Dashboard() {
         addChatMessage(errorMsg);
       }
     } finally {
-      if (requestId) clearStreamingMessage(requestId);
+      // Drain any text still sitting in the pending buffer immediately so the
+      // last words don't keep trickling in after the real response is known.
+      if (requestId) flushStream();
       setStreamingRequestId(null);
       setSending(false);
       setStatusText(null);
@@ -171,11 +185,11 @@ export function Dashboard() {
 
   const recentLogs = logs.slice(-5);
 
-  const streamingText = streamingRequestId ? streamingMessages[streamingRequestId] : undefined;
-
   const placeholder = selectedAgent
     ? 'Ask ' + selectedAgent.name + ' anything...'
-    : 'Message NodeBrain…';
+    : chatMode === 'agent'
+      ? 'Describe an agent, or give one a task…'
+      : 'Ask NodeBrain anything…';
 
   return (
     <div className="flex h-full gap-4 p-4">
@@ -326,28 +340,30 @@ export function Dashboard() {
             </div>
           ) : (
             <div className="rounded-xl border border-brain-border bg-brain-bg focus-within:border-brain-accent transition-colors overflow-hidden">
-              <div className="flex justify-end px-2.5 pt-2">
-                <ModelPickerButton
-                  provider={defaultProvider}
-                  model={defaultModel}
-                  availableModels={availableModels}
-                  onChange={(p, m) => {
-                    setDefaultProvider(p);
-                    setDefaultModel(m);
-                  }}
+              <div className="flex items-start gap-2 px-2.5 pt-2">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={placeholder}
+                  rows={1}
+                  className="flex-1 bg-transparent py-1 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none font-sans"
+                  style={{ minHeight: '28px', maxHeight: '160px' }}
                 />
+                <div className="flex-shrink-0">
+                  <ModelPickerButton
+                    provider={defaultProvider}
+                    model={defaultModel}
+                    availableModels={availableModels}
+                    onChange={(p, m) => {
+                      setDefaultProvider(p);
+                      setDefaultModel(m);
+                    }}
+                  />
+                </div>
               </div>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={placeholder}
-                rows={1}
-                className="w-full bg-transparent px-3 py-2 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none font-sans"
-                style={{ minHeight: '40px', maxHeight: '160px' }}
-              />
-              <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5">
+              <div className="flex items-center justify-end gap-2 px-2.5 pt-1 pb-2">
                 <div className="flex items-center rounded-md border border-brain-border overflow-hidden text-xs font-medium flex-shrink-0">
                   <button
                     type="button"
@@ -384,7 +400,6 @@ export function Dashboard() {
               </div>
             </div>
           )}
-          <p className="text-xs text-brain-text-dim mt-2 px-1">Enter to send · Shift+Enter for newline</p>
         </div>
       </div>
 
