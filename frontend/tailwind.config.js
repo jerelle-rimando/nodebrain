@@ -37,8 +37,14 @@ export default {
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'marquee': 'marquee 4s linear',
+        'rail-alert': 'railAlert 2.5s ease-out',
       },
       keyframes: {
+        railAlert: {
+          '0%':   { boxShadow: '0 0 0 0 rgba(239, 68, 68, 0)' },
+          '12%':  { boxShadow: '0 0 18px 4px rgba(239, 68, 68, 0.55)', borderColor: 'rgba(239, 68, 68, 0.7)' },
+          '100%': { boxShadow: '0 0 0 0 rgba(239, 68, 68, 0)' },
+        },
         fadeIn: {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },

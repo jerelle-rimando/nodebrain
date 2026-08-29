@@ -1,13 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Loader2, Zap, ArrowLeft } from 'lucide-react';
+import { Send, Bot, User, Loader2, Zap, ArrowLeft, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 import { ModelPickerButton } from './ModelPickerButton';
+import { LogsPanel } from '../shared/LogsPanel';
 import { useSmoothedStream } from '../../hooks/useSmoothedStream';
+import { useRightPanel, type DotState } from '../../hooks/useRightPanel';
 
 type ChatMode = 'chat' | 'agent';
+
+// Middle column (w-72 = 288) + gap-4 (16) + Execution Logs (w-80 = 320).
+const RIGHT_PANEL_WIDTH = 624;
+
+const DOT_BG: Record<Exclude<DotState, null>, string> = {
+  error: 'bg-brain-error',
+  approval: 'bg-brain-warning',
+  running: 'bg-brain-accent',
+  success: 'bg-brain-success',
+};
+
+const DOT_TITLE: Record<Exclude<DotState, null>, string> = {
+  error: 'A task failed since you last opened this panel',
+  approval: 'A task is awaiting approval',
+  running: 'A task is running',
+  success: 'A task completed since you last opened this panel',
+};
 
 function escapeHtml(content: string): string {
   return content
@@ -39,6 +58,7 @@ export function Dashboard() {
   const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? 'groq');
   const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'openai/gpt-oss-120b');
   const [chatMode, setChatMode] = useState<ChatMode>(() => (localStorage.getItem('nb_chat_mode') as ChatMode) ?? 'agent');
+  const { collapsed: rightCollapsed, toggle: toggleRight, dotState, pulsing } = useRightPanel(logs);
 
   useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
   useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
@@ -192,8 +212,8 @@ export function Dashboard() {
       : 'Ask NodeBrain anything…';
 
   return (
-    <div className="flex h-full gap-4 p-4">
-      <div className="flex flex-col flex-1 rounded-xl border border-brain-border bg-brain-surface overflow-hidden">
+    <div className="flex h-full p-4">
+      <div className="flex flex-col flex-1 min-w-0 rounded-xl border border-brain-border bg-brain-surface overflow-hidden">
 
         <div className="flex items-center gap-3 px-4 py-3 border-b border-brain-border">
           {selectedAgent ? (
@@ -403,7 +423,21 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="w-72 flex flex-col gap-4">
+      {/*
+        Collapsible right region — Active Agents + Live Logs + the Execution
+        Logs panel, all hidden together. Only `width`/`margin` animate; the
+        inner columns keep fixed widths (flex-shrink-0) and are clipped by
+        overflow-hidden, so nothing reflows visibly during the transition.
+      */}
+      <div
+        className="flex gap-4 min-h-0 overflow-hidden transition-[width,margin] duration-200 ease-in-out"
+        style={{
+          width: rightCollapsed ? 0 : RIGHT_PANEL_WIDTH,
+          marginLeft: rightCollapsed ? 0 : 16,
+        }}
+        aria-hidden={rightCollapsed}
+      >
+      <div className="w-72 flex flex-col gap-4 flex-shrink-0 min-h-0">
         <div className="rounded-xl border border-brain-border bg-brain-surface p-4 flex-1 flex flex-col min-h-0">
           <h3 className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider mb-3 flex-shrink-0">Active Agents</h3>
           {agents.length === 0 ? (
@@ -472,6 +506,42 @@ export function Dashboard() {
             )}
           </div>
         </div>
+      </div>
+
+        {/* Execution Logs — LogsPanel unchanged; just relocated into the
+            collapsible region so it hides together with the middle column. */}
+        <div className="w-80 flex-shrink-0 min-h-0 overflow-hidden">
+          <LogsPanel />
+        </div>
+      </div>
+
+      {/* Right rail — always visible; holds the collapse toggle and, when
+          collapsed, a small activity dot derived from task-log status. */}
+      <div
+        className={
+          'flex-shrink-0 w-[34px] ml-2 flex flex-col items-center py-3 rounded-xl border border-brain-border bg-brain-surface ' +
+          (pulsing ? 'animate-rail-alert' : '')
+        }
+      >
+        <button
+          onClick={toggleRight}
+          title={rightCollapsed ? 'Expand panel' : 'Collapse panel'}
+          aria-label={rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}
+          aria-expanded={!rightCollapsed}
+          className="relative w-7 h-7 rounded-lg flex items-center justify-center text-brain-text-dim hover:text-brain-text hover:bg-brain-border transition-colors"
+        >
+          {rightCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+          {rightCollapsed && dotState && (
+            <span
+              title={DOT_TITLE[dotState]}
+              className={
+                'absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ring-2 ring-brain-surface ' +
+                DOT_BG[dotState] +
+                (dotState === 'running' ? ' animate-pulse' : '')
+              }
+            />
+          )}
+        </button>
       </div>
     </div>
   );

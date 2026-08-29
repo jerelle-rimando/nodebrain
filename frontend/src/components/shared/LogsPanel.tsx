@@ -4,7 +4,7 @@ import { api } from '../../utils/api';
 import { Terminal, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TaskLog } from '@shared/types';
 
-type RunStatus = 'failed' | 'success' | 'approval' | 'running';
+export type RunStatus = 'failed' | 'success' | 'approval' | 'running';
 
 const LEVEL_COLORS: Record<string, string> = {
   info: '#94a3b8',
@@ -31,7 +31,7 @@ function formatLogTime(timestamp: string): string {
   });
 }
 
-function deriveStatus(groupLogs: TaskLog[]): RunStatus {
+export function deriveStatus(groupLogs: TaskLog[]): RunStatus {
   const hasFailed = groupLogs.some(
     (l) => l.level === 'error' || l.message.includes('Task failed'),
   );

@@ -3,7 +3,6 @@ import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, 
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
-import { LogsPanel } from './components/shared/LogsPanel';
 import { useStore } from './stores/appStore';
 import { useLiveSync } from './hooks/useLiveSync';
 import { api } from './utils/api';
@@ -125,7 +124,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Content + Logs */}
+        {/* Content — the dashboard hosts its own collapsible Execution Logs panel */}
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 overflow-hidden">
             {showServers && <ServersPage />}
@@ -136,13 +135,6 @@ export default function App() {
             {!showServers && activeTab === 'integrations' && <IntegrationsPage />}
             {!showServers && activeTab === 'analytics' && <AnalyticsPage />}
           </main>
-
-          {/* Logs panel only in dashboard */}
-          {!showServers && activeTab === 'dashboard' && (
-            <div className="w-80 flex-shrink-0 border-l border-brain-border p-3 overflow-hidden">
-              <LogsPanel />
-            </div>
-          )}
         </div>
       </div>
       </div>
