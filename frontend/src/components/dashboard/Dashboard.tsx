@@ -58,10 +58,11 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
-// Shown beneath a Chat-mode reply when the backend detected an unambiguous
-// agent-creation request. Chat mode stays non-acting; this points the user at
-// the toggle that would actually build it. Styled distinctly (brain-accent) so
-// it reads as app guidance, not part of the model's response.
+// Shown above a Chat-mode reply when the backend detected an unambiguous
+// agent-creation request — first thing the user sees, before they read a long
+// explanation. Chat mode stays non-acting; this points the user at the toggle
+// that would actually build it. Styled distinctly (brain-accent) so it reads as
+// app guidance, not part of the model's response.
 function AgentModeHint() {
   return (
     <div className="flex items-start gap-3">
@@ -85,7 +86,7 @@ export function Dashboard() {
   const [statusText, setStatusText] = useState<string | null>(null);
   const [streamingRequestId, setStreamingRequestId] = useState<string | null>(null);
   // Id of the assistant message that should show the "switch to Agent mode"
-  // nudge beneath it. Transient — set when the backend flags a Chat-mode
+  // nudge above it. Transient — set when the backend flags a Chat-mode
   // creation request, cleared on the next send.
   const [agentModeHintFor, setAgentModeHintFor] = useState<string | null>(null);
   const { displayedText: streamingText, flush: flushStream } = useSmoothedStream(streamingRequestId);
@@ -462,8 +463,8 @@ export function Dashboard() {
 
           {activeMessages.map((msg) => (
             <Fragment key={msg.id}>
-              <MessageBubble message={msg} />
               {!selectedAgent && agentModeHintFor === msg.id && <AgentModeHint />}
+              <MessageBubble message={msg} />
             </Fragment>
           ))}
 

@@ -254,7 +254,17 @@ router.post('/message', async (req, res) => {
           agents.length > 0
             ? `The user has these agents: ${agents.map((a) => a.name).join(', ')}.`
             : 'The user has no agents yet.';
-        const systemPrompt = `You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`;
+
+        // Chat mode is conversational only — it never builds anything. Without
+        // this framing the model reads "create a filesystem agent" as a coding
+        // request and dumps an implementation. Prepended to every Chat-mode
+        // request, so keep it to one tight paragraph. Agent mode keeps its
+        // original prompt untouched.
+        const chatModeFraming = !isAgentMode
+          ? `You're NodeBrain's built-in assistant. NodeBrain is a local-first desktop app for building and running AI agents. People create agents just by describing what they want in plain language while in Agent mode — they never write code to make one. So when someone asks you to create an agent, don't write implementation code for it: instead, explain in plain language what that agent would do and which integrations or credentials it would need, then tell them to switch to Agent mode and send the request again. Keep your usual warm, friendly tone and feel free to use emoji. 🧠 `
+          : '';
+
+        const systemPrompt = `${chatModeFraming}You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`;
 
         if (chosenProvider === 'anthropic') {
           const { default: Anthropic } = await import('@anthropic-ai/sdk');
