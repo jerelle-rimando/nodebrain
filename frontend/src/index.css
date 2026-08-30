@@ -91,7 +91,62 @@
   border-radius: 8px !important;
 }
 
-/* Chat markdown */
+/* Chat markdown — assistant messages, rendered by react-markdown + remark-gfm.
+   Colours are the brain-* tokens (see tailwind.config.js) as literal hex. */
+.chat-content {
+  overflow-wrap: anywhere;
+}
+.chat-content > *:first-child { margin-top: 0; }
+.chat-content > *:last-child { margin-bottom: 0; }
+
+.chat-content p {
+  margin: 0.5em 0;
+}
+
+/* Headings — sized for a chat bubble, not a page. ### reads as a section header. */
+.chat-content h1,
+.chat-content h2,
+.chat-content h3,
+.chat-content h4 {
+  color: #e4e6f0;               /* brain-text */
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1em 0 0.4em;
+}
+.chat-content h1 { font-size: 1.25em; }
+.chat-content h2 { font-size: 1.15em; }
+.chat-content h3 { font-size: 1.05em; }
+.chat-content h4 {
+  font-size: 0.95em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #9094ab;              /* brain-text-dim */
+}
+
+/* Horizontal rule — a full-width divider across the bubble. */
+.chat-content hr {
+  border: 0;
+  border-top: 1px solid #1f2235;  /* brain-border */
+  margin: 1.4em 0;
+}
+
+/* Lists */
+.chat-content ul,
+.chat-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.chat-content ul { list-style: disc; }
+.chat-content ol { list-style: decimal; }
+.chat-content li {
+  margin: 0.15em 0;
+  line-height: 1.5;
+}
+.chat-content li::marker { color: #5a5e75; }  /* brain-text-muted */
+.chat-content li > ul,
+.chat-content li > ol { margin: 0.15em 0; }
+
+/* Inline code */
 .chat-content code {
   font-family: 'JetBrains Mono', monospace;
   background: rgba(59, 130, 246, 0.1);
@@ -100,14 +155,66 @@
   border-radius: 4px;
   font-size: 0.85em;
 }
+
+/* Fenced code blocks — distinct surface, scrolls rather than widening the bubble. */
+.chat-content pre {
+  background: #0a0a0f;            /* brain-elevated */
+  border: 1px solid #1f2235;     /* brain-border */
+  border-radius: 8px;
+  padding: 0.75em 0.9em;
+  margin: 0.6em 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.chat-content pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.85em;
+  color: #e4e6f0;               /* brain-text */
+  white-space: pre;
+}
+
+/* Emphasis */
 .chat-content strong {
-  color: #e4e6f0;
+  color: #e4e6f0;               /* brain-text */
   font-weight: 600;
 }
-.chat-content ul {
-  margin: 0.5em 0;
-  padding-left: 1.5em;
+.chat-content em { font-style: italic; }
+
+/* Links — brain-accent; target=_blank is set on the element in JSX. */
+.chat-content a {
+  color: #3b82f6;               /* brain-accent */
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.chat-content li {
-  margin: 0.2em 0;
+.chat-content a:hover { color: #60a5fa; }
+
+/* Blockquote */
+.chat-content blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0 0.2em 0.9em;
+  border-left: 3px solid #2a2e47;  /* brain-border-bright */
+  color: #9094ab;                  /* brain-text-dim */
+}
+
+/* Tables */
+.chat-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+}
+.chat-content th,
+.chat-content td {
+  border: 1px solid #1f2235;   /* brain-border */
+  padding: 0.35em 0.6em;
+  text-align: left;
+}
+.chat-content th {
+  background: #0f1118;         /* brain-surface */
+  color: #e4e6f0;             /* brain-text */
+  font-weight: 600;
 }

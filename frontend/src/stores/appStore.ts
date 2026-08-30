@@ -18,6 +18,9 @@ interface AppState {
   credentials: Credential[];
   chatMessages: ChatMessage[];
   availableModels: Record<string, string[]>;
+  // Backend-signalled routing phase for the in-flight chat request, keyed by
+  // requestId. Drives the streaming placeholder label (e.g. "Creating…").
+  chatPhase: { requestId: string; phase: string } | null;
 
   activeTab: ActiveTab;
   selectedAgentId: string | null;
@@ -44,6 +47,7 @@ interface AppState {
 
   setChatMessages: (msgs: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
+  setChatPhase: (phase: { requestId: string; phase: string } | null) => void;
 
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedAgent: (id: string | null) => void;
@@ -59,6 +63,7 @@ export const useStore = create<AppState>((set) => ({
   credentials: [],
   chatMessages: [],
   availableModels: {},
+  chatPhase: null,
   activeTab: 'dashboard',
   selectedAgentId: null,
   logsFilterAgentId: null,
@@ -84,6 +89,7 @@ export const useStore = create<AppState>((set) => ({
 
   setChatMessages: (chatMessages) => set({ chatMessages }),
   addChatMessage: (msg) => set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+  setChatPhase: (chatPhase) => set({ chatPhase }),
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setSelectedAgent: (selectedAgentId) => set({ selectedAgentId }),

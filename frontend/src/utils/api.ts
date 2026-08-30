@@ -79,7 +79,11 @@ export const api = {
     requestId?: string,
     opts?: { mode?: 'chat' | 'agent'; provider?: string; model?: string },
   ) =>
-    request<{ userMessage: import('@shared/types').ChatMessage; assistantMessage: import('@shared/types').ChatMessage }>(
+    request<{
+      userMessage: import('@shared/types').ChatMessage;
+      assistantMessage: import('@shared/types').ChatMessage;
+      suggestAgentMode?: boolean;
+    }>(
       '/chat/message',
       { method: 'POST', body: JSON.stringify({ content, requestId, ...opts }) }
     ),

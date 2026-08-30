@@ -29,6 +29,23 @@ function ProviderIcon({ provider }: { provider: string }) {
   return <Icon size={14} className="text-brain-text-dim flex-shrink-0" />;
 }
 
+// Display-only friendly names, keyed by raw model id. The raw id is still what
+// gets sent to the backend and persisted — this map only changes what's shown.
+// Add entries as more models get friendly labels; unmapped ids fall back to the
+// raw id via displayModelName().
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'qwen3:4b-instruct-2507-q4_K_M': 'Qwen 3 4B · Local',
+};
+
+function displayModelName(modelId: string): string {
+  return MODEL_DISPLAY_NAMES[modelId] ?? modelId;
+}
+
+// Providers listed here are hoisted to the top of the dropdown, in this order,
+// ahead of every other (cloud) provider. Local-first: the local option should be
+// the first thing a user sees.
+const PROVIDER_ORDER = ['ollama'];
+
 export function ModelPickerButton({ provider, model, availableModels, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -88,9 +105,23 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
   const groups = Object.entries(availableModels)
     .map(([p, models]) => ({
       provider: p,
-      models: models.filter((m) => !lowerQuery || m.toLowerCase().includes(lowerQuery) || p.toLowerCase().includes(lowerQuery)),
+      models: models.filter(
+        (m) =>
+          !lowerQuery ||
+          m.toLowerCase().includes(lowerQuery) ||
+          displayModelName(m).toLowerCase().includes(lowerQuery) ||
+          p.toLowerCase().includes(lowerQuery),
+      ),
     }))
-    .filter((g) => g.models.length > 0);
+    .filter((g) => g.models.length > 0)
+    .sort((a, b) => {
+      const ai = PROVIDER_ORDER.indexOf(a.provider);
+      const bi = PROVIDER_ORDER.indexOf(b.provider);
+      if (ai === -1 && bi === -1) return 0; // both cloud: keep existing order
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
 
   return (
     <div ref={containerRef} className="relative">
@@ -100,7 +131,7 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
         className="flex items-center gap-1.5 text-xs font-mono text-brain-text-dim hover:text-brain-text bg-brain-elevated border border-brain-border rounded-md px-2 py-1 transition-colors max-w-[220px]"
       >
         <ProviderIcon provider={provider} />
-        <span className="truncate min-w-0 flex-1">{model || 'Select model'}</span>
+        <span className="truncate min-w-0 flex-1">{model ? displayModelName(model) : 'Select model'}</span>
         <ChevronUp size={12} className={'flex-shrink-0 transition-transform ' + (open ? 'rotate-180' : '')} />
       </button>
 
@@ -147,7 +178,7 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
                       }
                     >
                       <ProviderIcon provider={g.provider} />
-                      <span className="truncate">{m}</span>
+                      <span className="truncate">{displayModelName(m)}</span>
                     </button>
                   );
                 })}

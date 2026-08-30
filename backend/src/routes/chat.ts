@@ -117,6 +117,13 @@ router.post('/message', async (req, res) => {
     let agentId: string | undefined;
 
     if (isAgentMode && isCreateIntent) {
+      // Tell the client this request was routed to agent creation so it can
+      // show "Creating…" instead of the generic "Thinking…" placeholder while
+      // parseAgentFromChat runs. Streamed log lines (if any) still take
+      // precedence over this label on the client.
+      if (requestId) {
+        agentEvents.emit('chat:phase', { requestId, phase: 'creating' });
+      }
       const agentConfigs = await parseAgentFromChat(content);
       const validConfigs = (agentConfigs ?? []).filter((c) => c.name);
       if (validConfigs.length > 0) {
@@ -330,7 +337,16 @@ router.post('/message', async (req, res) => {
     };
     saveChatMessage(assistantMsg);
 
-    res.json({ success: true, data: { userMessage: userMsg, assistantMessage: assistantMsg } });
+    // Chat mode is deliberately non-acting, so a creation request here got a
+    // plain conversational reply. Flag it (using the same isCreateIntent gate,
+    // question guard included) so the client can nudge the user toward Agent
+    // mode. We do NOT create the agent.
+    const suggestAgentMode = !isAgentMode && isCreateIntent;
+
+    res.json({
+      success: true,
+      data: { userMessage: userMsg, assistantMessage: assistantMsg, suggestAgentMode },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }

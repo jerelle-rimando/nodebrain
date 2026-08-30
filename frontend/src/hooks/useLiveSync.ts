@@ -66,6 +66,11 @@ export function useLiveSync() {
         pushToken(requestId, token);
       });
 
+      es.addEventListener('chat:phase', (e) => {
+        const { requestId, phase } = JSON.parse((e as MessageEvent).data) as { requestId: string; phase: string };
+        useStore.getState().setChatPhase({ requestId, phase });
+      });
+
       es.onerror = () => {
         es.close();
         if (!unmounted) {

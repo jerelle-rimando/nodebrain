@@ -16,12 +16,21 @@ import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
 import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 
+// Nav order follows the arc of a user's journey through the app:
+//   work surfaces first  — Dashboard, NodeGraph (where you actually do things)
+//   discovery/setup next  — Templates (one-click starting points) and
+//                           Integrations (capabilities) a new user needs early
+//   set-once config       — Vault (configure credentials once, rarely revisit)
+//   retrospective         — Analytics (look back at what ran)
+//   future setup          — Servers (rendered separately, below)
+// Only the order is intentional here; icons, tooltips, and active-state styling
+// are unchanged.
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
   { id: 'graph' as const, label: 'NodeGraph', icon: GitFork },
   { id: 'templates' as const, label: 'Templates', icon: LayoutTemplate },
-  { id: 'vault' as const, label: 'Vault', icon: Shield },
   { id: 'integrations' as const, label: 'Integrations', icon: Plug },
+  { id: 'vault' as const, label: 'Vault', icon: Shield },
   { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
 ];
 

@@ -74,7 +74,10 @@ const DEFAULT_MODELS: Record<string, string> = {
 // NOTE for later (do not implement now): post-launch, replace this static
 // list with a live fetch from each provider's /v1/models endpoint using the
 // user's key, so the list never goes stale.
+// Ollama (local) is listed first so the model picker surfaces the local option
+// above all cloud providers. This does not change the app-wide default model.
 export const AVAILABLE_MODELS: Record<string, string[]> = {
+  ollama:    ['qwen3:4b-instruct-2507-q4_K_M'],
   openai:    ['gpt-4o', 'gpt-4o-mini'],
   anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6'],
   groq: [
@@ -84,7 +87,6 @@ export const AVAILABLE_MODELS: Record<string, string[]> = {
   ],
   gemini:    ['gemini-2.0-flash'],
   mistral:   ['mistral-small-latest'],
-  ollama:    ['qwen3:4b-instruct-2507-q4_K_M'],
   together:  ['meta-llama/Llama-3.3-70B-Instruct-Turbo'],
   fireworks: ['accounts/fireworks/models/llama-v3-70b-instruct'],
   custom:    ['gpt-4o-mini'],

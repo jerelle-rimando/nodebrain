@@ -35,6 +35,7 @@ router.get('/', (req: Request, res: Response) => {
   const onAgentUpdated = (agent: Agent) => sendEvent('agent:updated', agent);
   const onAgentDeleted = (payload: { id: string }) => sendEvent('agent:deleted', payload);
   const onChatToken = (payload: { requestId: string; token: string }) => sendEvent('chat:token', payload);
+  const onChatPhase = (payload: { requestId: string; phase: string }) => sendEvent('chat:phase', payload);
 
   agentEvents.on('log', onLog);
   agentEvents.on('task:start', onTaskStart);
@@ -46,6 +47,7 @@ router.get('/', (req: Request, res: Response) => {
   agentEvents.on('agent:updated', onAgentUpdated);
   agentEvents.on('agent:deleted', onAgentDeleted);
   agentEvents.on('chat:token', onChatToken);
+  agentEvents.on('chat:phase', onChatPhase);
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -59,6 +61,7 @@ router.get('/', (req: Request, res: Response) => {
     agentEvents.off('agent:updated', onAgentUpdated);
     agentEvents.off('agent:deleted', onAgentDeleted);
     agentEvents.off('chat:token', onChatToken);
+    agentEvents.off('chat:phase', onChatPhase);
   });
 });
 
