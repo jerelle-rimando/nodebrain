@@ -45,10 +45,14 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
       >
         <div className="flex items-center gap-2 mb-2">
           <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-sm leading-none"
             style={{ backgroundColor: statusColor + '22', border: '1px solid ' + statusColor + '44' }}
           >
-            <Bot size={14} style={{ color: statusColor }} />
+            {agent.emoji ? (
+              <span aria-hidden>{agent.emoji}</span>
+            ) : (
+              <Bot size={14} style={{ color: statusColor }} />
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-brain-text truncate">{agent.name}</p>

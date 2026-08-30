@@ -23,6 +23,7 @@ const AgentSchema = z.object({
   model: z.string().default('gpt-4o-mini'),
   systemPrompt: z.string().default('You are a helpful AI assistant.'),
   schedule: z.string().optional(),
+  emoji: z.string().optional(),
   toolPermissions: z.array(z.string()).default([]),
   config: z.object({
     temperature: z.number().min(0).max(2).optional(),
@@ -91,6 +92,10 @@ router.patch('/:id', (req, res) => {
 
     const patch = req.body as Partial<Agent>;
     if (typeof patch.description === 'string') patch.description = patch.description.slice(0, 80);
+    // PATCH is deliberately not zod-validated (a partial schema would strip
+    // nested config keys like approvalMode/dryRun). Clamp emoji defensively so
+    // an oversized value can't be persisted.
+    if (typeof patch.emoji === 'string') patch.emoji = [...patch.emoji].slice(0, 8).join('');
     const updated = updateAgent(req.params.id, patch);
     if (!updated) return res.status(404).json({ success: false, error: 'Agent not found' });
 

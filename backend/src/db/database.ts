@@ -72,6 +72,7 @@ export async function initDb(): Promise<void> {
       model TEXT NOT NULL DEFAULT 'gpt-4o-mini',
       system_prompt TEXT NOT NULL DEFAULT '',
       schedule TEXT,
+      emoji TEXT,
       tool_permissions TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'idle',
       config TEXT NOT NULL DEFAULT '{}',
@@ -157,6 +158,25 @@ export async function initDb(): Promise<void> {
     stmt.free();
     if (cols.length > 0 && !cols.includes('base_url')) {
       _db.run('ALTER TABLE credentials ADD COLUMN base_url TEXT');
+    }
+  }
+
+  // Migration: add emoji to existing agents tables that predate the column.
+  // Mirrors the base_url migration above: PRAGMA-guarded so the ALTER runs at
+  // most once. A bare unconditional `ALTER TABLE agents ADD COLUMN emoji` would
+  // throw "duplicate column name: emoji" on the second startup — and migrations
+  // run on every startup — leaving the app unable to launch. Fresh DBs already
+  // have the column from the CREATE TABLE above, so the ALTER is skipped there.
+  {
+    const stmt = _db.prepare('PRAGMA table_info(agents)');
+    const cols: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { name: string };
+      cols.push(row.name);
+    }
+    stmt.free();
+    if (cols.length > 0 && !cols.includes('emoji')) {
+      _db.run('ALTER TABLE agents ADD COLUMN emoji TEXT');
     }
   }
 

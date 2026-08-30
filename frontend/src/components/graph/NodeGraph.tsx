@@ -141,10 +141,14 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-brain-border flex-shrink-0">
         <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-base leading-none"
           style={{ backgroundColor: statusColor(agent.status) + '22', border: '1px solid ' + statusColor(agent.status) + '44' }}
         >
-          <Bot size={15} style={{ color: statusColor(agent.status) }} />
+          {agent.emoji ? (
+            <span aria-hidden>{agent.emoji}</span>
+          ) : (
+            <Bot size={15} style={{ color: statusColor(agent.status) }} />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-brain-text truncate">{agent.name}</p>

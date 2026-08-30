@@ -3,6 +3,7 @@ import { Sun, GitPullRequest, FolderOpen, Search, Bot, ArrowRight, Loader2, Chec
 import { api } from '../../utils/api';
 import { featuredTemplates } from '../../data/featuredTemplates';
 import type { FeaturedTemplate } from '../../data/featuredTemplates';
+import { deriveAgentEmoji } from '@shared/emoji';
 
 export interface GoalDoneOptions {
   starterPrompt?: string;
@@ -91,6 +92,7 @@ async function installTemplate(template: FeaturedTemplate): Promise<void> {
     const created = await api.createAgent({
       name: agentDef.name,
       description: agentDef.description,
+      emoji: deriveAgentEmoji(agentDef.name, agentDef.description),
       systemPrompt: agentDef.systemPrompt,
       provider: 'openai',
       model: 'gpt-4o-mini',

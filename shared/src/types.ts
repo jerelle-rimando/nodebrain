@@ -13,6 +13,7 @@ export interface Agent {
   model: string;
   systemPrompt: string;
   schedule?: string; // cron expression
+  emoji?: string; // visual identity, derived deterministically from name/description
   toolPermissions: string[];
   status: AgentStatus;
   createdAt: string;

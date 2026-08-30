@@ -8,6 +8,7 @@ import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
 import { scheduleAgent } from '../scheduler/scheduler';
 import type { Agent, ChatMessage, ModelProvider } from '../../shared-types';
+import { deriveAgentEmoji } from '../../shared-types';
 
 const router = Router();
 
@@ -147,6 +148,7 @@ router.post('/message', async (req, res) => {
           schedule: cfg.schedule
             ? (parseNaturalSchedule(cfg.schedule).cron ?? cfg.schedule)
             : undefined,
+          emoji: cfg.emoji ?? deriveAgentEmoji(cfg.name, cfg.description),
           toolPermissions: cfg.toolPermissions ?? [],
           status: 'idle' as const,
           config: {},

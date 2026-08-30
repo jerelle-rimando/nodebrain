@@ -7,6 +7,7 @@ import { api } from '../../utils/api';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 import { ModelPickerButton } from './ModelPickerButton';
+import { EmojiPicker } from './EmojiPicker';
 import { LogsPanel } from '../shared/LogsPanel';
 import { useSmoothedStream } from '../../hooks/useSmoothedStream';
 import { useRightPanel, type DotState } from '../../hooks/useRightPanel';
@@ -90,6 +91,7 @@ export function Dashboard() {
   const { displayedText: streamingText, flush: flushStream } = useSmoothedStream(streamingRequestId);
   const logsMarkRef = useRef(0);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   // True while the view is pinned to the bottom. The streaming path reads this
@@ -190,6 +192,7 @@ export function Dashboard() {
   // Switching between the main chat and an agent thread starts pinned to newest.
   useEffect(() => {
     scrollChatToBottom('auto');
+    setShowEmojiPicker(false);
   }, [selectedAgent, scrollChatToBottom]);
 
   // A new message landed (user send, or the finalized assistant reply) — follow
@@ -330,6 +333,17 @@ export function Dashboard() {
       ? 'Describe an agent, or give one a task…'
       : 'Ask NodeBrain anything…';
 
+  async function handleEmojiSelect(emoji: string) {
+    if (!selectedAgent) return;
+    try {
+      const updated = await api.updateAgent(selectedAgent.id, { emoji });
+      storeUpdateAgent(updated);
+      setSelectedAgent(updated);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   return (
     <div className="flex h-full p-4">
       <div className="relative flex flex-col flex-1 min-w-0 rounded-xl border border-brain-border bg-brain-surface overflow-hidden">
@@ -343,6 +357,22 @@ export function Dashboard() {
               >
                 <ArrowLeft size={13} />
               </button>
+              <div className="relative flex-shrink-0">
+                <button
+                  onClick={() => setShowEmojiPicker((v) => !v)}
+                  title="Change agent emoji"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-base leading-none border border-brain-border bg-brain-bg hover:border-brain-muted transition-colors"
+                >
+                  <span aria-hidden>{selectedAgent.emoji ?? '🤖'}</span>
+                </button>
+                {showEmojiPicker && (
+                  <EmojiPicker
+                    onSelect={handleEmojiSelect}
+                    onClose={() => setShowEmojiPicker(false)}
+                    className="left-0"
+                  />
+                )}
+              </div>
               <div
                 className="w-2 h-2 rounded-full flex-shrink-0"
                 style={{
@@ -417,8 +447,10 @@ export function Dashboard() {
 
           {activeMessages.length === 0 && selectedAgent && (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-3 py-16">
-              <div className="w-12 h-12 rounded-xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center">
-                <Bot size={22} className="text-brain-accent" />
+              <div className="w-12 h-12 rounded-xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center text-3xl leading-none">
+                {selectedAgent.emoji
+                  ? <span aria-hidden>{selectedAgent.emoji}</span>
+                  : <Bot size={22} className="text-brain-accent" />}
               </div>
               <div>
                 <h3 className="text-brain-text font-semibold mb-1">{selectedAgent.name}</h3>
@@ -633,6 +665,7 @@ export function Dashboard() {
                     )
                   }
                 >
+                  <span className="text-base leading-none flex-shrink-0" aria-hidden>{agent.emoji ?? '🤖'}</span>
                   <span
                     className="w-2 h-2 rounded-full flex-shrink-0"
                     style={{

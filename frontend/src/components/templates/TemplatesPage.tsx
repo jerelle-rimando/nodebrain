@@ -8,6 +8,7 @@ import { useStore } from '../../stores/appStore';
 import { featuredTemplates, type FeaturedTemplate } from '../../data/featuredTemplates';
 import { toast } from '../shared/Toast';
 import type { Agent } from '@shared/types';
+import { deriveAgentEmoji } from '@shared/emoji';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ interface TemplateAgentEntry {
   provider?: string;
   model?: string;
   schedule?: string;
+  emoji?: string;
   toolPermissions?: string[];
 }
 
@@ -39,6 +41,7 @@ interface AgentTemplate {
   provider?: string;
   model?: string;
   schedule?: string;
+  emoji?: string;
   toolPermissions?: string[];
   config?: { temperature?: number; maxTokens?: number };
 }
@@ -154,6 +157,7 @@ function CreateTemplateModal({ agents, onClose, onSave }: CreateModalProps) {
         provider: a.provider,
         model: a.model,
         schedule: a.schedule,
+        emoji: a.emoji ?? deriveAgentEmoji(a.name, a.description),
         toolPermissions: a.toolPermissions,
       }));
 
@@ -431,6 +435,7 @@ export function TemplatesPage() {
           provider: 'openai',
           model: 'gpt-4o-mini',
           schedule: agentDef.schedule,
+          emoji: deriveAgentEmoji(agentDef.name, agentDef.description),
           toolPermissions: [],
           config: {},
         });
@@ -469,6 +474,7 @@ export function TemplatesPage() {
             provider: (a.provider ?? 'openai') as any,
             model: a.model ?? 'gpt-4o-mini',
             schedule: a.schedule,
+            emoji: a.emoji ?? deriveAgentEmoji(a.name, a.description),
             toolPermissions: a.toolPermissions ?? [],
             config: {},
           });
@@ -488,6 +494,7 @@ export function TemplatesPage() {
           provider: (template.provider ?? 'openai') as any,
           model: template.model ?? 'gpt-4o-mini',
           schedule: template.schedule,
+          emoji: template.emoji ?? deriveAgentEmoji(template.name, template.description),
           toolPermissions: template.toolPermissions ?? [],
           config: template.config ?? {},
         });

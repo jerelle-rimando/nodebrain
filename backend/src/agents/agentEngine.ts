@@ -9,6 +9,7 @@ import { queryRelevantContext } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, Task, TaskLog } from '../../shared-types';
+import { deriveAgentEmoji } from '../../shared-types';
 import { EventEmitter } from 'events';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 import { getAllAgents } from '../db/agentRepository';
@@ -692,7 +693,7 @@ export async function parseAgentFromChat(userMessage: string): Promise<Partial<A
 
 ALWAYS return a JSON array, even when only one agent is described. Each element has this shape:
 {
-  "name": "Agent Name",
+  "name": "Descriptive Agent Name",
   "description": "What this agent does",
   "model": "${model}",
   "systemPrompt": "You are a helpful assistant that...",
@@ -703,6 +704,7 @@ ALWAYS return a JSON array, even when only one agent is described. Each element 
 
 "connectsTo" is an array of OTHER agent names (from the same batch) that this agent should delegate tasks to. Only include it when the user explicitly describes delegation, orchestration, or one agent handing off work to another. Omit the field (or use an empty array) otherwise.
 
+name must describe what the agent does for the user, derived from their request: 2 to 4 words, specific and descriptive. Good examples: "Morning PDF Digest", "GitHub PR Watcher", "Invoice Email Sorter". Do NOT use generic role labels ("General Assistant", "Task Creator", "AI Helper", "Automation Agent") and do NOT include any person's name.
 description must be one short sentence, max 80 characters.
 For schedule, use cron expressions if time-based tasks are mentioned (e.g., "every hour" = "0 * * * *", "daily at 9am" = "0 9 * * *"). Otherwise null.
 Model should default to "${model}" unless the user specifies otherwise.
@@ -724,8 +726,14 @@ Return ONLY the JSON array with no additional text or markdown.`;
 
     const clean = content.replace(/```json|```/g, '').trim();
     const parsed: unknown = JSON.parse(clean);
-    if (Array.isArray(parsed)) return parsed as Partial<Agent>[];
-    return [parsed as Partial<Agent>];
+    const configs: Partial<Agent>[] = Array.isArray(parsed)
+      ? (parsed as Partial<Agent>[])
+      : [parsed as Partial<Agent>];
+    // Emoji is assigned here, deterministically — never asked of the model.
+    for (const cfg of configs) {
+      cfg.emoji = deriveAgentEmoji(cfg.name, cfg.description);
+    }
+    return configs;
   } catch {
     return null;
   }

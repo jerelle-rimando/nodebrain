@@ -10,6 +10,7 @@ interface AgentRow {
   model: string;
   system_prompt: string;
   schedule: string | null;
+  emoji: string | null;
   tool_permissions: string;
   status: string;
   config: string;
@@ -26,6 +27,7 @@ function rowToAgent(row: AgentRow): Agent {
     model: row.model,
     systemPrompt: row.system_prompt,
     schedule: row.schedule ?? undefined,
+    emoji: row.emoji ?? undefined,
     toolPermissions: JSON.parse(row.tool_permissions),
     status: row.status as AgentStatus,
     config: JSON.parse(row.config) as AgentConfig,
@@ -46,11 +48,11 @@ export function getAgentById(id: string): Agent | null {
 
 export function createAgent(agent: Agent): Agent {
   dbRun(
-    `INSERT INTO agents (id, name, description, provider, model, system_prompt, schedule, tool_permissions, status, config, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO agents (id, name, description, provider, model, system_prompt, schedule, emoji, tool_permissions, status, config, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       agent.id, agent.name, agent.description, agent.provider, agent.model,
-      agent.systemPrompt, agent.schedule ?? null,
+      agent.systemPrompt, agent.schedule ?? null, agent.emoji ?? null,
       JSON.stringify(agent.toolPermissions), agent.status,
       JSON.stringify(agent.config), agent.createdAt, agent.updatedAt,
     ],
@@ -65,10 +67,10 @@ export function updateAgent(id: string, updates: Partial<Agent>): Agent | null {
   const updated: Agent = { ...existing, ...updates, id, updatedAt: new Date().toISOString() };
   dbRun(
     `UPDATE agents SET name=?, description=?, provider=?, model=?, system_prompt=?,
-     schedule=?, tool_permissions=?, status=?, config=?, updated_at=? WHERE id=?`,
+     schedule=?, emoji=?, tool_permissions=?, status=?, config=?, updated_at=? WHERE id=?`,
     [
       updated.name, updated.description, updated.provider, updated.model,
-      updated.systemPrompt, updated.schedule ?? null,
+      updated.systemPrompt, updated.schedule ?? null, updated.emoji ?? null,
       JSON.stringify(updated.toolPermissions), updated.status,
       JSON.stringify(updated.config), updated.updatedAt, id,
     ],
