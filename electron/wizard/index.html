@@ -86,7 +86,8 @@
     }
 
     #screen-choose-model.active,
-    #screen-api-key.active {
+    #screen-api-key.active,
+    #screen-local-setup.active {
       display: flex;
     }
 
@@ -610,6 +611,281 @@
       text-decoration: underline;
     }
 
+    /* ── Screen: Local AI Setup ── */
+    #screen-local-setup {
+      background: #060608;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 20px 24px;
+    }
+
+    .ls-container {
+      position: relative;
+      width: 100%;
+      max-width: 400px;
+      padding-top: 30px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+    }
+
+    /* Soft radial glow behind the header — clipped by the container's top edge */
+    .ls-glow {
+      position: absolute;
+      top: -40px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 340px;
+      height: 190px;
+      background: radial-gradient(ellipse at center,
+        rgba(59, 130, 246, 0.16) 0%,
+        rgba(59, 130, 246, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .ls-content {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .ls-icon-badge {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: #12121a;
+      border: 0.5px solid #3b82f6;
+      box-shadow: 0 0 28px rgba(59, 130, 246, 0.22);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #3b82f6;
+      margin-bottom: 16px;
+    }
+
+    .ls-heading {
+      font-size: 22px;
+      font-weight: 500;
+      color: #f1f5f9;
+      letter-spacing: -0.01em;
+    }
+
+    .ls-subheading {
+      margin-top: 8px;
+      max-width: 340px;
+      font-size: 14px;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+
+    .ls-steps {
+      width: 100%;
+      margin: 22px 0 4px;
+      text-align: left;
+    }
+
+    .ls-step {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Left rail: badge on top, gradient connector line stretching to fill the row */
+    .ls-step-rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .ls-step-badge {
+      position: relative;
+      width: 39px;
+      height: 39px;
+      border-radius: 10px;
+      background: #0f0f18;
+      border: 0.5px solid #2a2a3a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      z-index: 1;
+    }
+
+    .ls-step-badge-icon,
+    .ls-step-check {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ls-step-check {
+      position: absolute;
+      inset: 0;
+      color: #3b82f6;
+      opacity: 0;
+    }
+
+    .ls-step.complete .ls-step-badge-icon { opacity: 0; }
+    .ls-step.complete .ls-step-check { opacity: 1; }
+    .ls-step.complete .ls-step-badge { border-color: #1f3a5f; }
+
+    .ls-step-rail-line {
+      width: 1px;
+      flex: 1;
+      min-height: 14px;
+      margin: 4px 0;
+      background: linear-gradient(#2a2a3a, #1a1a24);
+    }
+
+    .ls-step:last-child .ls-step-rail-line { display: none; }
+
+    .ls-step-body {
+      flex: 1;
+      min-width: 0;
+      padding-bottom: 18px;
+    }
+
+    .ls-step:last-child .ls-step-body { padding-bottom: 0; }
+
+    .ls-step-title {
+      font-size: 14px;
+      color: #e2e8f0;
+      line-height: 1.3;
+    }
+
+    .ls-step.complete .ls-step-title { color: #64748b; }
+
+    .ls-step-size {
+      margin-top: 2px;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    /* Progress bar + status line: revealed once a download is running */
+    .ls-step-progress {
+      display: none;
+      margin-top: 8px;
+    }
+
+    .ls-step.in-progress .ls-step-progress,
+    .ls-step.complete .ls-step-progress {
+      display: block;
+    }
+
+    .ls-step-bar {
+      width: 100%;
+      height: 4px;
+      background: #1a1a24;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .ls-step-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: #3b82f6;
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .ls-step.complete .ls-step-bar-fill { background: #1f3a5f; }
+
+    .ls-step-status {
+      margin-top: 4px;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .ls-step-error {
+      display: none;
+      margin-top: 6px;
+      font-size: 12px;
+      color: #f87171;
+      line-height: 1.4;
+    }
+
+    .ls-step-error.visible { display: block; }
+
+    .ls-start-btn {
+      width: 100%;
+      margin-top: 18px;
+      padding: 13px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+      box-shadow: 0 4px 18px rgba(59, 130, 246, 0.28);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter 0.15s, opacity 0.15s;
+    }
+
+    .ls-start-btn:hover:not(:disabled) { filter: brightness(1.06); }
+
+    .ls-start-btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+
+    .ls-eta {
+      margin-top: 10px;
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 12px;
+      color: #475569;
+    }
+
+    .ls-divider {
+      width: 100%;
+      border-top: 0.5px solid #16161f;
+      margin: 16px 0;
+    }
+
+    .ls-existing {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .ls-existing-link {
+      color: #3b82f6;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .ls-existing-link:hover { text-decoration: underline; }
+
+    /* ── Local AI Setup: completion state ── */
+    #screen-local-setup.done .ls-eta,
+    #screen-local-setup.done .ls-divider,
+    #screen-local-setup.done .ls-existing {
+      display: none;
+    }
+
+    #screen-local-setup.done .ls-start-btn {
+      opacity: 1;
+      cursor: pointer;
+    }
+
+    /* Header glow brightens briefly as the setup resolves, then settles */
+    #screen-local-setup.done #ls-glow {
+      animation: lsGlowResolve 1.6s ease-out;
+    }
+
+    @keyframes lsGlowResolve {
+      0%   { filter: brightness(1);   transform: translateX(-50%) scale(0.96); }
+      30%  { filter: brightness(2.1); transform: translateX(-50%) scale(1.06); }
+      100% { filter: brightness(1);   transform: translateX(-50%) scale(1); }
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; }
       to { opacity: 1; }
@@ -743,6 +1019,94 @@
     </div>
   </div>
 
+  <!-- ── Screen: Local AI Setup ── -->
+  <div id="screen-local-setup" class="screen">
+    <div class="ls-container">
+      <div class="ls-glow" id="ls-glow" aria-hidden="true"></div>
+
+      <div class="ls-content">
+        <div class="ls-icon-badge">
+          <!-- CPU / chip -->
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4.5" y="4.5" width="15" height="15" rx="3" stroke="currentColor" stroke-width="1.5"/>
+            <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M9 1.75v2.75M15 1.75v2.75M9 19.5v2.75M15 19.5v2.75M1.75 9H4.5M1.75 15H4.5M19.5 9h2.75M19.5 15h2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+
+        <h1 class="ls-heading" id="ls-heading">Bring the AI to your machine</h1>
+        <p class="ls-subheading" id="ls-subheading">Two downloads and it's yours. No account, no monthly bill, nothing leaving this computer.</p>
+
+        <div class="ls-steps">
+          <!-- Step 1: the engine -->
+          <div class="ls-step" id="ls-step-engine">
+            <div class="ls-step-rail">
+              <div class="ls-step-badge">
+                <span class="ls-step-badge-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4.5 20.5h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="ls-step-check">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </div>
+              <div class="ls-step-rail-line"></div>
+            </div>
+            <div class="ls-step-body">
+              <div class="ls-step-title">The engine that runs it</div>
+              <div class="ls-step-size">1.5 GB</div>
+              <div class="ls-step-progress">
+                <div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div>
+                <div class="ls-step-status"></div>
+              </div>
+              <div class="ls-step-error"></div>
+            </div>
+          </div>
+
+          <!-- Step 2: the model -->
+          <div class="ls-step" id="ls-step-model">
+            <div class="ls-step-rail">
+              <div class="ls-step-badge">
+                <span class="ls-step-badge-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 3l1.9 5.1 5.1 1.9-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                    <path d="M18 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="ls-step-check">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </div>
+              <div class="ls-step-rail-line"></div>
+            </div>
+            <div class="ls-step-body">
+              <div class="ls-step-title">The AI itself</div>
+              <div class="ls-step-size">2.5 GB &middot; Qwen 3 4B</div>
+              <div class="ls-step-progress">
+                <div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div>
+                <div class="ls-step-status"></div>
+              </div>
+              <div class="ls-step-error"></div>
+            </div>
+          </div>
+        </div>
+
+        <button class="ls-start-btn" id="ls-start-btn" onclick="startLocalSetup()">Start setup</button>
+        <p class="ls-eta">~15 min on average home internet</p>
+
+        <div class="ls-divider"></div>
+        <p class="ls-existing">Already have Ollama running? <a href="#" class="ls-existing-link" onclick="useExistingOllama(); return false;">Use what's installed</a></p>
+
+        <p class="ak-back"><a href="#" class="ak-back-link" onclick="showScreen('screen-choose-model'); return false;">Back</a></p>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Screen 4: Loading ── -->
   <div id="screen-loading" class="screen">
     <img id="loading-bg" src="loading.png" alt="" draggable="false" />
@@ -788,9 +1152,10 @@
     }
 
     // ── Choose Model screen actions ──────────────────────────────────────────
-    // TODO: kick off the local model download (~4 GB) before entering the app
+    // Show the local AI setup screen (engine + model downloads live there)
     function setupLocalModel() {
-      goToLoading();
+      resetLocalSetupScreen();
+      showScreen('screen-local-setup');
     }
 
     // Open the guided flow for creating/entering a free API key (e.g. Groq)
@@ -880,6 +1245,203 @@
 
       connectBtn.disabled = false;
       connectBtn.textContent = originalLabel;
+    }
+
+    // ── Local AI Setup screen ───────────────────────────────────────────────
+    const LS_STEPS = ['engine', 'model'];
+    const LS_HEADING_DEFAULT = 'Bring the AI to your machine';
+    const LS_SUBHEADING_DEFAULT =
+      "Two downloads and it's yours. No account, no monthly bill, nothing leaving this computer.";
+    let lsSetupRunning = false;
+    let lsAutoAdvanceTimer = null;
+
+    function lsClearAutoAdvance() {
+      if (lsAutoAdvanceTimer !== null) {
+        clearTimeout(lsAutoAdvanceTimer);
+        lsAutoAdvanceTimer = null;
+      }
+    }
+
+    function lsFormatBytes(bytes) {
+      if (!bytes || bytes < 0) bytes = 0;
+      if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+      if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
+      if (bytes >= 1e3) return Math.round(bytes / 1e3) + ' KB';
+      return Math.round(bytes) + ' B';
+    }
+
+    function lsFormatSpeed(bytesPerSec) {
+      if (!bytesPerSec || bytesPerSec <= 0) return '--';
+      if (bytesPerSec >= 1e6) return (bytesPerSec / 1e6).toFixed(1) + ' MB/s';
+      if (bytesPerSec >= 1e3) return Math.round(bytesPerSec / 1e3) + ' KB/s';
+      return Math.round(bytesPerSec) + ' B/s';
+    }
+
+    function lsStepRow(step) {
+      return document.getElementById('ls-step-' + step);
+    }
+
+    // Put the screen back to its pristine, pre-download state.
+    function resetLocalSetupScreen() {
+      lsSetupRunning = false;
+      lsClearAutoAdvance();
+
+      const screen = document.getElementById('screen-local-setup');
+      if (screen) screen.classList.remove('done');
+
+      const heading = document.getElementById('ls-heading');
+      if (heading) heading.textContent = LS_HEADING_DEFAULT;
+      const sub = document.getElementById('ls-subheading');
+      if (sub) sub.textContent = LS_SUBHEADING_DEFAULT;
+
+      const btn = document.getElementById('ls-start-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Start setup';
+        btn.onclick = startLocalSetup;
+      }
+      LS_STEPS.forEach(step => {
+        const row = lsStepRow(step);
+        if (!row) return;
+        row.classList.remove('in-progress', 'complete', 'failed');
+        const fill = row.querySelector('.ls-step-bar-fill');
+        if (fill) fill.style.width = '0%';
+        const status = row.querySelector('.ls-step-status');
+        if (status) status.textContent = '';
+        const err = row.querySelector('.ls-step-error');
+        if (err) { err.textContent = ''; err.classList.remove('visible'); }
+      });
+    }
+
+    // Called by the download layer as bytes arrive.
+    // step: 'engine' | 'model'
+    function setStepProgress(step, receivedBytes, totalBytes, bytesPerSec) {
+      const row = lsStepRow(step);
+      if (!row) return;
+      row.classList.add('in-progress');
+      row.classList.remove('failed');
+      const fill = row.querySelector('.ls-step-bar-fill');
+      const status = row.querySelector('.ls-step-status');
+      const pct = totalBytes > 0
+        ? Math.max(0, Math.min(100, (receivedBytes / totalBytes) * 100))
+        : 0;
+      if (fill) fill.style.width = pct.toFixed(1) + '%';
+      if (status) {
+        status.textContent =
+          lsFormatBytes(receivedBytes) + ' of ' + lsFormatBytes(totalBytes) +
+          ' · ' + lsFormatSpeed(bytesPerSec);
+      }
+    }
+
+    // Called by the download layer when an item finishes.
+    function setStepComplete(step) {
+      const row = lsStepRow(step);
+      if (!row) return;
+      row.classList.remove('in-progress', 'failed');
+      row.classList.add('complete');
+      const fill = row.querySelector('.ls-step-bar-fill');
+      if (fill) fill.style.width = '100%';
+      const status = row.querySelector('.ls-step-status');
+      if (status) status.textContent = 'Done';
+      const err = row.querySelector('.ls-step-error');
+      if (err) { err.textContent = ''; err.classList.remove('visible'); }
+    }
+
+    // Called by the download layer on failure — shows an inline error under the
+    // row and re-enables the button so the user can retry.
+    function setSetupFailed(step, message) {
+      const row = lsStepRow(step);
+      if (row) {
+        row.classList.remove('in-progress', 'complete');
+        row.classList.add('failed');
+        const err = row.querySelector('.ls-step-error');
+        if (err) {
+          err.textContent = message || 'Something went wrong. Please try again.';
+          err.classList.add('visible');
+        }
+      }
+      lsSetupRunning = false;
+      const btn = document.getElementById('ls-start-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Start setup';
+      }
+    }
+
+    // Called by the download layer once BOTH the engine and the model have
+    // finished. Transforms the screen in place, then auto-advances after ~3s.
+    function setSetupComplete() {
+      lsSetupRunning = true; // keep startLocalSetup from re-entering
+
+      LS_STEPS.forEach(step => setStepComplete(step));
+
+      const screen = document.getElementById('screen-local-setup');
+      if (screen) screen.classList.add('done');
+
+      const heading = document.getElementById('ls-heading');
+      if (heading) heading.textContent = 'Your AI is ready';
+      const sub = document.getElementById('ls-subheading');
+      if (sub) sub.textContent = 'It runs on this computer, offline, for free.';
+
+      const btn = document.getElementById('ls-start-btn');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Open NodeBrain';
+        btn.onclick = () => { lsClearAutoAdvance(); goToLoading(); };
+      }
+
+      // Someone who walked away during the download should come back to a
+      // working app, not a screen waiting on a click. The button stays live
+      // for anyone who wants to go now.
+      lsClearAutoAdvance();
+      lsAutoAdvanceTimer = setTimeout(() => {
+        lsAutoAdvanceTimer = null;
+        goToLoading();
+      }, 3000);
+    }
+
+    // "Start setup" — one click triggers both downloads; the user does not
+    // sequence them.
+    function startLocalSetup() {
+      if (lsSetupRunning) return;
+      lsSetupRunning = true;
+
+      const btn = document.getElementById('ls-start-btn');
+      btn.disabled = true;
+      btn.textContent = 'Setting up…';
+
+      // Enter the in-progress visual state for both rows.
+      LS_STEPS.forEach(step => {
+        const row = lsStepRow(step);
+        if (!row) return;
+        row.classList.remove('complete', 'failed');
+        row.classList.add('in-progress');
+        const fill = row.querySelector('.ls-step-bar-fill');
+        if (fill) fill.style.width = '0%';
+        const status = row.querySelector('.ls-step-status');
+        if (status) status.textContent = 'Starting…';
+        const err = row.querySelector('.ls-step-error');
+        if (err) { err.textContent = ''; err.classList.remove('visible'); }
+      });
+
+      // TODO: kick off the real work here. From this single click:
+      //   1. Download / install the Ollama engine (~1.5 GB), reporting progress
+      //      via setStepProgress('engine', received, total, bytesPerSec) and
+      //      setStepComplete('engine') when done.
+      //   2. Pull the model via Ollama's POST /api/pull for "qwen3:4b" (~2.5 GB),
+      //      streaming its progress via setStepProgress('model', ...) and
+      //      setStepComplete('model') when done.
+      // On any failure call setSetupFailed(step, message). Once BOTH steps are
+      // complete, call setSetupComplete() — it renders the done state and
+      // auto-advances to goToLoading(). Do NOT call goToLoading() here yet.
+    }
+
+    // "Use what's installed" — the user already runs Ollama.
+    function useExistingOllama() {
+      // TODO: before continuing, verify a local Ollama server is reachable
+      // (e.g. GET http://127.0.0.1:11434/api/tags) and that at least one usable
+      // model is installed. If not, surface guidance instead of proceeding.
+      goToLoading();
     }
 
     // ── Flow ──────────────────────────────────────────────────────────────────

@@ -2,7 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getVaultSecret: () => ipcRenderer.invoke('get-vault-secret'),
-  setVaultSecret: (secret: string) => ipcRenderer.invoke('set-vault-secret', secret),
   isFirstRun: () => ipcRenderer.invoke('is-first-run'),
   completeSetup: () => ipcRenderer.invoke('complete-setup'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),

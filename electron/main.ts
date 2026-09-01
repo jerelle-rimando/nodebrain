@@ -444,10 +444,6 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('get-vault-secret', () => getOrCreateVaultSecret());
 
-  ipcMain.handle('set-vault-secret', (_event: Electron.IpcMainInvokeEvent, secret: string) => {
-    store.set('vaultSecret', secret);
-  });
-
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],
@@ -566,6 +562,17 @@ function registerIpcHandlers(): void {
 }
 
 ipcMain.handle('open-external', (_event, url: string) => {
+  let protocol: string;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    log(`open-external rejected (malformed URL): ${url}`);
+    return;
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    log(`open-external rejected (disallowed scheme "${protocol}"): ${url}`);
+    return;
+  }
   const { shell } = require('electron');
   shell.openExternal(url);
 });
