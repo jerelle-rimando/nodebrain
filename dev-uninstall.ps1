@@ -1,5 +1,13 @@
 # NodeBrain dev uninstall script
 # Run from PowerShell as Administrator
+#
+# By default this leaves %LOCALAPPDATA%\NodeBrain (the downloaded local AI
+# engine + model, multi-GB) in place so a dev rebuild doesn't re-download it.
+# Pass -Full to also remove it.
+
+param(
+    [switch]$Full
+)
 
 function Remove-WithLogging {
     param([string]$Path, [switch]$Recurse)
@@ -53,6 +61,17 @@ Remove-WithLogging "C:\Users\$env:USERNAME\AppData\Roaming\NodeBrain" -Recurse
 Remove-WithLogging "C:\Users\$env:USERNAME\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\NodeBrain.lnk"
 Remove-WithLogging "C:\Users\$env:USERNAME\Desktop\NodeBrain.lnk"
 Remove-WithLogging "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NodeBrain" -Recurse
+
+# --- Local AI engine + model data (%LOCALAPPDATA%\NodeBrain) ---
+# This holds the downloaded Ollama engine (~26 MB) and model (~2.5 GB). Kept by
+# default so rebuilding during development doesn't re-download 2.5 GB every time.
+if ($Full) {
+    Write-Host "Removing local AI engine + model data (-Full)..." -ForegroundColor Yellow
+    Remove-WithLogging "$env:LOCALAPPDATA\NodeBrain" -Recurse
+} else {
+    Write-Host "Keeping $env:LOCALAPPDATA\NodeBrain (local AI engine + model data)." -ForegroundColor Cyan
+    Write-Host "  Pass -Full to also remove it." -ForegroundColor Cyan
+}
 
 # --- Remove build artifacts ---
 Write-Host "Removing dist-electron..." -ForegroundColor Yellow

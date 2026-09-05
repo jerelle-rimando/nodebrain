@@ -28,6 +28,7 @@
   "dependencies": {
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
+    "extract-zip": "2.0.1",
     "keytar": "^7.9.0"
   }
 }

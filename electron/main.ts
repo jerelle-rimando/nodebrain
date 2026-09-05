@@ -4,8 +4,10 @@ import * as crypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
 import Store from 'electron-store';
 import * as http from 'http';
+import * as https from 'https';
 import * as fs from 'fs';
 import { autoUpdater } from 'electron-updater';
+import extractZip from 'extract-zip';
 
 interface StoreSchema {
   setupComplete: boolean;
@@ -44,6 +46,37 @@ const BACKEND_PORT = 3001;
 const FRONTEND_PORT = 5173;
 const isDev = process.env.NODE_ENV === 'development';
 let ACTIVE_FRONTEND_PORT = FRONTEND_PORT;
+
+// ── Local AI engine (Ollama) ──────────────────────────────────────────────────
+// Pinned deliberately — same reasoning as the MCP server version pinning in
+// backend/src/mcp/toolRegistry.ts: an unpinned URL/version could silently start
+// serving a different (potentially malicious) binary on a future release.
+// This is a CPU-only repack of Ollama hosted on NodeBrain's own GitHub releases —
+// NOT the ~1.46 GB upstream asset, which bundles CUDA/ROCm libraries we don't need.
+// To upgrade: manually verify the new release, then update version/url/sha256/sizeBytes together.
+const OLLAMA_ENGINE = {
+  version: 'v0.33.2',
+  url: 'https://github.com/jerelle-rimando/nodebrain/releases/download/ollama-engine-v0.33.2/ollama-windows-amd64-cpu-v0.33.2.zip',
+  sha256: '00B12FBA422084996920C5DBF7A85B57520428573950DFBF259BBB8DD8A924F4',
+  sizeBytes: 27199488, // ~26 MB
+};
+const LOCAL_MODEL = 'qwen3:4b-instruct-2507-q4_K_M';
+const OLLAMA_PORT = 11434;
+
+let ollamaProcess: ChildProcess | null = null;
+let ollamaSpawnedByUs = false;
+
+// Multi-GB engine + model data does not belong in userData (Roaming) — that's
+// what dev-uninstall.ps1 wipes, and it's meant for small config, not this.
+function getNodeBrainLocalDir(): string {
+  return path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'NodeBrain');
+}
+function getEngineDir(): string {
+  return path.join(getNodeBrainLocalDir(), 'engine');
+}
+function getModelsDir(): string {
+  return path.join(getNodeBrainLocalDir(), 'models');
+}
 
 // ── Vault secret ──────────────────────────────────────────────────────────────
 async function getOrCreateVaultSecret(): Promise<string> {
@@ -164,6 +197,249 @@ function waitForBackend(timeoutMs = 60000): Promise<void> {
       setTimeout(check, 500);
     }
     check();
+  });
+}
+
+// ── Local AI setup: download / verify / unpack / run / pull ──────────────────
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function downloadWithProgress(
+  url: string,
+  destPath: string,
+  onProgress: (received: number, total: number, bytesPerSec: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const attempt = (currentUrl: string, redirectsLeft: number) => {
+      const req = https.get(currentUrl, (res) => {
+        const status = res.statusCode || 0;
+
+        if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
+          res.resume();
+          if (redirectsLeft <= 0) {
+            reject(new Error('The download link redirected too many times.'));
+            return;
+          }
+          attempt(res.headers.location, redirectsLeft - 1);
+          return;
+        }
+
+        if (status !== 200) {
+          res.resume();
+          reject(new Error(`The download server responded with an error (status ${status}).`));
+          return;
+        }
+
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let received = 0;
+        let windowStart = Date.now();
+        let windowStartBytes = 0;
+        const file = fs.createWriteStream(destPath);
+
+        res.on('data', (chunk: Buffer) => {
+          received += chunk.length;
+          const elapsed = Date.now() - windowStart;
+          if (elapsed >= 250) {
+            onProgress(received, total, ((received - windowStartBytes) / elapsed) * 1000);
+            windowStart = Date.now();
+            windowStartBytes = received;
+          }
+        });
+        res.on('error', (err) => {
+          file.close();
+          fs.unlink(destPath, () => { /* ignore */ });
+          reject(err);
+        });
+
+        res.pipe(file);
+        file.on('finish', () => {
+          onProgress(received, total || received, 0);
+          file.close(() => resolve());
+        });
+        file.on('error', (err) => {
+          fs.unlink(destPath, () => { /* ignore */ });
+          reject(err);
+        });
+      });
+      req.on('error', () => {
+        reject(new Error("Couldn't connect to download the engine. Check your internet connection and try again."));
+      });
+    };
+    attempt(url, 5);
+  });
+}
+
+// Recursively looks for ollama.exe under the unpacked engine directory — the
+// zip's internal layout isn't guaranteed, so we don't hardcode a subpath.
+function findEnginePath(engineDir: string): string | null {
+  if (!fs.existsSync(engineDir)) return null;
+  const stack: string[] = [engineDir];
+  while (stack.length > 0) {
+    const dir = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile() && entry.name.toLowerCase() === 'ollama.exe') {
+        return full;
+      }
+    }
+  }
+  return null;
+}
+
+function httpGetText(url: string, timeoutMs = 3000): Promise<{ status: number; body: string } | null> {
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode || 0, body }));
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function isOllamaRunning(): Promise<boolean> {
+  const res = await httpGetText(`http://127.0.0.1:${OLLAMA_PORT}/api/version`, 1500);
+  return !!res && res.status === 200;
+}
+
+function waitForOllamaReady(timeoutMs = 30000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    function check() {
+      http.get(`http://localhost:${OLLAMA_PORT}/`, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          if (body.includes('Ollama is running')) resolve();
+          else retry();
+        });
+      }).on('error', retry);
+    }
+    function retry() {
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error('The local AI engine did not start in time. Please try again.'));
+        return;
+      }
+      setTimeout(check, 500);
+    }
+    check();
+  });
+}
+
+async function ensureEngineRunning(enginePath: string, modelsDir: string): Promise<void> {
+  if (await isOllamaRunning()) {
+    log('Local AI engine already running on 11434 — reusing it instead of spawning a second copy.');
+    return;
+  }
+  log(`Starting local AI engine: ${enginePath}`);
+  ollamaProcess = spawn(enginePath, ['serve'], {
+    windowsHide: true,
+    shell: false,
+    env: { ...process.env, OLLAMA_HOST: `127.0.0.1:${OLLAMA_PORT}`, OLLAMA_MODELS: modelsDir },
+  });
+  ollamaSpawnedByUs = true;
+  ollamaProcess.stdout?.on('data', (data: Buffer) => log(`[Ollama] ${data.toString().trim()}`));
+  ollamaProcess.stderr?.on('data', (data: Buffer) => log(`[Ollama Error] ${data.toString().trim()}`));
+  ollamaProcess.on('exit', (code: number | null) => {
+    log(`[Ollama] exited with code ${code}`);
+    ollamaProcess = null;
+  });
+  await waitForOllamaReady(30000);
+}
+
+// Streams POST /api/pull's newline-delimited JSON progress. Layer `completed`
+// may be absent early (treated as 0); aggregate across all layers seen so far
+// since Ollama pulls model layers one at a time within a single stream.
+function pullModel(onProgress: (received: number, total: number, bytesPerSec: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err); else resolve();
+    };
+
+    const body = JSON.stringify({ model: LOCAL_MODEL, stream: true });
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: OLLAMA_PORT,
+        path: '/api/pull',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      },
+      (res) => {
+        let buffer = '';
+        const layerTotals = new Map<string, number>();
+        const layerCompleted = new Map<string, number>();
+        let windowStart = Date.now();
+        let windowStartBytes = 0;
+
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          buffer += chunk;
+          let idx: number;
+          while ((idx = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+
+            let obj: { status?: string; digest?: string; total?: number; completed?: number; error?: string };
+            try {
+              obj = JSON.parse(line);
+            } catch {
+              continue;
+            }
+
+            if (obj.error) {
+              finish(new Error(obj.error));
+              return;
+            }
+
+            if (obj.digest) {
+              if (typeof obj.total === 'number') layerTotals.set(obj.digest, obj.total);
+              layerCompleted.set(obj.digest, obj.completed || 0);
+            }
+
+            const totalSum = Array.from(layerTotals.values()).reduce((a, b) => a + b, 0);
+            const completedSum = Array.from(layerCompleted.values()).reduce((a, b) => a + b, 0);
+            const elapsed = Date.now() - windowStart;
+            if (elapsed >= 250) {
+              onProgress(completedSum, totalSum, ((completedSum - windowStartBytes) / elapsed) * 1000);
+              windowStart = Date.now();
+              windowStartBytes = completedSum;
+            }
+
+            if (obj.status === 'success') {
+              onProgress(totalSum || completedSum, totalSum || completedSum, 0);
+              finish();
+              return;
+            }
+          }
+        });
+        res.on('end', () => finish());
+        res.on('error', (err) => finish(err));
+      },
+    );
+    req.on('error', () => finish(new Error("Couldn't reach the local AI engine to download the model.")));
+    req.write(body);
+    req.end();
   });
 }
 
@@ -425,7 +701,7 @@ function createTray(): void {
       },
     },
     { type: 'separator' },
-    { label: 'Quit', click: () => { backendProcess?.kill(); app.exit(0); } },
+    { label: 'Quit', click: () => { backendProcess?.kill(); if (ollamaSpawnedByUs) ollamaProcess?.kill(); app.exit(0); } },
   ]);
 
   tray.setToolTip('NodeBrain');
@@ -548,6 +824,120 @@ function registerIpcHandlers(): void {
     store.set('backendUrl', url || 'http://localhost:3001');
   });
 
+  ipcMain.handle('start-local-setup', async (event: Electron.IpcMainInvokeEvent) => {
+    const sender = event.sender;
+    const emit = (fn: string, ...args: unknown[]) => {
+      if (!sender.isDestroyed()) sender.send('local-setup-event', { fn, args });
+    };
+
+    const engineDir = getEngineDir();
+    const modelsDir = getModelsDir();
+    try {
+      fs.mkdirSync(engineDir, { recursive: true });
+      fs.mkdirSync(modelsDir, { recursive: true });
+    } catch (err) {
+      log(`start-local-setup: could not create data folders: ${err}`);
+      emit('setSetupFailed', 'engine', "Couldn't create the folders needed for setup. Please try again.");
+      return { success: false };
+    }
+
+    let enginePath = findEnginePath(engineDir);
+
+    if (!enginePath) {
+      const zipPath = path.join(app.getPath('temp'), `nodebrain-ollama-engine-${OLLAMA_ENGINE.version}.zip`);
+
+      log(`start-local-setup: downloading engine from ${OLLAMA_ENGINE.url}`);
+      try {
+        await downloadWithProgress(OLLAMA_ENGINE.url, zipPath, (received, total, bytesPerSec) => {
+          emit('setStepProgress', 'engine', received, total || OLLAMA_ENGINE.sizeBytes, bytesPerSec);
+        });
+      } catch (err) {
+        log(`start-local-setup: engine download failed: ${err}`);
+        emit('setSetupFailed', 'engine', "Couldn't download the engine. Check your internet connection and try again.");
+        return { success: false };
+      }
+
+      let actualHash: string;
+      try {
+        actualHash = await sha256File(zipPath);
+      } catch (err) {
+        log(`start-local-setup: hashing the download failed: ${err}`);
+        try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+        emit('setSetupFailed', 'engine', "Couldn't verify the downloaded file. Please try again.");
+        return { success: false };
+      }
+
+      // Case-insensitive on purpose: hex hashes are case-insensitive, and a
+      // case mismatch must never cause a false rejection of a good download.
+      if (actualHash.toLowerCase() !== OLLAMA_ENGINE.sha256.toLowerCase()) {
+        log(`start-local-setup: SHA256 mismatch — expected ${OLLAMA_ENGINE.sha256}, got ${actualHash}`);
+        try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+        emit('setSetupFailed', 'engine', "The downloaded file didn't match what we expected, so it was deleted for safety. Please try again.");
+        return { success: false };
+      }
+
+      log('start-local-setup: engine verified, unpacking...');
+      try {
+        await extractZip(zipPath, { dir: engineDir });
+        fs.unlinkSync(zipPath);
+      } catch (err) {
+        log(`start-local-setup: unzip failed: ${err}`);
+        emit('setSetupFailed', 'engine', "Couldn't unpack the engine. Please try again.");
+        return { success: false };
+      }
+
+      enginePath = findEnginePath(engineDir);
+      if (!enginePath) {
+        log('start-local-setup: ollama.exe not found after unpacking');
+        emit('setSetupFailed', 'engine', "The engine didn't unpack as expected. Please try again.");
+        return { success: false };
+      }
+    } else {
+      log(`start-local-setup: engine already present at ${enginePath}, skipping download`);
+    }
+
+    emit('setStepComplete', 'engine');
+
+    try {
+      await ensureEngineRunning(enginePath, modelsDir);
+    } catch (err) {
+      log(`start-local-setup: engine failed to start: ${err}`);
+      emit('setSetupFailed', 'engine', 'The local AI engine failed to start. Please try again.');
+      return { success: false };
+    }
+
+    log(`start-local-setup: pulling model ${LOCAL_MODEL}`);
+    try {
+      await pullModel((received, total, bytesPerSec) => {
+        emit('setStepProgress', 'model', received, total, bytesPerSec);
+      });
+    } catch (err) {
+      log(`start-local-setup: model pull failed: ${err}`);
+      emit('setSetupFailed', 'model', "Couldn't download the AI model. Check your internet connection and try again.");
+      return { success: false };
+    }
+
+    emit('setStepComplete', 'model');
+    emit('setSetupComplete');
+    return { success: true };
+  });
+
+  ipcMain.handle('check-existing-ollama', async () => {
+    const version = await httpGetText(`http://127.0.0.1:${OLLAMA_PORT}/api/version`, 1500);
+    if (!version || version.status !== 200) {
+      return { running: false, hasModel: false };
+    }
+    const tags = await httpGetText(`http://127.0.0.1:${OLLAMA_PORT}/api/tags`, 1500);
+    let hasModel = false;
+    if (tags && tags.status === 200) {
+      try {
+        const parsed = JSON.parse(tags.body);
+        hasModel = Array.isArray(parsed.models) && parsed.models.length > 0;
+      } catch { /* ignore */ }
+    }
+    return { running: true, hasModel };
+  });
+
   ipcMain.handle('load-main-app', async () => {
     log('load-main-app called');
     try {
@@ -611,6 +1001,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   backendProcess?.kill();
+  if (ollamaSpawnedByUs) ollamaProcess?.kill();
 });
 
 app.on('activate', () => {

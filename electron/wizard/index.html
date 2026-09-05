@@ -863,10 +863,22 @@
 
     .ls-existing-link:hover { text-decoration: underline; }
 
+    .ls-existing-msg {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #f87171;
+      display: none;
+    }
+
+    .ls-existing-msg.visible {
+      display: block;
+    }
+
     /* ── Local AI Setup: completion state ── */
     #screen-local-setup.done .ls-eta,
     #screen-local-setup.done .ls-divider,
-    #screen-local-setup.done .ls-existing {
+    #screen-local-setup.done .ls-existing,
+    #screen-local-setup.done .ls-existing-msg {
       display: none;
     }
 
@@ -1057,7 +1069,7 @@
             </div>
             <div class="ls-step-body">
               <div class="ls-step-title">The engine that runs it</div>
-              <div class="ls-step-size">1.5 GB</div>
+              <div class="ls-step-size">26 MB</div>
               <div class="ls-step-progress">
                 <div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div>
                 <div class="ls-step-status"></div>
@@ -1097,10 +1109,11 @@
         </div>
 
         <button class="ls-start-btn" id="ls-start-btn" onclick="startLocalSetup()">Start setup</button>
-        <p class="ls-eta">~15 min on average home internet</p>
+        <p class="ls-eta">~10 min on average home internet</p>
 
         <div class="ls-divider"></div>
         <p class="ls-existing">Already have Ollama running? <a href="#" class="ls-existing-link" onclick="useExistingOllama(); return false;">Use what's installed</a></p>
+        <p class="ls-existing-msg" id="ls-existing-msg"></p>
 
         <p class="ak-back"><a href="#" class="ak-back-link" onclick="showScreen('screen-choose-model'); return false;">Back</a></p>
       </div>
@@ -1300,6 +1313,8 @@
         btn.textContent = 'Start setup';
         btn.onclick = startLocalSetup;
       }
+      const existingMsg = document.getElementById('ls-existing-msg');
+      if (existingMsg) { existingMsg.textContent = ''; existingMsg.classList.remove('visible'); }
       LS_STEPS.forEach(step => {
         const row = lsStepRow(step);
         if (!row) return;
@@ -1424,24 +1439,59 @@
         if (err) { err.textContent = ''; err.classList.remove('visible'); }
       });
 
-      // TODO: kick off the real work here. From this single click:
-      //   1. Download / install the Ollama engine (~1.5 GB), reporting progress
-      //      via setStepProgress('engine', received, total, bytesPerSec) and
-      //      setStepComplete('engine') when done.
-      //   2. Pull the model via Ollama's POST /api/pull for "qwen3:4b" (~2.5 GB),
-      //      streaming its progress via setStepProgress('model', ...) and
-      //      setStepComplete('model') when done.
-      // On any failure call setSetupFailed(step, message). Once BOTH steps are
-      // complete, call setSetupComplete() — it renders the done state and
-      // auto-advances to goToLoading(). Do NOT call goToLoading() here yet.
+      // The main process drives both the engine download and the model pull,
+      // streaming progress back via 'local-setup-event' (registered below),
+      // which calls setStepProgress/setStepComplete/setSetupFailed/setSetupComplete.
+      if (!window.electronAPI || !window.electronAPI.startLocalSetup) {
+        setSetupFailed('engine', "Setup isn't available in this build. Please try again.");
+        return;
+      }
+      window.electronAPI.startLocalSetup().catch(() => {
+        // Failures are normally reported via setSetupFailed through the event
+        // channel; this only guards against the IPC call itself throwing.
+        setSetupFailed('engine', 'Something went wrong starting setup. Please try again.');
+      });
+    }
+
+    // Routes progress/completion/failure events from the main process to the
+    // wizard functions that already render them.
+    if (window.electronAPI && window.electronAPI.onLocalSetupEvent) {
+      window.electronAPI.onLocalSetupEvent(({ fn, args }) => {
+        if (typeof window[fn] === 'function') window[fn](...(args || []));
+      });
     }
 
     // "Use what's installed" — the user already runs Ollama.
-    function useExistingOllama() {
-      // TODO: before continuing, verify a local Ollama server is reachable
-      // (e.g. GET http://127.0.0.1:11434/api/tags) and that at least one usable
-      // model is installed. If not, surface guidance instead of proceeding.
-      goToLoading();
+    async function useExistingOllama() {
+      const msg = document.getElementById('ls-existing-msg');
+      if (msg) { msg.textContent = ''; msg.classList.remove('visible'); }
+
+      if (!window.electronAPI || !window.electronAPI.checkExistingOllama) {
+        if (msg) {
+          msg.textContent = "Couldn't check for an existing installation. Please run setup instead.";
+          msg.classList.add('visible');
+        }
+        return;
+      }
+
+      let status;
+      try {
+        status = await window.electronAPI.checkExistingOllama();
+      } catch {
+        status = { running: false, hasModel: false };
+      }
+
+      if (status && status.running && status.hasModel) {
+        goToLoading();
+        return;
+      }
+
+      if (msg) {
+        msg.textContent = status && status.running
+          ? "Ollama is running, but it doesn't have any models yet. Please run setup instead."
+          : "No local Ollama installation was found running. Please run setup instead.";
+        msg.classList.add('visible');
+      }
     }
 
     // ── Flow ──────────────────────────────────────────────────────────────────

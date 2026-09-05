@@ -21,4 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completeOnboarding: () => ipcRenderer.invoke('complete_onboarding'),
   getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
   setBackendUrl: (url: string) => ipcRenderer.invoke('set-backend-url', url),
+  startLocalSetup: () => ipcRenderer.invoke('start-local-setup'),
+  checkExistingOllama: () => ipcRenderer.invoke('check-existing-ollama'),
+  onLocalSetupEvent: (callback: (payload: { fn: string; args: unknown[] }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { fn: string; args: unknown[] }) => callback(payload);
+    ipcRenderer.on('local-setup-event', listener);
+    return () => ipcRenderer.removeListener('local-setup-event', listener);
+  },
 });
