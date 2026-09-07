@@ -5,6 +5,7 @@ import {
   Plug,
   CheckCircle,
   XCircle,
+  AlertTriangle,
   Loader,
   ChevronDown,
   ChevronUp,
@@ -12,6 +13,7 @@ import {
   Plus,
   Trash2,
   Server,
+  FolderOpen,
 } from 'lucide-react';
 import {
   SiTelegram,
@@ -33,6 +35,7 @@ interface Integration {
   credentialPlaceholder: string;
   isSecret?: boolean;
   requiresCredential?: boolean;
+  hasFolderPicker?: boolean;
   tools: string[];
   setupSteps: string[];
   docsUrl?: string;
@@ -133,6 +136,7 @@ const INTEGRATIONS: Integration[] = [
     description: 'Let agents read and write files on your local machine.',
     credentialProvider: 'filesystem',
     credentialPlaceholder: 'Windows: C:\\Users\\you\\Documents | Mac: /Users/you/Documents',
+    hasFolderPicker: true,
     tools: ['Read file', 'Write file', 'List directory', 'Create folder', 'Delete file'],
     setupSteps: [
       'Enter the folder path you want agents to have access to',
@@ -142,9 +146,11 @@ const INTEGRATIONS: Integration[] = [
   },
 ];
 
+type IntegrationStatus = 'connected' | 'warning' | 'disconnected';
+
 interface ConnectSectionProps {
   integration: Integration;
-  connected: boolean;
+  status: IntegrationStatus;
   saving: string | null;
   tokenInputs: Record<string, string>;
   onTokenChange: (id: string, value: string) => void;
@@ -153,10 +159,18 @@ interface ConnectSectionProps {
   onEnable: (integration: Integration) => void;
 }
 
-function ConnectSection(props: ConnectSectionProps) {
-  const { integration, connected, saving, tokenInputs, onTokenChange, onConnect, onDisconnect, onEnable } = props;
+async function chooseFolder(): Promise<string | null> {
+  const electronAPI = (window as any).electronAPI;
+  if (!electronAPI?.selectFolder) return null;
+  const path = await electronAPI.selectFolder();
+  return path ?? null;
+}
 
-  if (connected) {
+function ConnectSection(props: ConnectSectionProps) {
+  const { integration, status, saving, tokenInputs, onTokenChange, onConnect, onDisconnect, onEnable } = props;
+  const isBusy = saving === integration.id;
+
+  if (status === 'connected') {
     return (
       <button
         onClick={() => onDisconnect(integration)}
@@ -171,30 +185,60 @@ function ConnectSection(props: ConnectSectionProps) {
     return (
       <button
         onClick={() => onEnable(integration)}
-        disabled={saving === integration.id}
+        disabled={isBusy}
         className="w-full py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
       >
-        {saving === integration.id ? 'Enabling...' : 'Enable'}
+        {isBusy ? 'Enabling...' : 'Enable'}
       </button>
     );
   }
 
+  const hasElectronFolderPicker =
+    integration.hasFolderPicker && typeof window !== 'undefined' && !!(window as any).electronAPI?.selectFolder;
+
   return (
-    <div className="flex gap-2">
-      <input
-        type={props.integration.isSecret ? 'password' : 'text'}
-        value={tokenInputs[integration.id] ?? ''}
-        onChange={(e) => onTokenChange(integration.id, e.target.value)}
-        placeholder={integration.credentialPlaceholder}
-        className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
-      />
-      <button
-        onClick={() => onConnect(integration)}
-        disabled={!tokenInputs[integration.id]?.trim() || saving === integration.id}
-        className="px-4 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors"
-      >
-        {saving === integration.id ? 'Saving...' : 'Connect'}
-      </button>
+    <div className="space-y-2">
+      {status === 'warning' && (
+        <button
+          onClick={() => onDisconnect(integration)}
+          className="text-xs text-brain-text-dim hover:text-brain-error underline"
+        >
+          Remove this credential
+        </button>
+      )}
+
+      {hasElectronFolderPicker && (
+        <button
+          type="button"
+          onClick={async () => {
+            const path = await chooseFolder();
+            if (path) onTokenChange(integration.id, path);
+          }}
+          className="w-full py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim text-white rounded-lg transition-colors flex items-center justify-center gap-1.5"
+        >
+          <FolderOpen size={13} />
+          Choose folder…
+        </button>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type={integration.isSecret ? 'password' : 'text'}
+          value={tokenInputs[integration.id] ?? ''}
+          onChange={(e) => onTokenChange(integration.id, e.target.value)}
+          placeholder={
+            hasElectronFolderPicker ? 'Or paste a path here' : integration.credentialPlaceholder
+          }
+          className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+        />
+        <button
+          onClick={() => onConnect(integration)}
+          disabled={!tokenInputs[integration.id]?.trim() || isBusy}
+          className="px-4 py-2 text-xs bg-brain-accent-deep hover:bg-brain-accent-deep-dim disabled:opacity-40 text-white rounded-lg transition-colors flex-shrink-0"
+        >
+          {isBusy ? 'Connecting...' : status === 'warning' ? 'Retry' : 'Connect'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -252,11 +296,17 @@ function ExpandedSection(props: ConnectSectionProps) {
   );
 }
 
+// Thrown when the request to NodeBrain's own backend fails — a different problem
+// from the target service (Telegram, GitHub, ...) rejecting a credential.
+const BACKEND_UNREACHABLE_MESSAGE =
+  "Can't reach NodeBrain's background service right now. Make sure the app is fully started, then try again.";
+
 export function IntegrationsPage() {
   const { credentials } = useStore();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, 'ok' | 'fail'>>({});
+  const [statusMessages, setStatusMessages] = useState<Record<string, string>>({});
   const [tokenInputs, setTokenInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [serverStatus, setServerStatus] = useState<Record<string, boolean>>({});
@@ -280,24 +330,36 @@ export function IntegrationsPage() {
       .catch(console.error);
   }, []);
 
-  function isConnected(integration: Integration): boolean {
+  // A credential row existing only means something was saved — it says nothing about
+  // whether the service actually accepted it. A credential that failed its last
+  // verification (connect-time or manual Test) reads as "warning", not "connected".
+  function getStatus(integration: Integration): IntegrationStatus {
     if (integration.requiresCredential === false) {
-      return serverStatus[integration.credentialProvider] ?? false;
+      return (serverStatus[integration.credentialProvider] ?? false) ? 'connected' : 'disconnected';
     }
-    return credentials.some((c) => c.provider === integration.credentialProvider);
+    const hasCredential = credentials.some((c) => c.provider === integration.credentialProvider);
+    if (!hasCredential) return 'disconnected';
+    return testResults[integration.id] === 'fail' ? 'warning' : 'connected';
+  }
+
+  // Calls the /integrations/:provider/test route and normalizes both its
+  // "service said no" replies and outright network failures into one shape.
+  async function verify(integration: Integration): Promise<{ ok: boolean; message: string }> {
+    try {
+      const res = await api.testIntegration(integration.credentialProvider);
+      return { ok: res.success, message: res.message };
+    } catch {
+      return { ok: false, message: BACKEND_UNREACHABLE_MESSAGE };
+    }
   }
 
   async function handleTest(integration: Integration) {
     setTesting(integration.id);
     try {
-      const res = await api.testIntegration(integration.credentialProvider);
-      setTestResults((prev) => ({
-        ...prev,
-        [integration.id]: res.success ? 'ok' : 'fail',
-      }));
-    } catch {
-      toast.error('Could not reach' + integration.label + '. Check your credential.');
-      setTestResults((prev) => ({ ...prev, [integration.id]: 'fail' }));
+      const { ok, message } = await verify(integration);
+      setTestResults((prev) => ({ ...prev, [integration.id]: ok ? 'ok' : 'fail' }));
+      setStatusMessages((prev) => ({ ...prev, [integration.id]: message }));
+      if (!ok) toast.error(message);
     } finally {
       setTesting(null);
     }
@@ -316,7 +378,19 @@ export function IntegrationsPage() {
       const creds = await api.getCredentials();
       useStore.getState().setCredentials(creds);
       setTokenInputs((prev) => ({ ...prev, [integration.id]: '' }));
-            toast.success(integration.label + ' connected successfully');
+
+      // Don't declare success yet — actually check whether the service accepts this credential.
+      const { ok, message } = await verify(integration);
+      setTestResults((prev) => ({ ...prev, [integration.id]: ok ? 'ok' : 'fail' }));
+      setStatusMessages((prev) => ({ ...prev, [integration.id]: message }));
+
+      if (ok) {
+        toast.success(integration.label + ' connected successfully');
+      } else {
+        // Keep the credential (so a typo can be fixed by just retyping and clicking
+        // Retry, rather than having to delete and re-add it) but never show it as connected.
+        toast.error(integration.label + ' was saved, but the connection could not be verified.');
+      }
     } catch (err) {
           toast.error('Failed to save credential. Check your input and try again.');
           console.error(err);
@@ -352,6 +426,11 @@ export function IntegrationsPage() {
       useStore.getState().setCredentials(creds);
             toast.success(integration.label + ' disconnected');
       setTestResults((prev) => {
+        const next = { ...prev };
+        delete next[integration.id];
+        return next;
+      });
+      setStatusMessages((prev) => {
         const next = { ...prev };
         delete next[integration.id];
         return next;
@@ -491,31 +570,39 @@ export function IntegrationsPage() {
         </div>
 
         {INTEGRATIONS.map((integration) => {
-          const connected = isConnected(integration);
+          const status = getStatus(integration);
           const testResult = testResults[integration.id];
+          const message = statusMessages[integration.id];
           const isExpanded = expanded === integration.id;
           const Icon = integration.icon ?? Plug;
 
+          const cardClass =
+            status === 'connected'
+              ? 'rounded-xl border border-brain-success/30 bg-brain-success/5 transition-all'
+              : status === 'warning'
+              ? 'rounded-xl border border-brain-warning/30 bg-brain-warning/5 transition-all'
+              : 'rounded-xl border border-brain-border bg-brain-surface transition-all';
+
           return (
-            <div
-              key={integration.id}
-              className={
-                connected
-                  ? 'rounded-xl border border-brain-success/30 bg-brain-success/5 transition-all'
-                  : 'rounded-xl border border-brain-border bg-brain-surface transition-all'
-              }
-            >
+            <div key={integration.id} className={cardClass}>
               <div className="flex items-center gap-3 p-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <Icon size={20} className="text-brain-text flex-shrink-0" />
                     <p className="text-sm font-medium text-brain-text">{integration.label}</p>
-                    {connected ? (
+                    {status === 'connected' && (
                       <span className="flex items-center gap-1 text-xs text-brain-success">
                         <CheckCircle size={11} />
                         Connected
                       </span>
-                    ) : (
+                    )}
+                    {status === 'warning' && (
+                      <span className="flex items-center gap-1 text-xs text-brain-warning">
+                        <AlertTriangle size={11} />
+                        Needs attention
+                      </span>
+                    )}
+                    {status === 'disconnected' && (
                       <span className="flex items-center gap-1 text-xs text-brain-text-dim">
                         <XCircle size={11} />
                         Not connected
@@ -526,17 +613,23 @@ export function IntegrationsPage() {
                         Working
                       </span>
                     )}
-                    {testResult === 'fail' && (
-                      <span className="text-xs text-brain-error bg-brain-error/10 px-2 py-0.5 rounded-full">
-                        Failed
-                      </span>
-                    )}
                   </div>
                   <p className="text-xs text-brain-text-dim mt-0.5">{integration.description}</p>
+                  {message && (
+                    <p
+                      className={
+                        status === 'warning'
+                          ? 'text-xs text-brain-error mt-1'
+                          : 'text-xs text-brain-success mt-1'
+                      }
+                    >
+                      {message}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {connected && (
+                  {status !== 'disconnected' && (
                     <button
                       onClick={() => handleTest(integration)}
                       disabled={testing === integration.id}
@@ -561,7 +654,7 @@ export function IntegrationsPage() {
               {isExpanded && (
                 <ExpandedSection
                   integration={integration}
-                  connected={connected}
+                  status={status}
                   saving={saving}
                   tokenInputs={tokenInputs}
                   onTokenChange={handleTokenChange}

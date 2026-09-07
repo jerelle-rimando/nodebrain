@@ -92,7 +92,9 @@ export const api = {
       request<{ saved: number }>('/chat/save', { method: 'POST', body: JSON.stringify({ messages }) }),
 
   testIntegration: (provider: string) =>
-    request<{ success: boolean; message: string }>(`/integrations/${provider}/test`),
+    request<{ success: boolean; message: string; reason?: 'invalid_credential' | 'not_configured' | 'network' | 'unknown' }>(
+      `/integrations/${provider}/test`
+    ),
   getIntegrationStatus: (provider: string) =>
     request<{ connected: boolean }>(`/integrations/${provider}/status`),
   enableIntegration: (provider: string) =>

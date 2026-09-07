@@ -1,4 +1,4 @@
-# NodeBrain dev uninstall script
+# NodeBrain dev script
 # Run from PowerShell as Administrator
 #
 # By default this leaves %LOCALAPPDATA%\NodeBrain (the downloaded local AI
