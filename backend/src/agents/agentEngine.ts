@@ -6,7 +6,7 @@ import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
 import { dbRun } from '../db/database';
 import { updateAgentStatus } from '../db/agentRepository';
 import { queryRelevantContext } from '../rag/ragEngine';
-import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic } from '../mcp/toolRegistry';
+import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, Task, TaskLog } from '../../shared-types';
 import { deriveAgentEmoji } from '../../shared-types';
@@ -239,6 +239,19 @@ const DESTRUCTIVE_TOOLS = new Set([
   'pdf-reader__read_pdf',
 ]);
 
+// Servers NodeBrain ships. Anything else is a user-added custom MCP server whose
+// tools are unvetted, so approval mode must gate them even if they aren't in
+// DESTRUCTIVE_TOOLS — fail closed on the unknown rather than open.
+const BUILTIN_SERVERS = new Set([
+  ...SERVER_CONFIGS.map((config) => config.name),
+  'pdf-reader',
+  'agent-coordinator',
+]);
+
+function requiresApproval(fullToolName: string, serverName: string): boolean {
+  return DESTRUCTIVE_TOOLS.has(fullToolName) || !BUILTIN_SERVERS.has(serverName);
+}
+
 function getClient(provider: string, apiKey: string, customBaseUrl?: string): OpenAI {
   return new OpenAI({
     apiKey: apiKey || 'ollama',
@@ -321,7 +334,7 @@ async function runOpenAIAgenticLoop(
       const { serverName, toolName } = parseToolName(toolCall.function.name);
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
-      if (agent.config.approvalMode && DESTRUCTIVE_TOOLS.has(toolCall.function.name)) {
+      if (agent.config.approvalMode && requiresApproval(toolCall.function.name, serverName)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${toolCall.function.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, toolCall.function.name, args);
         if (!approved) {
@@ -458,7 +471,7 @@ async function runAnthropicAgenticLoop(
       const { serverName, toolName } = parseToolName(block.name);
       const args = block.input as Record<string, unknown>;
 
-      if (agent.config.approvalMode && DESTRUCTIVE_TOOLS.has(block.name)) {
+      if (agent.config.approvalMode && requiresApproval(block.name, serverName)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${block.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, block.name, args);
         if (!approved) {

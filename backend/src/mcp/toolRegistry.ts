@@ -16,7 +16,7 @@ interface ServerConfig {
 // Pinning prevents silent supply-chain re-resolution: without a version, npx re-checks the
 // npm registry on every reconnect and may silently pull a newer (potentially malicious) release.
 // To upgrade a server, manually verify the new release and update the version string here.
-const SERVER_CONFIGS: ServerConfig[] = [
+export const SERVER_CONFIGS: ServerConfig[] = [
   {
     name: 'telegram',
     credentialProvider: 'telegram',
