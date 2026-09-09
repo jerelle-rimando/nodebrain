@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
-import { Send, Bot, User, Loader2, Zap, ArrowLeft, ArrowDown, PanelRightOpen, PanelRightClose, X, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Loader2, ArrowLeft, ArrowDown, PanelRightOpen, PanelRightClose, X, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore } from '../../stores/appStore';
@@ -13,6 +13,39 @@ import { useSmoothedStream } from '../../hooks/useSmoothedStream';
 import { useRightPanel, type DotState } from '../../hooks/useRightPanel';
 
 type ChatMode = 'chat' | 'agent';
+
+// Static first-run welcome shown in the main Dashboard thread before any chat
+// history exists. Deliberately hard-coded text, not a model call: it must
+// render instantly, before any provider is even confirmed working, and it is
+// never persisted — see the render site for why.
+const WELCOME_EXAMPLES = [
+  'Watch a folder and tell me when new files show up',
+  'Summarize PDFs in my Downloads folder and save notes to a file',
+  'Search the web for AI news and save a summary',
+];
+
+const WELCOME_MARKDOWN = `Welcome to NodeBrain. 👋🤖
+
+Tell me what you want done and I'll build a personalized AI assistant to do it. Switch to Agent mode, then try:
+
+- ${WELCOME_EXAMPLES[0]}
+- ${WELCOME_EXAMPLES[1]}
+- ${WELCOME_EXAMPLES[2]}
+
+Or tell me what you're tired of doing by hand. I'll figure out if I can take it off you.`;
+
+// Flattens a react-markdown children tree back to plain text so a rendered
+// <li> can be matched against WELCOME_EXAMPLES regardless of the inline
+// markup remark wraps it in.
+function getNodeText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getNodeText).join('');
+  if (node && typeof node === 'object' && 'props' in (node as any)) {
+    return getNodeText((node as any).props.children);
+  }
+  return '';
+}
 
 // Right column is now just the Active Agents + Live Logs stack (w-72 = 288).
 // Execution Logs moved to an on-demand overlay opened from Live Logs.
@@ -79,6 +112,52 @@ function AgentModeHint() {
   );
 }
 
+// First-run empty state for the main Dashboard thread. Styled like a real
+// assistant bubble and rendered through the same Markdown pipeline so the
+// bullets/bold match a real reply, but it's a pure UI empty-state: it holds
+// no ChatMessage, is never sent to the API, and never written to chat
+// history — so it simply stops appearing once `chatMessages` is non-empty.
+function WelcomeMessage({ onExampleClick }: { onExampleClick: (text: string) => void }) {
+  return (
+    <div className="flex items-start gap-3 animate-slide-up">
+      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-brain-surface border border-brain-border">
+        <Bot size={14} className="text-brain-text-dim" />
+      </div>
+      <div className="max-w-[80%] rounded-xl px-4 py-3 text-sm bg-brain-bg border border-brain-border text-brain-text-dim">
+        <div className="chat-content leading-relaxed">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ node: _node, ...props }) => (
+                <a {...props} target="_blank" rel="noopener noreferrer" />
+              ),
+              li: ({ node: _node, children, ...props }) => {
+                const text = getNodeText(children).trim();
+                if (!WELCOME_EXAMPLES.includes(text)) {
+                  return <li {...props}>{children}</li>;
+                }
+                return (
+                  <li {...props}>
+                    <button
+                      type="button"
+                      onClick={() => onExampleClick(text)}
+                      className="text-left text-brain-accent hover:text-brain-accent-dim hover:underline transition-colors"
+                    >
+                      {children}
+                    </button>
+                  </li>
+                );
+              },
+            }}
+          >
+            {WELCOME_MARKDOWN}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { chatMessages, setChatMessages, addChatMessage, agents, logs, updateAgent: storeUpdateAgent, availableModels, chatPhase, setChatPhase } = useStore();
   const [input, setInput] = useState('');
@@ -94,6 +173,10 @@ export function Dashboard() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [agentMessages, setAgentMessages] = useState<Record<string, ChatMessage[]>>({});
+  // Gates the first-run welcome message: stays false until the history fetch
+  // below resolves, so a returning user with real history never sees a flash
+  // of the welcome state before it's replaced.
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // True while the view is pinned to the bottom. The streaming path reads this
   // ref (not state) so a ~60/s token cadence doesn't trigger re-renders;
@@ -158,7 +241,8 @@ export function Dashboard() {
           byAgent[m.agentId!].push(m);
         });
       setAgentMessages(byAgent);
-    }).catch(console.error);
+    }).catch(console.error)
+      .finally(() => setChatHistoryLoaded(true));
   }, [setChatMessages]);
 
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -306,6 +390,14 @@ export function Dashboard() {
     }
   }
 
+  // Clicking a welcome-message example fills the composer and switches to
+  // Agent mode, but never auto-sends — the user still presses enter.
+  function handleWelcomeExampleClick(text: string) {
+    setInput(text);
+    setChatMode('agent');
+    inputRef.current?.focus();
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -417,33 +509,8 @@ export function Dashboard() {
         </div>
 
         <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto p-4 space-y-4">
-          {activeMessages.length === 0 && !selectedAgent && (
-            <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-16">
-              <div className="w-16 h-16 rounded-2xl bg-brain-accent/10 border border-brain-accent/20 flex items-center justify-center">
-                <Zap size={28} className="text-brain-accent" />
-              </div>
-              <div>
-                <h3 className="text-brain-text font-semibold mb-2">Create your first agent</h3>
-                <p className="text-brain-text-dim text-sm max-w-xs">
-                Describe what you want an agent to do. Connect integrations to give it real tools — file access, messaging, code, and more.
-                </p>
-              </div>
-              <div className="space-y-2 text-left w-full max-w-sm">
-                {[
-                  'Create a file manager agent that reads and summarizes my local documents',
-                  'Build a Telegram agent that sends me a daily briefing every morning at 9am',
-                  'Make a GitHub agent that monitors my repos and summarizes new issues',
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="w-full text-left text-xs text-brain-text-dim hover:text-brain-text bg-brain-bg hover:bg-brain-border border border-brain-border rounded-lg px-3 py-2 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
+          {activeMessages.length === 0 && !selectedAgent && chatHistoryLoaded && (
+            <WelcomeMessage onExampleClick={handleWelcomeExampleClick} />
           )}
 
           {activeMessages.length === 0 && selectedAgent && (
