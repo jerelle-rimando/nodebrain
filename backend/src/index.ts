@@ -33,6 +33,32 @@ if (process.platform === 'win32') {
   (process as any).type = 'browser';
 }
 
+// ── Fatal error capture (backend process) ───────────────────────────────────
+// The Electron main process already captures our stderr line-by-line into
+// nodebrain-log.txt, but process.exit() can truncate a final async console
+// write, so the reason gets lost. fs.writeSync(2, …) is synchronous — the
+// parent always receives the detail before the pipe closes. Local logging
+// only; nothing here is transmitted.
+function writeFatalToStderr(context: string, err: unknown): void {
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  try {
+    fs.writeSync(2, `[Backend Fatal] ${context}: ${detail}\n`);
+  } catch {
+    console.error(`[Backend Fatal] ${context}:`, err); // last resort (async)
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  writeFatalToStderr('uncaughtException', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  // Log but keep serving — a stray rejection shouldn't kill the backend and
+  // trigger a user-visible restart. Change to process.exit(1) to make it fatal.
+  writeFatalToStderr('unhandledRejection', reason);
+});
+
 const PORT = Number(process.env.PORT) || 3001;
 const BIND_HOST = process.env.NODEBRAIN_BIND_HOST ?? '127.0.0.1';
 const app = express();
@@ -143,13 +169,13 @@ async function main() {
       .catch(err => console.warn('[RAG] Failed to initialize:', (err as Error).message ?? err));
 
   } catch (err) {
-    console.error('❌ Fatal error during startup:', err);
+    writeFatalToStderr('fatal error during startup', err);
     process.exit(1);
   }
 }
 
 main().catch((err) => {
-  console.error('❌ Unhandled error in main():', err);
+  writeFatalToStderr('unhandled error in main()', err);
   process.exit(1);
 });
 

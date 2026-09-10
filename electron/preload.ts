@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   completeSetup: () => ipcRenderer.invoke('complete-setup'),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  logRendererError: (payload: { kind: string; message: string; stack?: string; source?: string }) =>
+    ipcRenderer.invoke('log-renderer-error', payload),
   testApiKey: (provider: string, key: string) => ipcRenderer.invoke('test-api-key', provider, key),
   saveCredential: (payload: { name: string; provider: string; value: string; description?: string; baseUrl?: string }) =>
     ipcRenderer.invoke('save-credential', payload),

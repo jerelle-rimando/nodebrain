@@ -27,14 +27,62 @@ if (!gotTheLock) {
 
 // ── Logging (must be after app is referenced but path is safe here) ───────────
 let logPath: string;
+
+// Keep nodebrain-log.txt from growing without bound. Once it passes the cap we
+// rename it to nodebrain-log.old.txt (replacing any previous .old) and start a
+// fresh file, so on-disk usage stays bounded at ~2x LOG_MAX_BYTES. Purely local
+// housekeeping — nothing here is transmitted anywhere.
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+let logWritesSinceSizeCheck = 0;
+
+function rotateLogIfNeeded(): void {
+  try {
+    if (fs.statSync(logPath).size <= LOG_MAX_BYTES) return;
+    const rotatedPath = logPath.replace(/\.txt$/, '.old.txt');
+    try { fs.rmSync(rotatedPath, { force: true }); } catch { /* ignore */ }
+    fs.renameSync(logPath, rotatedPath);
+  } catch { /* file not created yet, or stat/rename failed — nothing to rotate */ }
+}
+
 function log(msg: string): void {
   if (!logPath) {
     logPath = path.join(app.getPath('userData'), 'nodebrain-log.txt');
+    rotateLogIfNeeded();
+  }
+  if (++logWritesSinceSizeCheck >= 200) {
+    logWritesSinceSizeCheck = 0;
+    rotateLogIfNeeded();
   }
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   try { fs.appendFileSync(logPath, line); } catch { /* ignore */ }
   console.log(msg);
 }
+
+// ── Global error capture (main process) ──────────────────────────────────────
+// Local logging only — every line lands in nodebrain-log.txt and is never sent
+// anywhere. The goal is that a main-process error can't vanish without a
+// record, while keeping the app's existing crash/no-crash behavior.
+process.on('uncaughtException', (err: Error) => {
+  log(`[FATAL] uncaughtException (main): ${err?.stack || err}`);
+  // Electron's built-in handler shows an error dialog and leaves the app
+  // running; registering this listener suppresses that dialog, so we recreate
+  // the visible feedback here and likewise do NOT force-exit.
+  try {
+    dialog.showErrorBox(
+      'NodeBrain hit an unexpected error',
+      `${err?.message || err}\n\nA record was written to the log.`,
+    );
+  } catch { /* dialog unavailable — the log line still stands */ }
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const detail = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+  log(`[ERROR] unhandledRejection (main): ${detail}`);
+  // Node would normally escalate an unhandled rejection to a fatal
+  // uncaughtException. We log and keep running instead, so a stray rejection
+  // can't take the window down — change this to `throw reason` to restore the
+  // hard failure.
+});
 
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -618,6 +666,42 @@ async function createWindow(): Promise<void> {
 
   log('BrowserWindow created');
 
+  // ── Renderer error capture ────────────────────────────────────────────────
+  // Local logging only. Catches the failure modes that never reach the main
+  // process's exception handlers: a dead render process, a hung renderer, a
+  // failed asset load, or a blank/black window from a renderer-side throw.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return;
+    log(`[RENDERER] render-process-gone — reason: ${details.reason}, exitCode: ${details.exitCode}`);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // -3 is ERR_ABORTED — fired for superseded/cancelled navigations, which the
+    // backend-recovery poller below triggers routinely. Not a real failure.
+    if (errorCode === -3) return;
+    log(`[RENDERER] did-fail-load — code: ${errorCode}, desc: "${errorDescription}", url: ${validatedURL}, mainFrame: ${isMainFrame}`);
+  });
+
+  let unresponsiveSince = 0;
+  mainWindow.webContents.on('unresponsive', () => {
+    unresponsiveSince = Date.now();
+    log('[RENDERER] unresponsive — window stopped responding to input');
+  });
+  mainWindow.webContents.on('responsive', () => {
+    const downFor = unresponsiveSince ? `${Date.now() - unresponsiveSince}ms` : 'unknown duration';
+    log(`[RENDERER] responsive again — was unresponsive for ${downFor}`);
+    unresponsiveSince = 0;
+  });
+
+  // Renderer-side console.error output. The window only ever runs our own
+  // bundled app, so error-level volume is low; this is a backstop for throws
+  // that the window.onerror / React error-boundary path doesn't already wrap.
+  mainWindow.webContents.on('console-message', (event) => {
+    if (event.level !== 'error') return;
+    const where = event.sourceId ? ` (${event.sourceId}:${event.lineNumber})` : '';
+    log(`[RENDERER console.error] ${event.message}${where}`);
+  });
+
   const isFirstRun = !store.get('setupComplete');
   log(`isFirstRun: ${isFirstRun}`);
 
@@ -729,6 +813,18 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('get-app-version', () => app.getVersion());
+
+  // Renderer-side global error hooks (window.onerror, unhandledrejection, and
+  // the React error boundary) forward here so their details land in
+  // nodebrain-log.txt. Local logging only — never transmitted.
+  ipcMain.handle('log-renderer-error', (_event, payload: unknown) => {
+    const p = (payload && typeof payload === 'object') ? payload as Record<string, unknown> : {};
+    const kind = typeof p.kind === 'string' ? p.kind : 'error';
+    const message = typeof p.message === 'string' ? p.message : String(p.message ?? '(no message)');
+    const stack = typeof p.stack === 'string' && p.stack ? `\n${p.stack}` : '';
+    const source = typeof p.source === 'string' && p.source ? ` @ ${p.source}` : '';
+    log(`[RENDERER ${kind}] ${message}${source}${stack}`);
+  });
 
   ipcMain.handle('test-api-key', async (_event: Electron.IpcMainInvokeEvent, provider: string, key: string) => {
     const baseURLs: Record<string, string> = {
