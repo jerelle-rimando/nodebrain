@@ -1,6 +1,7 @@
 import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
+import { readSpreadsheetAsText, readDocumentAsText } from '../utils/fileReaders';
 import { getAllCustomMCPServers } from '../db/mcpServerRepository';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 import { getAgentById } from '../db/agentRepository';
@@ -192,6 +193,38 @@ const PDF_TOOL: MCPToolWithServer = {
   },
 };
 
+const SPREADSHEET_TOOL: MCPToolWithServer = {
+  serverName: 'file-reader',
+  name: 'read_spreadsheet',
+  description: 'Read and extract data from a spreadsheet file (.xlsx or .csv) on the local filesystem, returned as CSV-style text',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description: 'Absolute path to the spreadsheet file to read',
+      },
+    },
+    required: ['file_path'],
+  },
+};
+
+const DOCUMENT_TOOL: MCPToolWithServer = {
+  serverName: 'file-reader',
+  name: 'read_document',
+  description: 'Read and extract plain text content from a Word document (.docx) on the local filesystem',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description: 'Absolute path to the .docx file to read',
+      },
+    },
+    required: ['file_path'],
+  },
+};
+
 const DELEGATE_TOOL: MCPToolWithServer = {
   serverName: 'agent-coordinator',
   name: 'delegate_to_agent',
@@ -218,7 +251,7 @@ export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithSer
     new Promise<void>(resolve => setTimeout(resolve, REGISTRY_READY_TIMEOUT_MS)),
   ]);
   const mcpTools = await getAllAvailableTools();
-  const tools: MCPToolWithServer[] = [...mcpTools, PDF_TOOL];
+  const tools: MCPToolWithServer[] = [...mcpTools, PDF_TOOL, SPREADSHEET_TOOL, DOCUMENT_TOOL];
 
   const toolPermissions = agentId ? getAgentById(agentId)?.toolPermissions : undefined;
   let result = tools;

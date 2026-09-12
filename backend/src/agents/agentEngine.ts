@@ -237,6 +237,9 @@ const DESTRUCTIVE_TOOLS = new Set([
   // pdf-reader — reads arbitrary absolute paths; gated behind approval mode
   // even though it's a read, since it isn't confined to the filesystem sandbox.
   'pdf-reader__read_pdf',
+  // file-reader — same rationale as pdf-reader above.
+  'file-reader__read_spreadsheet',
+  'file-reader__read_document',
 ]);
 
 // Servers NodeBrain ships. Anything else is a user-added custom MCP server whose
@@ -245,6 +248,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 const BUILTIN_SERVERS = new Set([
   ...SERVER_CONFIGS.map((config) => config.name),
   'pdf-reader',
+  'file-reader',
   'agent-coordinator',
 ]);
 
@@ -362,6 +366,12 @@ async function runOpenAIAgenticLoop(
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
           toolResult = await readPdfAsText(args.file_path as string);
+        } else if (serverName === 'file-reader' && toolName === 'read_spreadsheet') {
+          const { readSpreadsheetAsText } = await import('../utils/fileReaders');
+          toolResult = await readSpreadsheetAsText(args.file_path as string);
+        } else if (serverName === 'file-reader' && toolName === 'read_document') {
+          const { readDocumentAsText } = await import('../utils/fileReaders');
+          toolResult = await readDocumentAsText(args.file_path as string);
         } else if (serverName === 'agent-coordinator' && toolName === 'delegate_to_agent') {
           const targetName = args.target_agent_name as string;
           const task = args.task as string;
@@ -496,6 +506,12 @@ async function runAnthropicAgenticLoop(
         if (serverName === 'pdf-reader') {
           const { readPdfAsText } = await import('../utils/pdfReader');
           toolResult = await readPdfAsText(args.file_path as string);
+        } else if (serverName === 'file-reader' && toolName === 'read_spreadsheet') {
+          const { readSpreadsheetAsText } = await import('../utils/fileReaders');
+          toolResult = await readSpreadsheetAsText(args.file_path as string);
+        } else if (serverName === 'file-reader' && toolName === 'read_document') {
+          const { readDocumentAsText } = await import('../utils/fileReaders');
+          toolResult = await readDocumentAsText(args.file_path as string);
         } else if (serverName === 'agent-coordinator' && toolName === 'delegate_to_agent') {
           const targetName = args.target_agent_name as string;
           const task = args.task as string;
