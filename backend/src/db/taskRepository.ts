@@ -78,3 +78,19 @@ export function getLogsByAgent(agentId: string, limit = 100): TaskLog[] {
 export function getAllRecentLogs(limit = 200): TaskLog[] {
   return dbAll<LogRow>('SELECT * FROM task_logs ORDER BY timestamp DESC LIMIT ?', [limit]).map(rowToLog).reverse();
 }
+
+// Startup reconciliation: any task still 'running' when the process starts up
+// cannot actually be running — nothing has executed yet at this point — so it
+// is necessarily a leftover from an unclean shutdown (the process was killed
+// before executeAgentTask's catch block could mark it failed). Safe to run on
+// an empty database and idempotent: once no rows match, it's a no-op.
+export function reconcileOrphanedTasks(): number {
+  const stale = dbAll<{ id: string }>('SELECT id FROM tasks WHERE status = ?', ['running']);
+  if (stale.length === 0) return 0;
+  const completedAt = new Date().toISOString();
+  dbRun(
+    'UPDATE tasks SET status=?, error=?, completed_at=? WHERE status=?',
+    ['failed', 'Interrupted — NodeBrain stopped before this finished.', completedAt, 'running'],
+  );
+  return stale.length;
+}

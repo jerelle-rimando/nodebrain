@@ -90,3 +90,17 @@ export function deleteAgent(id: string): boolean {
 export function updateAgentStatus(id: string, status: AgentStatus): void {
   dbRun('UPDATE agents SET status=?, updated_at=? WHERE id=?', [status, new Date().toISOString(), id]);
 }
+
+// Startup reconciliation: an agent left 'running' when the process starts up
+// is necessarily stale — nothing has executed yet at this point, so there is
+// no "genuinely running" case to distinguish. Safe on an empty database and
+// idempotent across restarts.
+export function reconcileOrphanedAgents(): number {
+  const stale = dbAll<{ id: string }>('SELECT id FROM agents WHERE status = ?', ['running']);
+  if (stale.length === 0) return 0;
+  dbRun(
+    'UPDATE agents SET status=?, updated_at=? WHERE status=?',
+    ['idle', new Date().toISOString(), 'running'],
+  );
+  return stale.length;
+}

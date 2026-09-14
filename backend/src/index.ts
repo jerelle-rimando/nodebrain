@@ -6,6 +6,8 @@ import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import { initDb } from './db/database';
+import { reconcileOrphanedTasks } from './db/taskRepository';
+import { reconcileOrphanedAgents } from './db/agentRepository';
 import { startScheduler } from './scheduler/scheduler';
 import { initRag } from './rag/ragEngine';
 import { initializeToolRegistry } from './mcp/toolRegistry';
@@ -150,6 +152,17 @@ async function main() {
 
     await initDb();
     console.log('✅ Database ready');
+
+    // Reconcile state left behind by an unclean shutdown (e.g. the backend
+    // dying with STATUS_CONTROL_C_EXIT). Runs before anything else touches
+    // tasks/agents, so any row still 'running' here is necessarily orphaned.
+    const orphanedTasks = reconcileOrphanedTasks();
+    const orphanedAgents = reconcileOrphanedAgents();
+    if (orphanedTasks > 0 || orphanedAgents > 0) {
+      console.log(`♻️  Reconciled ${orphanedTasks} orphaned task(s) and ${orphanedAgents} orphaned agent(s) left running from a previous shutdown`);
+    } else {
+      console.log('✅ No orphaned tasks or agents from a previous shutdown');
+    }
 
     startScheduler();
     console.log('✅ Scheduler ready');
