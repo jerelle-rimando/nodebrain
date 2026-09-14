@@ -26,6 +26,9 @@ interface AppState {
   selectedAgentId: string | null;
   logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
+  // Whether the Electron-proxied backend is currently reachable. Driven by
+  // useLiveSync's SSE connection (primary) and api.ts's request() (secondary).
+  backendConnected: boolean;
 
   setAvailableModels: (models: Record<string, string[]>) => void;
 
@@ -54,6 +57,7 @@ interface AppState {
   setLogsFilterAgentId: (id: string | null) => void;
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
+  setBackendConnected: (connected: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -68,6 +72,7 @@ export const useStore = create<AppState>((set) => ({
   selectedAgentId: null,
   logsFilterAgentId: null,
   pendingApprovals: [],
+  backendConnected: true,
 
   setAvailableModels: (availableModels) => set({ availableModels }),
   setAgents: (agents) => set({ agents }),
@@ -96,4 +101,5 @@ export const useStore = create<AppState>((set) => ({
   setLogsFilterAgentId: (logsFilterAgentId) => set({ logsFilterAgentId }),
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
   removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
+  setBackendConnected: (backendConnected) => set({ backendConnected }),
 }));

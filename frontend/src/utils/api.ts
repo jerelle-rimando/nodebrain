@@ -1,13 +1,28 @@
+import { useStore } from '../stores/appStore';
+
 const BASE_URL = '/api';
 
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${endpoint}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    });
+  } catch {
+    // Network-level failure — the Electron proxy itself is unreachable.
+    useStore.getState().setBackendConnected(false);
+    throw new Error('backend unreachable');
+  }
+
+  if (res.status === 502) {
+    // Electron's proxy responds 502 while the backend is mid-restart.
+    useStore.getState().setBackendConnected(false);
+    throw new Error('backend unreachable');
+  }
 
   const json = await res.json();
   if (!json.success) throw new Error(json.error ?? 'Request failed');

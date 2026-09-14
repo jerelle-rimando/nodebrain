@@ -4,14 +4,27 @@ import type { ToolApprovalRequest } from '../stores/appStore';
 import type { TaskLog, Task, Agent } from '@shared/types';
 import { pushToken } from '../utils/tokenStreamBuffer';
 
+// A brief drop shouldn't flash the "reconnecting" banner — only surface it
+// once the stream has actually been down for a couple of seconds.
+const DISCONNECT_DEBOUNCE_MS = 2500;
+
 export function useLiveSync() {
   useEffect(() => {
     let es: EventSource;
     let unmounted = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
       es = new EventSource('/api/events');
+
+      es.onopen = () => {
+        if (disconnectTimer !== null) {
+          clearTimeout(disconnectTimer);
+          disconnectTimer = null;
+        }
+        useStore.getState().setBackendConnected(true);
+      };
 
       es.addEventListener('log', (e) => {
         const log: TaskLog = JSON.parse((e as MessageEvent).data);
@@ -73,6 +86,12 @@ export function useLiveSync() {
 
       es.onerror = () => {
         es.close();
+        if (disconnectTimer === null) {
+          disconnectTimer = setTimeout(() => {
+            disconnectTimer = null;
+            useStore.getState().setBackendConnected(false);
+          }, DISCONNECT_DEBOUNCE_MS);
+        }
         if (!unmounted) {
           reconnectTimer = setTimeout(connect, 2000);
         }
@@ -84,6 +103,7 @@ export function useLiveSync() {
     return () => {
       unmounted = true;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      if (disconnectTimer !== null) clearTimeout(disconnectTimer);
       es.close();
     };
   }, []);

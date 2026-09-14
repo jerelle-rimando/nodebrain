@@ -14,6 +14,7 @@ import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
 import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
+import { ConnectionBanner } from './components/shared/ConnectionBanner';
 import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 
 // Nav order follows the arc of a user's journey through the app:
@@ -80,6 +81,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-brain-bg overflow-hidden">
+      <ConnectionBanner />
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
