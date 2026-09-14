@@ -61,6 +61,7 @@ router.post('/save', (req, res) => {
 });
 
 router.post('/message', async (req, res) => {
+  let chosenProviderForError: string | undefined;
   try {
     const { content, requestId, mode, provider: requestedProvider, model: requestedModel } = req.body as {
       content?: string;
@@ -245,6 +246,7 @@ router.post('/message', async (req, res) => {
         }
         chosenModel = defaultModels[chosenProvider] || 'gpt-4o-mini';
       }
+      chosenProviderForError = chosenProvider;
 
       if (!apiKey && chosenProvider !== 'ollama') {
         assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
@@ -360,7 +362,13 @@ router.post('/message', async (req, res) => {
       data: { userMessage: userMsg, assistantMessage: assistantMsg, suggestAgentMode },
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: String(err) });
+    const message = err instanceof Error ? err.message : String(err);
+    const isConnectionFailure = /ECONNREFUSED|connection error|fetch failed/i.test(message);
+    const friendlyMessage =
+      isConnectionFailure && chosenProviderForError === 'ollama'
+        ? "Your local AI isn't running. Try restarting NodeBrain."
+        : message;
+    res.status(500).json({ success: false, error: friendlyMessage });
   }
 });
 

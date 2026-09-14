@@ -409,6 +409,30 @@ async function ensureEngineRunning(enginePath: string, modelsDir: string): Promi
     ollamaProcess = null;
   });
   await waitForOllamaReady(30000);
+  log('Local AI engine: spawned our own instance and it is ready.');
+}
+
+// Called once at app launch (in addition to the first-run setup wizard's own
+// call into ensureEngineRunning) so the engine also comes back up on every
+// later launch, not just the one where the wizard ran. Probes before touching
+// installation state so an already-running Ollama (ours or the user's own
+// system install) is always reused rather than double-spawned. Deliberately
+// not awaited by the caller — must never delay window creation.
+async function startEngineAtLaunch(): Promise<void> {
+  if (await isOllamaRunning()) {
+    log('Local AI engine: reused existing instance already running on 11434.');
+    return;
+  }
+  const enginePath = findEnginePath(getEngineDir());
+  if (!enginePath) {
+    log('Local AI engine: not installed — skipping startup (likely using a cloud provider).');
+    return;
+  }
+  try {
+    await ensureEngineRunning(enginePath, getModelsDir());
+  } catch (err) {
+    log(`Local AI engine: failed to start: ${err}`);
+  }
 }
 
 // Streams POST /api/pull's newline-delimited JSON progress. Layer `completed`
@@ -1082,6 +1106,7 @@ app.whenReady().then(async () => {
   log('Frontend server ready');
   await startBackend();
   log('Backend started');
+  startEngineAtLaunch().catch((err) => log(`Local AI engine: unexpected error: ${err}`));
   createTray();
   log('Tray created');
   Menu.setApplicationMenu(null);
