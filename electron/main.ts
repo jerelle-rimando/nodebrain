@@ -773,6 +773,18 @@ async function createWindow(): Promise<void> {
   const isFirstRun = !store.get('setupComplete');
   log(`isFirstRun: ${isFirstRun}`);
 
+  mainWindow.once('ready-to-show', () => {
+    log('ready-to-show fired');
+    mainWindow?.show();
+  });
+
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      log('Force showing window after timeout');
+      mainWindow.show();
+    }
+  }, 4000);
+
   if (isFirstRun) {
     const wizardPath = isDev
       ? path.join(__dirname, '../electron/wizard/index.html')
@@ -782,6 +794,16 @@ async function createWindow(): Promise<void> {
     await mainWindow.loadFile(wizardPath);
     log('Wizard loaded');
   } else {
+    // Show a backend-independent splash immediately instead of leaving the
+    // window invisible for the full waitForBackend() wait (previously 24-56s).
+    const splashPath = isDev
+      ? path.join(__dirname, '../electron/splash/index.html')
+      : path.join(process.resourcesPath, 'electron/splash/index.html');
+    log(`Loading splash from: ${splashPath}`);
+    await mainWindow.loadFile(splashPath);
+    mainWindow.show();
+    log('Splash shown');
+
     log('Waiting for backend...');
     try {
       await waitForBackend(120000);
@@ -812,18 +834,6 @@ async function createWindow(): Promise<void> {
       }, 2000);
     }
   }
-
-  mainWindow.once('ready-to-show', () => {
-    log('ready-to-show fired');
-    mainWindow?.show();
-  });
-
-  setTimeout(() => {
-    if (mainWindow && !mainWindow.isVisible()) {
-      log('Force showing window after timeout');
-      mainWindow.show();
-    }
-  }, 4000);
 
   mainWindow.on('close', (e: Electron.Event) => {
     e.preventDefault();

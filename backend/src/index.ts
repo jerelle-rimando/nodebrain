@@ -145,9 +145,16 @@ async function main() {
     initVaultKey();
     delete process.env.NODEBRAIN_DATA_DIR;
 
-    // Verify pdfjs-dist loads correctly
-    import('pdfjs-dist/legacy/build/pdf.mjs').catch((err) => {
-      console.warn('[PDF] pdfjs-dist failed to load:', err.message);
+    // /api/health has no DB/scheduler/vault dependency beyond what's already
+    // done above, so open the port here — before await initDb() — instead of
+    // after. Electron's readiness poll can then succeed as soon as the process
+    // is alive, without waiting on DB init. Nothing else can reach the server
+    // before that poll succeeds (the frontend isn't loaded until it does), so
+    // no other route is exposed to a pre-initDb() request in practice.
+    app.listen(PORT, BIND_HOST, () => {
+      console.log(`\n🧠 NodeBrain backend running at http://${BIND_HOST}:${PORT}`);
+      console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
+      console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
     });
 
     await initDb();
@@ -166,12 +173,6 @@ async function main() {
 
     startScheduler();
     console.log('✅ Scheduler ready');
-
-    app.listen(PORT, BIND_HOST, () => {
-      console.log(`\n🧠 NodeBrain backend running at http://${BIND_HOST}:${PORT}`);
-      console.log(`📡 SSE events at http://localhost:${PORT}/api/events`);
-      console.log(`💾 SQLite database at ./data/nodebrain.db\n`);
-    });
 
     initializeToolRegistry()
       .then(() => console.log('✅ Tool registry ready'))

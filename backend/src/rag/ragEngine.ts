@@ -1,6 +1,6 @@
 import path from 'path';
 import { LocalIndex } from 'vectra';
-import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
+import type { FeatureExtractionPipeline } from '@xenova/transformers';
 
 const INDEX_PATH = path.join(process.env.NODEBRAIN_DATA_DIR ?? path.join(process.cwd(), 'data'), 'rag-index');
 
@@ -10,6 +10,10 @@ let extractor: FeatureExtractionPipeline | null = null;
 async function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (!extractor) {
     console.log('[RAG] Loading local embedding model (first run downloads ~25MB)...');
+    // Dynamically imported: @xenova/transformers pulls in onnxruntime-node (a 9.3MB
+    // native Windows DLL). A top-level import forced Node to load it at process
+    // boot even though it's only needed once an agent actually queries RAG.
+    const { pipeline } = await import('@xenova/transformers');
     extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
     console.log('[RAG] Embedding model ready');
   }

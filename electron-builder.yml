@@ -12,6 +12,7 @@ directories:
 files:
   - electron/dist/**/*
   - electron/wizard/**/*
+  - electron/splash/**/*
   - electron/assets/**/*
   - node_modules/**/*
   - "!node_modules/.cache"
@@ -22,6 +23,8 @@ extraResources:
     to: frontend/dist
   - from: electron/wizard
     to: electron/wizard
+  - from: electron/splash
+    to: electron/splash
   - from: electron/assets
     to: electron/assets
   - from: backend/dist

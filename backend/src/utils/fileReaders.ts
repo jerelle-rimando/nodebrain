@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import ExcelJS from 'exceljs';
-import * as mammoth from 'mammoth';
+import type ExcelJS from 'exceljs';
 import { getCredentialForProvider } from '../vault/credentialVault';
 
 const MAX_ROWS_PER_SHEET = 100;
@@ -86,6 +85,10 @@ export async function readSpreadsheetAsText(filePath: string): Promise<string> {
     throw new Error(`Not a supported spreadsheet file: ${absolutePath}`);
   }
 
+  // Dynamically imported: exceljs is 23MB across 395 files, and a top-level
+  // import forced Node to load it at process boot even though it's only
+  // needed when a spreadsheet tool call actually happens.
+  const { default: ExcelJS } = await import('exceljs');
   const workbook = new ExcelJS.Workbook();
 
   let sections: string[];
@@ -114,6 +117,8 @@ export async function readDocumentAsText(filePath: string): Promise<string> {
     throw new Error(`Not a supported document file: ${absolutePath}`);
   }
 
+  // Dynamically imported: only needed when a Word doc tool call happens.
+  const mammoth = await import('mammoth');
   const result = await mammoth.extractRawText({ path: absolutePath });
   let output = result.value.trim();
 

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NodeBrain</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #060608;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* ── Title bar ── */
+    #titlebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 36px;
+      z-index: 1000;
+      background: #12121a;
+      border-bottom: 1px solid #1e1e2e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    #titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #titlebar-logo {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+    }
+
+    #titlebar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+
+    #titlebar-close {
+      -webkit-app-region: no-drag;
+      width: 40px;
+      height: 36px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #titlebar-close:hover {
+      background: #e81123;
+      color: #fff;
+    }
+
+    /* ── Content ── */
+    #content {
+      position: fixed;
+      top: 36px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      -webkit-app-region: drag;
+    }
+
+    #logo {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      opacity: 0.95;
+    }
+
+    #title {
+      font-size: 16px;
+      font-weight: 500;
+      color: #e2e8f0;
+      letter-spacing: 0.01em;
+    }
+
+    #bar-wrap {
+      width: 200px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    #bar {
+      height: 100%;
+      width: 40%;
+      border-radius: 999px;
+      background: #3b82f6;
+      animation: indeterminate 1.3s ease-in-out infinite;
+    }
+
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+
+    #slow-line {
+      font-size: 12px;
+      color: #64748b;
+      height: 14px;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+
+    #slow-line.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Title bar ── -->
+  <div id="titlebar">
+    <div id="titlebar-left">
+      <img id="titlebar-logo" src="../assets/tray-icon.png" alt="" draggable="false" />
+      <span id="titlebar-title">NodeBrain</span>
+    </div>
+    <button id="titlebar-close" onclick="window.electronAPI?.windowClose()" title="Close">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ── Content ── -->
+  <div id="content">
+    <img id="logo" src="../assets/tray-icon.png" alt="" draggable="false" />
+    <div id="title">Starting NodeBrain…</div>
+    <div id="bar-wrap"><div id="bar"></div></div>
+    <div id="slow-line">Taking a little longer than usual…</div>
+  </div>
+
+  <script>
+    setTimeout(() => {
+      document.getElementById('slow-line').classList.add('visible');
+    }, 10000);
+  </script>
+</body>
+</html>
