@@ -189,4 +189,28 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
+// SIGTERM, SIGHUP, and SIGBREAK previously had no listener at all, so Node's
+// default disposition (silent termination) applied and none of them left any
+// trace in the log. On Windows, SIGHUP is how Node surfaces
+// CTRL_CLOSE_EVENT / CTRL_LOGOFF_EVENT / CTRL_SHUTDOWN_EVENT and SIGBREAK is
+// CTRL_BREAK_EVENT — exactly the console-control-event family suspected of
+// causing the unexplained STATUS_CONTROL_C_EXIT deaths. If one of these fires
+// and this log line appears before the process disappears, that confirms a
+// signal reached the process (and, for SIGHUP/SIGBREAK, narrows the cause to
+// a console-control event). If the backend still dies with no line at all,
+// that rules signals out entirely and confirms it's a direct TerminateProcess
+// call, which no in-process handler can intercept.
+// Logged synchronously (writeFatalToStderr uses fs.writeSync) and exits
+// immediately without awaiting async cleanup — Windows gives very little grace
+// period for SIGHUP/SIGBREAK before force-killing, so a slow async shutdown
+// could easily lose the very log line this exists to capture.
+function handleTerminationSignal(signal: NodeJS.Signals): void {
+  writeFatalToStderr(`received ${signal}`, `process received ${signal} — exiting`);
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => handleTerminationSignal('SIGTERM'));
+process.on('SIGHUP', () => handleTerminationSignal('SIGHUP'));
+process.on('SIGBREAK', () => handleTerminationSignal('SIGBREAK'));
+
 export default app;

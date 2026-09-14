@@ -1,7 +1,7 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, dialog, nativeImage, MessageBoxReturnValue } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, dialog, nativeImage, MessageBoxReturnValue, powerMonitor } from 'electron';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, spawnSync, ChildProcess } from 'child_process';
 import Store from 'electron-store';
 import * as http from 'http';
 import * as https from 'https';
@@ -202,6 +202,18 @@ async function startBackend(): Promise<void> {
       ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
     },
     shell: false,
+    // On Windows this sets CREATE_NEW_PROCESS_GROUP, giving the backend its own
+    // console/process group instead of implicitly sharing whatever console this
+    // (GUI, normally console-less) Electron process is attached to. A console
+    // control event (close/logoff/shutdown) delivered to a shared console is
+    // broadcast to every process still attached to it; detaching removes the
+    // backend from that blast radius. windowsHide additionally suppresses any
+    // console window Windows would otherwise flash for it.
+    // Trade-off: a detached child does NOT die automatically when this process
+    // does. Every intentional-quit path below now calls killBackendProcess()
+    // explicitly instead of relying on OS cascade — see that function.
+    detached: true,
+    windowsHide: true,
     cwd,
   });
 
@@ -214,6 +226,38 @@ async function startBackend(): Promise<void> {
       setTimeout(() => startBackend().catch(err => log(`[Backend] restart failed: ${err}`)), 3000);
     }
   });
+}
+
+// ── Kill the backend process (and, on Windows, its process tree) ─────────────
+// Now that backendProcess is spawned with detached: true, plain .kill() only
+// guarantees termination of that single process — it does not cascade to the
+// process group, and on Windows it never killed grandchildren (the cmd.exe /
+// npx / node chain behind each MCP server) to begin with. taskkill /T walks
+// the whole tree rooted at the backend's PID, which is strictly more reliable
+// for the "must not survive us" requirement than a bare kill() ever was.
+function killBackendProcess(): void {
+  const proc = backendProcess;
+  if (!proc || proc.pid == null) return;
+
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/pid', String(proc.pid), '/t', '/f']);
+      return;
+    } catch (err) {
+      log(`killBackendProcess: taskkill failed, falling back to kill(): ${err}`);
+    }
+  } else {
+    // detached:true on POSIX makes the child the leader of a new process
+    // group (pgid === pid); killing -pid takes the whole group with it.
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+      return;
+    } catch {
+      // Not a group leader, or already dead — fall through to a direct kill.
+    }
+  }
+
+  try { proc.kill(); } catch { /* already dead */ }
 }
 
 // ── Wait for backend to be ready ──────────────────────────────────────────────
@@ -802,14 +846,14 @@ function createTray(): void {
       label: 'Restart Backend',
       click: () => {
         suppressAutoRestart = true;
-        backendProcess?.kill();
+        killBackendProcess();
         setTimeout(() => {
           startBackend().catch(console.error).finally(() => { suppressAutoRestart = false; });
         }, 500);
       },
     },
     { type: 'separator' },
-    { label: 'Quit', click: () => { backendProcess?.kill(); if (ollamaSpawnedByUs) ollamaProcess?.kill(); app.exit(0); } },
+    { label: 'Quit', click: () => { killBackendProcess(); if (ollamaSpawnedByUs) ollamaProcess?.kill(); app.exit(0); } },
   ]);
 
   tray.setToolTip('NodeBrain');
@@ -898,7 +942,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('reset-all-data', async () => {
     log('reset-all-data: starting');
-    backendProcess?.kill();
+    killBackendProcess();
     await new Promise(r => setTimeout(r, 500));
 
     const dataDir = path.join(app.getPath('userData'), 'data');
@@ -1096,10 +1140,28 @@ app.on('second-instance', () => {
   }
 });
 
+// ── Power/session diagnostics ─────────────────────────────────────────────────
+// Purely observational — records suspend/resume/lock/shutdown events to
+// nodebrain-log.txt so a backend death can be correlated against them after
+// the fact. 'user-did-become-active' / 'user-did-resign-active' are
+// macOS-only; registering them is harmless on other platforms since Electron
+// simply never emits events it doesn't support.
+function registerPowerMonitorListeners(): void {
+  powerMonitor.on('suspend', () => log('[POWER] suspend'));
+  powerMonitor.on('resume', () => log('[POWER] resume'));
+  powerMonitor.on('lock-screen', () => log('[POWER] lock-screen'));
+  powerMonitor.on('unlock-screen', () => log('[POWER] unlock-screen'));
+  powerMonitor.on('shutdown', () => log('[POWER] shutdown'));
+  powerMonitor.on('user-did-become-active', () => log('[POWER] user-did-become-active'));
+  powerMonitor.on('user-did-resign-active', () => log('[POWER] user-did-resign-active'));
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
+
 app.whenReady().then(async () => {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   log('App ready');
+  registerPowerMonitorListeners();
   registerIpcHandlers();
   log('IPC handlers registered');
   await serveStaticFrontend();
@@ -1121,7 +1183,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
-  backendProcess?.kill();
+  killBackendProcess();
   if (ollamaSpawnedByUs) ollamaProcess?.kill();
 });
 
