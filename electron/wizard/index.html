@@ -87,7 +87,8 @@
 
     #screen-choose-model.active,
     #screen-api-key.active,
-    #screen-local-setup.active {
+    #screen-local-setup.active,
+    #screen-consent.active {
       display: flex;
     }
 
@@ -611,6 +612,125 @@
       text-decoration: underline;
     }
 
+    /* ── Screen: Telemetry Consent ── */
+    #screen-consent {
+      background: #060608;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 20px 24px;
+    }
+
+    .cs-container {
+      width: 100%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .cs-icon-badge {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: #12121a;
+      border: 0.5px solid #6366f1;
+      box-shadow: 0 0 28px rgba(99, 102, 241, 0.22);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6366f1;
+      margin-bottom: 16px;
+    }
+
+    .cs-heading {
+      font-size: 22px;
+      font-weight: 600;
+      color: #e2e8f0;
+      letter-spacing: 0.01em;
+      text-align: center;
+    }
+
+    .cs-subheading {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .cs-facts {
+      list-style: none;
+      width: 100%;
+      margin: 18px 0 4px;
+    }
+
+    .cs-facts li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.4;
+    }
+
+    .cs-fact-icon {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      margin-top: 1px;
+    }
+
+    .cs-fact-yes .cs-fact-icon { color: #4ade80; }
+    .cs-fact-no .cs-fact-icon { color: #64748b; }
+
+    .cs-btn-primary {
+      width: 100%;
+      margin-top: 18px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      background: #6366f1;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .cs-btn-primary:hover {
+      background: #5457e5;
+    }
+
+    .cs-btn-secondary {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      background: transparent;
+      border: 0.5px solid #2a2a3a;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .cs-btn-secondary:hover {
+      border-color: #6366f1;
+      color: #e2e8f0;
+    }
+
+    .cs-note {
+      margin-top: 12px;
+      font-size: 11.5px;
+      color: #64748b;
+      text-align: center;
+      line-height: 1.4;
+    }
+
     /* ── Screen: Local AI Setup ── */
     #screen-local-setup {
       background: #060608;
@@ -1120,6 +1240,49 @@
     </div>
   </div>
 
+  <!-- ── Screen: Telemetry Consent ── -->
+  <div id="screen-consent" class="screen">
+    <div class="cs-container">
+      <div class="cs-icon-badge">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3l8 4v5c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V7l8-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <h1 class="cs-heading">Help make NodeBrain better?</h1>
+      <p class="cs-subheading">Nothing leaves your computer by default. If you say yes, NodeBrain can send small, anonymous usage signals — nothing more.</p>
+
+      <ul class="cs-facts">
+        <li class="cs-fact-yes">
+          <svg class="cs-fact-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Feature usage counts, timings, and error categories</span>
+        </li>
+        <li class="cs-fact-no">
+          <svg class="cs-fact-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>Never your prompts, files, messages, or credentials</span>
+        </li>
+        <li class="cs-fact-no">
+          <svg class="cs-fact-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>Never anything tied to your identity</span>
+        </li>
+      </ul>
+
+      <button class="cs-btn-primary" onclick="setTelemetryConsent(true)">Share usage data</button>
+      <button class="cs-btn-secondary" onclick="setTelemetryConsent(false)">Not now</button>
+
+      <p class="cs-note">Off by default. Change this anytime in Settings.</p>
+    </div>
+  </div>
+
   <!-- ── Screen 4: Loading ── -->
   <div id="screen-loading" class="screen">
     <img id="loading-bg" src="loading.png" alt="" draggable="false" />
@@ -1225,7 +1388,7 @@
       // No electronAPI (e.g. wizard opened directly in a browser for testing) —
       // nothing to save it to, so just proceed.
       if (!window.electronAPI || !window.electronAPI.saveCredential) {
-        goToLoading();
+        showConsentScreen();
         return;
       }
 
@@ -1244,7 +1407,7 @@
         });
 
         if (result && result.success) {
-          goToLoading();
+          showConsentScreen();
           return;
         }
 
@@ -1402,7 +1565,7 @@
       if (btn) {
         btn.disabled = false;
         btn.textContent = 'Open NodeBrain';
-        btn.onclick = () => { lsClearAutoAdvance(); goToLoading(); };
+        btn.onclick = () => { lsClearAutoAdvance(); showConsentScreen(); };
       }
 
       // Someone who walked away during the download should come back to a
@@ -1411,7 +1574,7 @@
       lsClearAutoAdvance();
       lsAutoAdvanceTimer = setTimeout(() => {
         lsAutoAdvanceTimer = null;
-        goToLoading();
+        showConsentScreen();
       }, 3000);
     }
 
@@ -1482,7 +1645,7 @@
       }
 
       if (status && status.running && status.hasModel) {
-        goToLoading();
+        showConsentScreen();
         return;
       }
 
@@ -1492,6 +1655,26 @@
           : "No local Ollama installation was found running. Please run setup instead.";
         msg.classList.add('visible');
       }
+    }
+
+    // ── Telemetry Consent screen ─────────────────────────────────────────────
+    function showConsentScreen() {
+      showScreen('screen-consent');
+    }
+
+    // Records the choice (defaulting to denied happens naturally: if this
+    // screen is never reached — e.g. the window is closed mid-wizard — the
+    // store's consent stays 'unset', which the main-process sink treats the
+    // same as denied) and continues into the app either way.
+    async function setTelemetryConsent(granted) {
+      try {
+        if (window.electronAPI && window.electronAPI.setTelemetryConsent) {
+          await window.electronAPI.setTelemetryConsent(granted ? 'granted' : 'denied');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      goToLoading();
     }
 
     // ── Flow ──────────────────────────────────────────────────────────────────

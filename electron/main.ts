@@ -9,11 +9,18 @@ import * as fs from 'fs';
 import { autoUpdater } from 'electron-updater';
 import extractZip from 'extract-zip';
 
+interface TelemetryConsentState {
+  installId: string;
+  firstLaunchAt: string;
+  consent: 'granted' | 'denied' | 'unset';
+}
+
 interface StoreSchema {
   setupComplete: boolean;
   vaultSecret: string;
   onboardingComplete: boolean;
   backendUrl?: string;
+  telemetry: TelemetryConsentState;
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -166,6 +173,143 @@ async function getOrCreateVaultSecret(): Promise<string> {
   }
   try { store.set('vaultSecret', secret); } catch { /* ignore */ }
   return secret;
+}
+
+// ── Telemetry: identity ───────────────────────────────────────────────────────
+// No events are emitted anywhere yet (this is plumbing only) — nothing here
+// transmits anything. installId/firstLaunchAt are minted once and persist
+// across normal use; reset-all-data below decides deliberately whether they
+// survive a data wipe.
+function ensureTelemetryIdentity(): TelemetryConsentState {
+  const existing = store.get('telemetry') as TelemetryConsentState | undefined;
+  if (existing && existing.installId) return existing;
+  const telemetry: TelemetryConsentState = {
+    installId: crypto.randomUUID(),
+    firstLaunchAt: new Date().toISOString(),
+    consent: existing?.consent ?? 'unset',
+  };
+  store.set('telemetry', telemetry);
+  return telemetry;
+}
+
+// ── Telemetry: on-disk queue ──────────────────────────────────────────────────
+// Append-only JSON-lines file. Nothing drains this yet — that's the deferred
+// transport. Bounded the same way nodebrain-log.txt is bounded, so an
+// unattended queue can't fill someone's disk: once it passes the cap we drop
+// the oldest quarter of events rather than the whole file, since (unlike the
+// log) losing everything here means losing real signal for no reason.
+const TELEMETRY_QUEUE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function getTelemetryQueuePath(): string {
+  return path.join(app.getPath('userData'), 'telemetry-queue.jsonl');
+}
+
+function trimTelemetryQueueIfNeeded(queuePath: string): void {
+  let size: number;
+  try {
+    size = fs.statSync(queuePath).size;
+  } catch {
+    return;
+  }
+  if (size <= TELEMETRY_QUEUE_MAX_BYTES) return;
+  try {
+    const lines = fs.readFileSync(queuePath, 'utf8').split('\n').filter(Boolean);
+    const keepFrom = Math.floor(lines.length * 0.25);
+    const kept = lines.slice(keepFrom);
+    fs.writeFileSync(queuePath, kept.length ? kept.join('\n') + '\n' : '');
+  } catch (err) {
+    log(`[TELEMETRY] queue trim failed: ${err}`);
+  }
+}
+
+function appendTelemetryEvent(event: Record<string, unknown>): void {
+  const queuePath = getTelemetryQueuePath();
+  try {
+    fs.appendFileSync(queuePath, JSON.stringify(event) + '\n');
+  } catch (err) {
+    log(`[TELEMETRY] failed to append event (dropped): ${err}`);
+    return;
+  }
+  trimTelemetryQueueIfNeeded(queuePath);
+}
+
+function clearTelemetryQueue(): void {
+  try { fs.rmSync(getTelemetryQueuePath(), { force: true }); } catch { /* ignore */ }
+}
+
+// ── Telemetry: scrubbing layer ────────────────────────────────────────────────
+// Allowlist, not blocklist: a key only reaches the queue if it is explicitly
+// named as safe for that event type (or is one of the handful of generic
+// metric shapes every event may carry). Everything else — including anything
+// we simply didn't anticipate — is dropped and logged locally so mistakes are
+// visible in nodebrain-log.txt instead of silently leaking later.
+//
+// No event types are registered yet: this task adds no events. Future work
+// adds entries here (e.g. 'task:completed': new Set(['durationMs', 'success']))
+// alongside whatever call site starts emitting that event.
+const TELEMETRY_COMMON_KEYS = new Set([
+  'durationMs', 'count', 'success', 'errorType', 'reasonCode', 'value',
+]);
+
+const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {};
+
+// Hard-blocked regardless of any allowlist entry — defense in depth against a
+// future mistake that adds one of these to an event's allowlist. Based on a
+// prior content audit: task rows / task_logs carry full prompt text and tool
+// args (file paths, Telegram chat IDs) under these exact keys.
+const TELEMETRY_BLOCKED_KEYS = new Set([
+  'input', 'output', 'description', 'message',
+  'name', 'systemPrompt', 'system_prompt', 'config',
+]);
+
+const TELEMETRY_MAX_STRING_LEN = 100;
+const TELEMETRY_PATH_LIKE = /[\\/]/;
+const TELEMETRY_URL_LIKE = /^[a-z][a-z0-9+.-]*:\/\/|www\./i;
+const TELEMETRY_EMAIL_LIKE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+// Known credential/token prefixes, or a long opaque-looking string — most
+// tokens are also caught by the length cap above, this is belt-and-suspenders.
+const TELEMETRY_TOKEN_LIKE = /^(sk-|gsk_|ghp_|gho_|xox[baprs]-|secret_|bearer\s|basic\s)/i;
+const TELEMETRY_OPAQUE_LIKE = /^[A-Za-z0-9_-]{24,}$/;
+
+function telemetryStringLooksLikeContent(value: string): boolean {
+  if (value.length > TELEMETRY_MAX_STRING_LEN) return true;
+  if (TELEMETRY_PATH_LIKE.test(value)) return true;
+  if (TELEMETRY_URL_LIKE.test(value)) return true;
+  if (TELEMETRY_EMAIL_LIKE.test(value)) return true;
+  if (TELEMETRY_TOKEN_LIKE.test(value)) return true;
+  if (TELEMETRY_OPAQUE_LIKE.test(value)) return true;
+  return false;
+}
+
+function scrubTelemetryPayload(
+  eventName: string,
+  properties: Record<string, unknown>,
+): { allowed: Record<string, unknown>; dropped: string[] } {
+  const allowedKeys = new Set<string>([
+    ...TELEMETRY_COMMON_KEYS,
+    ...(TELEMETRY_EVENT_ALLOWLIST[eventName] ?? []),
+  ]);
+  const allowed: Record<string, unknown> = {};
+  const dropped: string[] = [];
+
+  for (const [key, value] of Object.entries(properties || {})) {
+    if (TELEMETRY_BLOCKED_KEYS.has(key) || !allowedKeys.has(key)) {
+      dropped.push(key);
+      continue;
+    }
+    if (value === null) {
+      allowed[key] = null;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      allowed[key] = value;
+    } else if (typeof value === 'string') {
+      if (telemetryStringLooksLikeContent(value)) { dropped.push(key); continue; }
+      allowed[key] = value;
+    } else {
+      // Objects/arrays/anything non-primitive is never a metric — drop.
+      dropped.push(key);
+    }
+  }
+  return { allowed, dropped };
 }
 
 // ── Start backend ─────────────────────────────────────────────────────────────
@@ -882,6 +1026,60 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('get-vault-secret', () => getOrCreateVaultSecret());
 
+  // ── Telemetry ────────────────────────────────────────────────────────────
+  // No events are emitted by this task — this is the consent + scrub + queue
+  // plumbing only. Every branch is wrapped so a telemetry failure can never
+  // surface to (or affect) the app.
+  ipcMain.handle('telemetry:get-consent', () => {
+    try {
+      return ensureTelemetryIdentity().consent;
+    } catch {
+      return 'unset';
+    }
+  });
+
+  ipcMain.handle('telemetry:set-consent', (_event: Electron.IpcMainInvokeEvent, consent: unknown) => {
+    try {
+      const value: 'granted' | 'denied' = consent === 'granted' ? 'granted' : 'denied';
+      const telemetry = ensureTelemetryIdentity();
+      store.set('telemetry', { ...telemetry, consent: value });
+      if (value !== 'granted') {
+        // Withdrawing (or never giving) consent means nothing queued should
+        // survive — don't keep data staged for a send that won't happen.
+        clearTelemetryQueue();
+      }
+      log(`[TELEMETRY] consent set to "${value}"`);
+      return value;
+    } catch (err) {
+      log(`[TELEMETRY] set-consent failed: ${err}`);
+      return 'unset';
+    }
+  });
+
+  ipcMain.handle('telemetry:event', (_event: Electron.IpcMainInvokeEvent, eventName: unknown, properties: unknown) => {
+    try {
+      const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+      if (!telemetry || telemetry.consent !== 'granted') return;
+      if (typeof eventName !== 'string' || !eventName) return;
+
+      const props = (properties && typeof properties === 'object') ? properties as Record<string, unknown> : {};
+      const { allowed, dropped } = scrubTelemetryPayload(eventName, props);
+      if (dropped.length > 0) {
+        log(`[TELEMETRY] dropped unrecognized/unsafe keys for "${eventName}": ${dropped.join(', ')}`);
+      }
+
+      appendTelemetryEvent({
+        installId: telemetry.installId,
+        event: eventName,
+        ts: new Date().toISOString(),
+        properties: allowed,
+      });
+    } catch (err) {
+      // Never throw — telemetry failures must not affect the app.
+      log(`[TELEMETRY] telemetry:event handler failed (dropped): ${err}`);
+    }
+  });
+
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openDirectory'],
@@ -964,7 +1162,23 @@ function registerIpcHandlers(): void {
       await keytarLib.deletePassword('NodeBrain', 'vault-secret');
     } catch { /* ignore */ }
 
+    // A reset is still the same install for retention purposes — it's not a
+    // new user — but consent does not survive a wipe: someone deliberately
+    // erasing their data shouldn't come back to find they're silently still
+    // opted in. Capture identity before store.clear() wipes it, then restore
+    // it with consent forced back to 'unset'.
+    const preservedTelemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+
     try { store.clear(); } catch { /* ignore */ }
+
+    try {
+      store.set('telemetry', {
+        installId: preservedTelemetry?.installId ?? crypto.randomUUID(),
+        firstLaunchAt: preservedTelemetry?.firstLaunchAt ?? new Date().toISOString(),
+        consent: 'unset',
+      });
+    } catch { /* ignore */ }
+    clearTelemetryQueue();
 
     app.relaunch();
     app.exit(0);
@@ -1171,6 +1385,7 @@ function registerPowerMonitorListeners(): void {
 app.whenReady().then(async () => {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   log('App ready');
+  ensureTelemetryIdentity();
   registerPowerMonitorListeners();
   registerIpcHandlers();
   log('IPC handlers registered');

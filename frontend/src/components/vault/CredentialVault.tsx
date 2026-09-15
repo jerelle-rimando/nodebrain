@@ -35,6 +35,7 @@ export function CredentialVault() {
 
   const isElectron = !!(window as any).electronAPI;
   const [launchOnStartup, setLaunchOnStartupState] = useState(false);
+  const [telemetryEnabled, setTelemetryEnabledState] = useState(false);
 
   useEffect(() => {
     api.getCredentials().then(setCredentials).catch(console.error);
@@ -45,10 +46,26 @@ export function CredentialVault() {
     (window as any).electronAPI.getLaunchOnStartup().then(setLaunchOnStartupState).catch(console.error);
   }, [isElectron]);
 
+  useEffect(() => {
+    if (!isElectron || !(window as any).electronAPI.getTelemetryConsent) return;
+    (window as any).electronAPI.getTelemetryConsent()
+      .then((consent: string) => setTelemetryEnabledState(consent === 'granted'))
+      .catch(console.error);
+  }, [isElectron]);
+
   async function handleLaunchOnStartupChange(enabled: boolean) {
     try {
       const newState = await (window as any).electronAPI.setLaunchOnStartup(enabled);
       setLaunchOnStartupState(newState);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleTelemetryChange(enabled: boolean) {
+    try {
+      const consent = await (window as any).electronAPI.setTelemetryConsent(enabled ? 'granted' : 'denied');
+      setTelemetryEnabledState(consent === 'granted');
     } catch (err) {
       console.error(err);
     }
@@ -289,6 +306,23 @@ export function CredentialVault() {
               className={`relative inline-flex w-10 h-6 rounded-full transition-colors ${launchOnStartup ? 'bg-brain-accent' : 'bg-brain-border'}`}
             >
               <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${launchOnStartup ? 'translate-x-4' : 'translate-x-0'}`} />
+            </button>
+          </div>
+        )}
+
+        {isElectron && (
+          <div className="pt-4 border-t border-brain-border flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-brain-text">Share anonymous usage data</p>
+              <p className="text-xs text-brain-text-dim mt-0.5">Counts and error types only — never prompts, files, or credentials. Off by default.</p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={telemetryEnabled}
+              onClick={() => handleTelemetryChange(!telemetryEnabled)}
+              className={`relative inline-flex w-10 h-6 rounded-full transition-colors flex-shrink-0 ${telemetryEnabled ? 'bg-brain-accent' : 'bg-brain-border'}`}
+            >
+              <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${telemetryEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
           </div>
         )}

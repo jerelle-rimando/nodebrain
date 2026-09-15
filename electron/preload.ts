@@ -30,4 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('local-setup-event', listener);
     return () => ipcRenderer.removeListener('local-setup-event', listener);
   },
+  // Opt-in only — dropped in the main process unless consent is 'granted'.
+  // Safe to call unconditionally; failures are swallowed on the other end.
+  telemetry: (eventName: string, properties?: Record<string, unknown>) =>
+    ipcRenderer.invoke('telemetry:event', eventName, properties || {}),
+  getTelemetryConsent: () => ipcRenderer.invoke('telemetry:get-consent'),
+  setTelemetryConsent: (consent: 'granted' | 'denied') => ipcRenderer.invoke('telemetry:set-consent', consent),
 });
