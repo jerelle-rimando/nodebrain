@@ -692,7 +692,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       persistLog(makeLog(taskId, agent.id, `Task failed: ${errorMessage}`, 'error'));
       updateTaskStatus(taskId, 'failed', undefined, errorMessage);
       updateAgentStatus(agent.id, 'error');
-      const failedTask = { ...task, status: 'failed' as const, error: errorMessage };
+      const failedTask = { ...task, status: 'failed' as const, error: errorMessage, completedAt: new Date().toISOString() };
       agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: 'tool_error' as TelemetryErrorType });
       return failedTask;
     }
@@ -717,7 +717,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
     updateTaskStatus(taskId, 'failed', undefined, errorMessage);
     updateAgentStatus(agent.id, 'error');
 
-    const failedTask = { ...task, status: 'failed' as const, error: errorMessage };
+    const failedTask = { ...task, status: 'failed' as const, error: errorMessage, completedAt: new Date().toISOString() };
     agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: classifyTaskError(err) });
     return failedTask;
   }

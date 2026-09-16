@@ -53,7 +53,7 @@ router.post('/:id/stop', (req, res) => {
     }
     cancelTask(req.params.id);
     updateTaskStatus(req.params.id, 'cancelled');
-    const cancelledTask = { ...task, status: 'cancelled' as const };
+    const cancelledTask = { ...task, status: 'cancelled' as const, completedAt: new Date().toISOString() };
     agentEvents.emit('task:cancelled', cancelledTask);
     res.json({ success: true, data: cancelledTask });
   } catch (err) {

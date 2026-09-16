@@ -69,4 +69,10 @@ export function registerTelemetrySubscribers(): void {
       errorType: meta?.errorType ?? 'unknown',
     });
   });
+
+  agentEvents.on('task:cancelled', (task: Task) => {
+    telemetry('task_cancelled', {
+      durationMs: durationMs(task),
+    });
+  });
 }

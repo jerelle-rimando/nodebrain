@@ -263,6 +263,7 @@ const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {
   task_started: new Set(['dryRun', 'approvalMode', 'providerType']),
   task_completed: new Set(['toolCallCount']),
   task_failed: new Set([]),
+  task_cancelled: new Set([]),
   usage_snapshot: new Set([
     'agentCount', 'agentsNeverRun', 'runsLast7Days', 'successRatePct',
     'connectedIntegrations', 'localRuns', 'hostedRuns',

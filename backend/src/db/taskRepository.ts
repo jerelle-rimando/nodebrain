@@ -53,7 +53,7 @@ export function createTask(task: Task): Task {
 }
 
 export function updateTaskStatus(id: string, status: TaskStatus, output?: string, error?: string): void {
-  const completedAt = (status === 'completed' || status === 'failed') ? new Date().toISOString() : null;
+  const completedAt = (status === 'completed' || status === 'failed' || status === 'cancelled') ? new Date().toISOString() : null;
   dbRun('UPDATE tasks SET status=?, output=?, error=?, completed_at=? WHERE id=?',
     [status, output ?? null, error ?? null, completedAt, id]);
 }
