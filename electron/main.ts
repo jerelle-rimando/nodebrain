@@ -6,6 +6,7 @@ import Store from 'electron-store';
 import * as http from 'http';
 import * as https from 'https';
 import * as fs from 'fs';
+import * as os from 'os';
 import { autoUpdater } from 'electron-updater';
 import extractZip from 'extract-zip';
 
@@ -244,14 +245,29 @@ function clearTelemetryQueue(): void {
 // we simply didn't anticipate — is dropped and logged locally so mistakes are
 // visible in nodebrain-log.txt instead of silently leaking later.
 //
-// No event types are registered yet: this task adds no events. Future work
-// adds entries here (e.g. 'task:completed': new Set(['durationMs', 'success']))
-// alongside whatever call site starts emitting that event.
 const TELEMETRY_COMMON_KEYS = new Set([
   'durationMs', 'count', 'success', 'errorType', 'reasonCode', 'value',
 ]);
 
-const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {};
+// One entry per event this app actually emits. A key not listed here (or in
+// TELEMETRY_COMMON_KEYS) is dropped even if the call site sends it.
+const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {
+  first_agent_created: new Set([]),
+  first_agent_run: new Set([]),
+  task_started: new Set(['dryRun', 'approvalMode', 'providerType']),
+  task_completed: new Set(['toolCallCount']),
+  task_failed: new Set([]),
+  usage_snapshot: new Set([
+    'agentCount', 'agentsNeverRun', 'runsLast7Days', 'successRatePct',
+    'connectedIntegrations', 'localRuns', 'hostedRuns',
+  ]),
+};
+
+// Keys allowed to carry an array value — only ever short lists of safe,
+// short strings (e.g. provider names). Every other key with an array/object
+// value is dropped by scrubTelemetryPayload below.
+const TELEMETRY_ARRAY_KEYS = new Set(['connectedIntegrations']);
+const TELEMETRY_MAX_ARRAY_LEN = 30;
 
 // Hard-blocked regardless of any allowlist entry — defense in depth against a
 // future mistake that adds one of these to an event's allowlist. Based on a
@@ -304,12 +320,118 @@ function scrubTelemetryPayload(
     } else if (typeof value === 'string') {
       if (telemetryStringLooksLikeContent(value)) { dropped.push(key); continue; }
       allowed[key] = value;
+    } else if (Array.isArray(value)) {
+      if (!TELEMETRY_ARRAY_KEYS.has(key) || value.length > TELEMETRY_MAX_ARRAY_LEN) { dropped.push(key); continue; }
+      const items: string[] = [];
+      let bad = false;
+      for (const item of value) {
+        if (typeof item !== 'string' || telemetryStringLooksLikeContent(item)) { bad = true; break; }
+        items.push(item);
+      }
+      if (bad) { dropped.push(key); continue; }
+      allowed[key] = items;
     } else {
-      // Objects/arrays/anything non-primitive is never a metric — drop.
+      // Objects/anything else non-primitive is never a metric — drop.
       dropped.push(key);
     }
   }
   return { allowed, dropped };
+}
+
+// Environment metadata every event envelope carries, added centrally here
+// rather than at each call site (a call site can't lie about appVersion/
+// platform/osRelease, and it keeps that logic in exactly one place).
+function buildTelemetryEnvelope(
+  installId: string,
+  eventName: string,
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    installId,
+    event: eventName,
+    ts: new Date().toISOString(),
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    osRelease: os.release(),
+    properties,
+  };
+}
+
+// Shared by the renderer IPC path (telemetry:event) and the backend's
+// loopback HTTP path (startTelemetryListener below) — both funnel through
+// this single consent-check → scrub → append pipeline so there's exactly one
+// place that decides what reaches disk. Never throws.
+function processTelemetryEvent(eventName: unknown, properties: unknown): void {
+  try {
+    const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+    if (!telemetry || telemetry.consent !== 'granted') return;
+    if (typeof eventName !== 'string' || !eventName) return;
+
+    const props = (properties && typeof properties === 'object') ? properties as Record<string, unknown> : {};
+    const { allowed, dropped } = scrubTelemetryPayload(eventName, props);
+    if (dropped.length > 0) {
+      log(`[TELEMETRY] dropped unrecognized/unsafe keys for "${eventName}": ${dropped.join(', ')}`);
+    }
+
+    appendTelemetryEvent(buildTelemetryEnvelope(telemetry.installId, eventName, allowed));
+  } catch (err) {
+    // Never throw — telemetry failures must not affect the app.
+    log(`[TELEMETRY] processTelemetryEvent failed (dropped): ${err}`);
+  }
+}
+
+// ── Telemetry: loopback listener for the backend ──────────────────────────────
+// A separate tiny HTTP server bound to 127.0.0.1, distinct from the frontend
+// static-file proxy (serveStaticFrontend below) — the backend process (which
+// has no access to `store` or the scrubber directly) POSTs events here and
+// main re-runs consent + scrubbing before appending, so main stays the single
+// writer of telemetry-queue.jsonl. Bound to an OS-assigned ephemeral port
+// (0) rather than a fixed one to avoid any chance of colliding with
+// BACKEND_PORT/FRONTEND_PORT/OLLAMA_PORT; the resolved port is handed to the
+// backend at spawn time as an env var (see startBackend below) since main
+// always starts this listener before spawning the backend.
+let telemetryListenerPort: number | null = null;
+
+function startTelemetryListener(): Promise<void> {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 64 * 1024) req.destroy(); // guard against a runaway body
+      });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}') as { event?: unknown; properties?: unknown };
+          processTelemetryEvent(parsed.event, parsed.properties);
+        } catch (err) {
+          log(`[TELEMETRY] loopback listener: bad request body: ${err}`);
+        }
+        try { res.writeHead(204); res.end(); } catch { /* client already gone */ }
+      });
+      req.on('error', () => {
+        try { res.writeHead(400); res.end(); } catch { /* ignore */ }
+      });
+    });
+
+    server.on('error', (err) => {
+      log(`[TELEMETRY] loopback listener failed to start: ${err}`);
+      telemetryListenerPort = null;
+      resolve(); // never block app startup over telemetry
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      telemetryListenerPort = (addr && typeof addr === 'object') ? addr.port : null;
+      log(`[TELEMETRY] loopback listener on 127.0.0.1:${telemetryListenerPort}`);
+      resolve();
+    });
+  });
 }
 
 // ── Start backend ─────────────────────────────────────────────────────────────
@@ -343,6 +465,7 @@ async function startBackend(): Promise<void> {
       NODE_ENV: 'production',
       ELECTRON_RUN_AS_NODE: '1',
       ELECTRON_RUN: 'true',
+      ...(telemetryListenerPort && { NODEBRAIN_TELEMETRY_PORT: String(telemetryListenerPort) }),
       ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
     },
     shell: false,
@@ -1057,27 +1180,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('telemetry:event', (_event: Electron.IpcMainInvokeEvent, eventName: unknown, properties: unknown) => {
-    try {
-      const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
-      if (!telemetry || telemetry.consent !== 'granted') return;
-      if (typeof eventName !== 'string' || !eventName) return;
-
-      const props = (properties && typeof properties === 'object') ? properties as Record<string, unknown> : {};
-      const { allowed, dropped } = scrubTelemetryPayload(eventName, props);
-      if (dropped.length > 0) {
-        log(`[TELEMETRY] dropped unrecognized/unsafe keys for "${eventName}": ${dropped.join(', ')}`);
-      }
-
-      appendTelemetryEvent({
-        installId: telemetry.installId,
-        event: eventName,
-        ts: new Date().toISOString(),
-        properties: allowed,
-      });
-    } catch (err) {
-      // Never throw — telemetry failures must not affect the app.
-      log(`[TELEMETRY] telemetry:event handler failed (dropped): ${err}`);
-    }
+    processTelemetryEvent(eventName, properties);
   });
 
   ipcMain.handle('select-folder', async () => {
@@ -1386,6 +1489,7 @@ app.whenReady().then(async () => {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   log('App ready');
   ensureTelemetryIdentity();
+  await startTelemetryListener();
   registerPowerMonitorListeners();
   registerIpcHandlers();
   log('IPC handlers registered');

@@ -132,6 +132,10 @@ export async function initDb(): Promise<void> {
       target_agent_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS kv_store (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS usage_records (
       id TEXT PRIMARY KEY,
       task_id TEXT,

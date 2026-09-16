@@ -10,6 +10,31 @@ import { PRICING_LAST_VERIFIED } from '../agents/agentEngine';
 
 const router = Router();
 
+// Reused by both the /api/analytics route and the telemetry usage snapshot
+// (usageSnapshot.ts) so there's one definition of "success rate" in the app.
+export function getSuccessRate(): number {
+  const taskRow = dbGet<{ total: number; completed: number }>(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
+     FROM tasks`,
+  );
+  const totalTasks = taskRow?.total ?? 0;
+  return totalTasks > 0 ? (taskRow?.completed ?? 0) / totalTasks : 0;
+}
+
+// Agents that have never had a task run against them — same LEFT JOIN shape
+// as topExpensiveTasks below (tasks joined onto the owning row), just with
+// the direction flipped: rows with no matching task at all.
+export function getAgentsNeverRunCount(): number {
+  const row = dbGet<{ count: number }>(
+    `SELECT COUNT(*) AS count
+     FROM agents a
+     LEFT JOIN tasks t ON t.agent_id = a.id
+     WHERE t.id IS NULL`,
+  );
+  return row?.count ?? 0;
+}
+
 // GET /api/analytics
 router.get('/', (_req, res) => {
   try {
@@ -27,13 +52,9 @@ router.get('/', (_req, res) => {
     );
     const totalTokens = tokenRow?.total_tokens ?? 0;
 
-    const taskRow = dbGet<{ total: number; completed: number }>(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
-       FROM tasks`,
-    );
+    const taskRow = dbGet<{ total: number }>('SELECT COUNT(*) AS total FROM tasks');
     const totalTasks = taskRow?.total ?? 0;
-    const successRate = totalTasks > 0 ? (taskRow?.completed ?? 0) / totalTasks : 0;
+    const successRate = getSuccessRate();
 
     const topExpensiveTasks = dbAll<{
       task_id: string;

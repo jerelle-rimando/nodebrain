@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
+import Anthropic, { APIError as AnthropicAPIError, APIConnectionTimeoutError as AnthropicTimeoutError } from '@anthropic-ai/sdk';
+import OpenAI, { APIError as OpenAIAPIError, APIConnectionTimeoutError as OpenAITimeoutError } from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/credentialVault';
 import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
@@ -156,7 +156,21 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'accounts/fireworks/models/llama-v3p1-8b-instruct':   { input: 0.20, output: 0.20 }, // docs.fireworks.ai (4B–16B tier)
 };
 
-const FREE_PROVIDERS = new Set(['ollama', 'custom']);
+export const FREE_PROVIDERS = new Set(['ollama', 'custom']);
+
+// ── Telemetry: task-failure classification ────────────────────────────────────
+// A reason code, never the raw exception text — the scrubber would block a raw
+// message anyway (it fails TELEMETRY_MAX_STRING_LEN / looks-like-content checks
+// most of the time), but classification has to happen here, at the point the
+// original error is still in scope, not downstream where only the code survives.
+export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'unknown';
+
+function classifyTaskError(err: unknown): TelemetryErrorType {
+  if (err instanceof OpenAITimeoutError || err instanceof AnthropicTimeoutError) return 'timeout';
+  if (err instanceof OpenAIAPIError || err instanceof AnthropicAPIError) return 'provider_error';
+  if (err instanceof Error && /No API key found for provider/.test(err.message)) return 'no_credential';
+  return 'unknown';
+}
 
 function recordUsage(
   taskId: string,
@@ -296,6 +310,7 @@ async function runOpenAIAgenticLoop(
   signal: AbortSignal,
   depth = 0,
   destructiveFailRef: { value: boolean } = { value: false },
+  toolCallCountRef: { value: number } = { value: 0 },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForOpenAI(tools);
@@ -356,6 +371,7 @@ async function runOpenAIAgenticLoop(
       }
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${toolCall.function.name}`));
+      toolCallCountRef.value++;
       if (process.env.NODEBRAIN_DEBUG_TOOLS) {
         console.log('[DEBUG:TOOLS] Executing tool:', toolCall.function.name, '| args:', JSON.stringify(args));
       }
@@ -437,6 +453,7 @@ async function runAnthropicAgenticLoop(
   signal: AbortSignal,
   depth = 0,
   destructiveFailRef: { value: boolean } = { value: false },
+  toolCallCountRef: { value: number } = { value: 0 },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForAnthropic(tools);
@@ -499,6 +516,7 @@ async function runAnthropicAgenticLoop(
       }
 
       persistLog(makeLog(taskId, agent.id, `Calling tool: ${block.name}`));
+      toolCallCountRef.value++;
 
       let toolResult = '';
       let toolFailed = false;
@@ -580,10 +598,15 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
 
   const controller = new AbortController();
   activeTaskControllers.set(taskId, controller);
+  const toolCallCountRef = { value: 0 };
 
   createTask(task);
   updateAgentStatus(agent.id, 'running');
-  agentEvents.emit('task:start', task);
+  agentEvents.emit('task:start', task, {
+    dryRun: !!agent.config.dryRun,
+    approvalMode: !!agent.config.approvalMode,
+    providerType: FREE_PROVIDERS.has(agent.provider) ? 'local' : 'hosted',
+  });
   persistLog(makeLog(taskId, agent.id, `Starting task for agent "${agent.name}"`));
 
   try {
@@ -650,6 +673,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         controller.signal,
         depth,
         destructiveFailRef,
+        toolCallCountRef,
       );
     } else {
       const client = getClient(agent.provider, apiKey, customBaseUrl);
@@ -657,7 +681,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         { role: 'system', content: fullSystemPrompt },
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth, destructiveFailRef);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth, destructiveFailRef, toolCallCountRef);
     }
 
     activeTaskControllers.delete(taskId);
@@ -668,7 +692,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       updateTaskStatus(taskId, 'failed', undefined, errorMessage);
       updateAgentStatus(agent.id, 'error');
       const failedTask = { ...task, status: 'failed' as const, error: errorMessage };
-      agentEvents.emit('task:failed', failedTask);
+      agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: 'tool_error' as TelemetryErrorType });
       return failedTask;
     }
 
@@ -682,7 +706,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
       output,
       completedAt: new Date().toISOString(),
     };
-    agentEvents.emit('task:complete', completedTask);
+    agentEvents.emit('task:complete', completedTask, { toolCallCount: toolCallCountRef.value });
     return completedTask;
 
   } catch (err) {
@@ -693,7 +717,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
     updateAgentStatus(agent.id, 'error');
 
     const failedTask = { ...task, status: 'failed' as const, error: errorMessage };
-    agentEvents.emit('task:failed', failedTask);
+    agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: classifyTaskError(err) });
     return failedTask;
   }
 }

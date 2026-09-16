@@ -103,6 +103,22 @@ export function getCostByAgent(): CostByAgent[] {
   ).map(r => ({ agentId: r.agent_id, totalCostUsd: r.total_cost_usd, totalTokens: r.total_tokens }));
 }
 
+export interface RunCountByProvider {
+  provider: string;
+  runs: number;
+}
+
+// Distinct-task counts per provider — no content columns, just enough for
+// the local-vs-hosted split in the telemetry usage snapshot.
+export function getRunCountsByProvider(): RunCountByProvider[] {
+  return dbAll<{ provider: string; runs: number }>(
+    `SELECT provider, COUNT(DISTINCT task_id) AS runs
+     FROM usage_records
+     WHERE provider IS NOT NULL
+     GROUP BY provider`,
+  ).map(r => ({ provider: r.provider, runs: r.runs }));
+}
+
 export interface TasksPerDay {
   date: string;
   count: number;

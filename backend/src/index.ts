@@ -24,6 +24,9 @@ import { AVAILABLE_MODELS } from './agents/agentEngine';
 import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
+import telemetryRouter from './routes/telemetry';
+import { registerTelemetrySubscribers } from './telemetry/subscribers';
+import { emitUsageSnapshot } from './telemetry/usageSnapshot';
 
 // Windows: the MCP SDK only sets windowsHide when it detects Electron
 // (via 'type' in process). This backend runs as a standalone Node process,
@@ -108,6 +111,7 @@ app.use('/api/integrations', limiter, integrationsRouter);
 app.use('/api/mcp-servers', mcpServersRouter);
 app.use('/api/agent-connections', agentConnectionsRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/telemetry', telemetryRouter);
 
 async function main() {
   try {
@@ -173,6 +177,16 @@ async function main() {
 
     startScheduler();
     console.log('✅ Scheduler ready');
+
+    registerTelemetrySubscribers();
+
+    // A few minutes after startup, not immediately — snapshot collection
+    // shouldn't compete with the slow boot path above (DB init, scheduler,
+    // tool registry, RAG). One-shot per process lifetime, which is also one
+    // per app launch since this only runs through main().
+    setTimeout(() => {
+      emitUsageSnapshot().catch((err) => console.warn('[Telemetry] usage snapshot failed:', err));
+    }, 3 * 60 * 1000);
 
     initializeToolRegistry()
       .then(() => console.log('✅ Tool registry ready'))
