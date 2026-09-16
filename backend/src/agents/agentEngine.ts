@@ -33,6 +33,7 @@ export function resolveApproval(approvalId: string, approved: boolean): boolean 
   if (!resolve) return false;
   pendingApprovals.delete(approvalId);
   resolve(approved);
+  agentEvents.emit('tool:approval_resolved', { approved });
   return true;
 }
 

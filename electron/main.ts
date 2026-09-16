@@ -22,6 +22,10 @@ interface StoreSchema {
   onboardingComplete: boolean;
   backendUrl?: string;
   telemetry: TelemetryConsentState;
+  // Bounded launch history for retention metrics — local bookkeeping only,
+  // never transmitted itself. What ships per launch is a single
+  // daysSinceInstall number (see recordAppLaunch below).
+  telemetryLaunchHistory?: string[];
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -177,10 +181,8 @@ async function getOrCreateVaultSecret(): Promise<string> {
 }
 
 // ── Telemetry: identity ───────────────────────────────────────────────────────
-// No events are emitted anywhere yet (this is plumbing only) — nothing here
-// transmits anything. installId/firstLaunchAt are minted once and persist
-// across normal use; reset-all-data below decides deliberately whether they
-// survive a data wipe.
+// installId/firstLaunchAt are minted once and persist across normal use;
+// reset-all-data below decides deliberately whether they survive a data wipe.
 function ensureTelemetryIdentity(): TelemetryConsentState {
   const existing = store.get('telemetry') as TelemetryConsentState | undefined;
   if (existing && existing.installId) return existing;
@@ -190,6 +192,10 @@ function ensureTelemetryIdentity(): TelemetryConsentState {
     consent: existing?.consent ?? 'unset',
   };
   store.set('telemetry', telemetry);
+  // Consent doesn't exist yet at this point (this is the very first launch) —
+  // queue it for emitConsentAwareTelemetry to flush once the wizard's consent
+  // screen resolves, same as app_launched below.
+  pendingPreConsentEvents.push({ event: 'first_launch', properties: {} });
   return telemetry;
 }
 
@@ -253,7 +259,7 @@ const TELEMETRY_COMMON_KEYS = new Set([
 // TELEMETRY_COMMON_KEYS) is dropped even if the call site sends it.
 const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {
   first_agent_created: new Set([]),
-  first_agent_run: new Set([]),
+  first_agent_run: new Set(['minutesSinceInstall']),
   task_started: new Set(['dryRun', 'approvalMode', 'providerType']),
   task_completed: new Set(['toolCallCount']),
   task_failed: new Set([]),
@@ -261,6 +267,12 @@ const TELEMETRY_EVENT_ALLOWLIST: Record<string, Set<string>> = {
     'agentCount', 'agentsNeverRun', 'runsLast7Days', 'successRatePct',
     'connectedIntegrations', 'localRuns', 'hostedRuns',
   ]),
+  approval_resolved: new Set(['approved']),
+  setup_failed: new Set(['stage']),
+  onboarding_step: new Set(['step']),
+  onboarding_completed: new Set([]),
+  first_launch: new Set([]),
+  app_launched: new Set(['daysSinceInstall']),
 };
 
 // Keys allowed to carry an array value — only ever short lists of safe,
@@ -380,6 +392,55 @@ function processTelemetryEvent(eventName: unknown, properties: unknown): void {
   }
 }
 
+// ── Telemetry: pre-consent buffering ──────────────────────────────────────────
+// Some events (first_launch, the day-0 app_launched, and a setup failure hit
+// during the wizard's local-AI-setup screen) happen before the wizard's
+// consent screen is ever reached — consent is still 'unset' at that point,
+// and processTelemetryEvent above silently drops anything sent while unset.
+// Buffered here in memory instead of dropped outright, and flushed by
+// telemetry:set-consent once the user grants consent; a denial (or the
+// wizard never being finished) discards the buffer, per the "no consent, no
+// data" rule the rest of telemetry follows. Held only in memory — never
+// written to disk — so it can't outlive this run of the app.
+let pendingPreConsentEvents: Array<{ event: string; properties: Record<string, unknown> }> = [];
+
+function emitConsentAwareTelemetry(eventName: string, properties: Record<string, unknown> = {}): void {
+  const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+  if (!telemetry || telemetry.consent === 'unset') {
+    pendingPreConsentEvents.push({ event: eventName, properties });
+    return;
+  }
+  // Already decided (granted or denied) — processTelemetryEvent applies the
+  // same consent check and drops it if denied, exactly like every other
+  // post-onboarding event.
+  processTelemetryEvent(eventName, properties);
+}
+
+// ── Telemetry: per-launch record (retention metrics) ───────────────────────────
+// Local history is capped so it can never grow unbounded; only ever read to
+// bound its own length, never transmitted. What ships per launch is a single
+// daysSinceInstall number, which is enough for the server to derive D2/D7/D30
+// without ever seeing a launch history.
+const TELEMETRY_LAUNCH_HISTORY_MAX = 90;
+
+function recordAppLaunch(telemetry: TelemetryConsentState): void {
+  try {
+    const history = (store.get('telemetryLaunchHistory') as string[] | undefined) ?? [];
+    history.push(new Date().toISOString());
+    if (history.length > TELEMETRY_LAUNCH_HISTORY_MAX) {
+      history.splice(0, history.length - TELEMETRY_LAUNCH_HISTORY_MAX);
+    }
+    store.set('telemetryLaunchHistory', history);
+  } catch (err) {
+    log(`[TELEMETRY] recordAppLaunch: failed to persist launch history: ${err}`);
+  }
+
+  const daysSinceInstall = Math.floor(
+    (Date.now() - new Date(telemetry.firstLaunchAt).getTime()) / (24 * 60 * 60 * 1000),
+  );
+  emitConsentAwareTelemetry('app_launched', { daysSinceInstall });
+}
+
 // ── Telemetry: loopback listener for the backend ──────────────────────────────
 // A separate tiny HTTP server bound to 127.0.0.1, distinct from the frontend
 // static-file proxy (serveStaticFrontend below) — the backend process (which
@@ -437,6 +498,7 @@ function startTelemetryListener(): Promise<void> {
 // ── Start backend ─────────────────────────────────────────────────────────────
 async function startBackend(): Promise<void> {
   const vaultSecret = await getOrCreateVaultSecret();
+  const telemetryIdentity = ensureTelemetryIdentity();
 
   const backendEntry = isDev
     ? path.join(__dirname, '../backend/src/index.ts')
@@ -466,6 +528,7 @@ async function startBackend(): Promise<void> {
       ELECTRON_RUN_AS_NODE: '1',
       ELECTRON_RUN: 'true',
       ...(telemetryListenerPort && { NODEBRAIN_TELEMETRY_PORT: String(telemetryListenerPort) }),
+      NODEBRAIN_FIRST_LAUNCH_AT: telemetryIdentity.firstLaunchAt,
       ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
     },
     shell: false,
@@ -1150,9 +1213,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle('get-vault-secret', () => getOrCreateVaultSecret());
 
   // ── Telemetry ────────────────────────────────────────────────────────────
-  // No events are emitted by this task — this is the consent + scrub + queue
-  // plumbing only. Every branch is wrapped so a telemetry failure can never
-  // surface to (or affect) the app.
+  // Every branch is wrapped so a telemetry failure can never surface to (or
+  // affect) the app.
   ipcMain.handle('telemetry:get-consent', () => {
     try {
       return ensureTelemetryIdentity().consent;
@@ -1166,11 +1228,19 @@ function registerIpcHandlers(): void {
       const value: 'granted' | 'denied' = consent === 'granted' ? 'granted' : 'denied';
       const telemetry = ensureTelemetryIdentity();
       store.set('telemetry', { ...telemetry, consent: value });
-      if (value !== 'granted') {
+      if (value === 'granted') {
+        // Consent just resolved — replay anything minted before this point
+        // (first_launch, day-0 app_launched, an early setup_failed) now that
+        // there's somewhere safe for it to land.
+        for (const evt of pendingPreConsentEvents) {
+          processTelemetryEvent(evt.event, evt.properties);
+        }
+      } else {
         // Withdrawing (or never giving) consent means nothing queued should
         // survive — don't keep data staged for a send that won't happen.
         clearTelemetryQueue();
       }
+      pendingPreConsentEvents = [];
       log(`[TELEMETRY] consent set to "${value}"`);
       return value;
     } catch (err) {
@@ -1329,6 +1399,7 @@ function registerIpcHandlers(): void {
     } catch (err) {
       log(`start-local-setup: could not create data folders: ${err}`);
       emit('setSetupFailed', 'engine', "Couldn't create the folders needed for setup. Please try again.");
+      emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'folder_create_failed' });
       return { success: false };
     }
 
@@ -1345,6 +1416,7 @@ function registerIpcHandlers(): void {
       } catch (err) {
         log(`start-local-setup: engine download failed: ${err}`);
         emit('setSetupFailed', 'engine', "Couldn't download the engine. Check your internet connection and try again.");
+        emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'download_failed' });
         return { success: false };
       }
 
@@ -1355,6 +1427,7 @@ function registerIpcHandlers(): void {
         log(`start-local-setup: hashing the download failed: ${err}`);
         try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
         emit('setSetupFailed', 'engine', "Couldn't verify the downloaded file. Please try again.");
+        emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'checksum_failed' });
         return { success: false };
       }
 
@@ -1364,6 +1437,7 @@ function registerIpcHandlers(): void {
         log(`start-local-setup: SHA256 mismatch — expected ${OLLAMA_ENGINE.sha256}, got ${actualHash}`);
         try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
         emit('setSetupFailed', 'engine', "The downloaded file didn't match what we expected, so it was deleted for safety. Please try again.");
+        emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'checksum_mismatch' });
         return { success: false };
       }
 
@@ -1374,6 +1448,7 @@ function registerIpcHandlers(): void {
       } catch (err) {
         log(`start-local-setup: unzip failed: ${err}`);
         emit('setSetupFailed', 'engine', "Couldn't unpack the engine. Please try again.");
+        emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'unzip_failed' });
         return { success: false };
       }
 
@@ -1381,6 +1456,7 @@ function registerIpcHandlers(): void {
       if (!enginePath) {
         log('start-local-setup: ollama.exe not found after unpacking');
         emit('setSetupFailed', 'engine', "The engine didn't unpack as expected. Please try again.");
+        emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'unzip_failed' });
         return { success: false };
       }
     } else {
@@ -1394,6 +1470,7 @@ function registerIpcHandlers(): void {
     } catch (err) {
       log(`start-local-setup: engine failed to start: ${err}`);
       emit('setSetupFailed', 'engine', 'The local AI engine failed to start. Please try again.');
+      emitConsentAwareTelemetry('setup_failed', { stage: 'engine', reasonCode: 'spawn_failed' });
       return { success: false };
     }
 
@@ -1405,6 +1482,7 @@ function registerIpcHandlers(): void {
     } catch (err) {
       log(`start-local-setup: model pull failed: ${err}`);
       emit('setSetupFailed', 'model', "Couldn't download the AI model. Check your internet connection and try again.");
+      emitConsentAwareTelemetry('setup_failed', { stage: 'model', reasonCode: 'pull_failed' });
       return { success: false };
     }
 
@@ -1488,7 +1566,7 @@ function registerPowerMonitorListeners(): void {
 app.whenReady().then(async () => {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   log('App ready');
-  ensureTelemetryIdentity();
+  recordAppLaunch(ensureTelemetryIdentity());
   await startTelemetryListener();
   registerPowerMonitorListeners();
   registerIpcHandlers();

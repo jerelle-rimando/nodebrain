@@ -1303,6 +1303,39 @@
   </div>
 
   <script>
+    // ── Telemetry: onboarding step trail ─────────────────────────────────────
+    // The consent screen lives inside this same wizard flow, so every step
+    // before the user answers it happens with no consent decision made yet.
+    // Buffer those step names here and flush them (via the preload telemetry()
+    // bridge, which the main process will actually persist) only if consent is
+    // later granted; discard the buffer entirely on denial. Abandonment is the
+    // whole point of this event, so dropping the pre-consent trail unconditionally
+    // would make it meaningless — but sending it before consent exists isn't an
+    // option either (main's sink silently drops anything sent pre-consent anyway).
+    let telemetryConsentResolved = false;
+    let telemetryConsentGranted = false;
+    const onboardingStepBuffer = [];
+
+    function sendOnboardingStep(step) {
+      try {
+        window.electronAPI?.telemetry?.('onboarding_step', { step });
+      } catch (err) { /* telemetry must never affect the wizard */ }
+    }
+
+    function recordOnboardingStep(step) {
+      if (!telemetryConsentResolved) {
+        onboardingStepBuffer.push(step);
+        return;
+      }
+      if (telemetryConsentGranted) sendOnboardingStep(step);
+      // else: consent denied — drop silently, nothing to send.
+    }
+
+    // The welcome screen is shown directly in markup (active by default), not
+    // via showScreen(), so it needs its own explicit record to appear in the
+    // step trail at all.
+    recordOnboardingStep('screen-welcome');
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     function showScreen(id) {
       document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1311,6 +1344,7 @@
       el.classList.remove('fade-in');
       void el.offsetWidth;
       el.classList.add('fade-in');
+      recordOnboardingStep(id);
     }
 
     function openLink(url) {
@@ -1674,6 +1708,16 @@
       } catch (err) {
         console.error(err);
       }
+      // Resolve buffering *after* the IPC call above lands, so main's consent
+      // store is already updated by the time any flushed step reaches it.
+      telemetryConsentResolved = true;
+      telemetryConsentGranted = granted;
+      if (granted) {
+        onboardingStepBuffer.forEach(sendOnboardingStep);
+      }
+      // Denied (or the IPC call above failed): discard rather than hold onto
+      // pre-consent steps indefinitely.
+      onboardingStepBuffer.length = 0;
       goToLoading();
     }
 

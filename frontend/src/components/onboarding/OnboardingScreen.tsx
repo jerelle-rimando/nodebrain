@@ -20,6 +20,7 @@ export function OnboardingScreen({ onComplete }: Props) {
     const electronAPI = (window as any).electronAPI;
     if (electronAPI) {
       electronAPI.completeOnboarding().catch(console.error);
+      electronAPI.telemetry?.('onboarding_completed');
     }
     setActiveTab('dashboard');
     onComplete();

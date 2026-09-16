@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { telemetry } from '../utils/telemetry';
 
 export interface MCPTool {
   name: string;
@@ -70,6 +71,7 @@ export async function connectToServer(server: MCPServer, fingerprint = ''): Prom
     const msg = err instanceof Error ? err.message : String(err);
     connectionErrors.set(server.name, msg);
     console.error(`[MCP] Failed to connect to "${server.name}":`, err);
+    telemetry('setup_failed', { stage: 'mcp', reasonCode: 'mcp_spawn_failed' });
     return [];
   }
 }
@@ -100,6 +102,7 @@ export async function connectToSSEServer(server: MCPSSEServer, fingerprint = '')
     const msg = err instanceof Error ? err.message : String(err);
     connectionErrors.set(server.name, msg);
     console.error(`[MCP] Failed to connect to SSE server "${server.name}":`, err);
+    telemetry('setup_failed', { stage: 'mcp', reasonCode: 'mcp_connect_failed' });
     return [];
   }
 }

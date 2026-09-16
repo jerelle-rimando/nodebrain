@@ -1,7 +1,8 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { getConnectedServers } from '../mcp/mcpClient';
 import { providerRequiresCredential, reloadToolRegistry } from '../mcp/toolRegistry';
+import { telemetry } from '../utils/telemetry';
 
 const router = Router();
 
@@ -33,6 +34,19 @@ function isNetworkError(err: unknown): boolean {
   return false;
 }
 
+// Every /test response funnels through here so a failed test with a known
+// reason also reports setup_failed — reusing the same typed reason the UI
+// gets, never the free-text message.
+function sendTestResult(
+  res: Response,
+  result: { success: boolean; message: string; reason?: TestReason },
+): void {
+  if (!result.success && result.reason) {
+    telemetry('setup_failed', { stage: 'credential', reasonCode: result.reason });
+  }
+  res.json({ success: true, data: result });
+}
+
 router.get('/:provider/test', async (req, res) => {
   const { provider } = req.params;
 
@@ -40,13 +54,10 @@ router.get('/:provider/test', async (req, res) => {
     const credential = getCredentialForProvider(provider);
 
     if (!credential && providerRequiresCredential(provider)) {
-      res.json({
-        success: true,
-        data: {
-          success: false,
-          message: `No credential saved for "${provider}" yet.`,
-          reason: 'not_configured' as TestReason,
-        },
+      sendTestResult(res, {
+        success: false,
+        message: `No credential saved for "${provider}" yet.`,
+        reason: 'not_configured' as TestReason,
       });
       return;
     }
@@ -58,15 +69,9 @@ router.get('/:provider/test', async (req, res) => {
       );
       const data = await response.json() as { ok: boolean; result?: { username?: string } };
       if (data.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: `Connected as @${data.result?.username ?? 'unknown'}` },
-        });
+        sendTestResult(res, { success: true, message: `Connected as @${data.result?.username ?? 'unknown'}` });
       } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'Telegram rejected that bot token.', reason: 'invalid_credential' as TestReason },
-        });
+        sendTestResult(res, { success: false, message: 'Telegram rejected that bot token.', reason: 'invalid_credential' as TestReason });
       }
       return;
     }
@@ -77,15 +82,9 @@ router.get('/:provider/test', async (req, res) => {
       });
       const data = await response.json() as { login?: string };
       if (response.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: `Connected as ${data.login}` },
-        });
+        sendTestResult(res, { success: true, message: `Connected as ${data.login}` });
       } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'GitHub rejected that token.', reason: 'invalid_credential' as TestReason },
-        });
+        sendTestResult(res, { success: false, message: 'GitHub rejected that token.', reason: 'invalid_credential' as TestReason });
       }
       return;
     }
@@ -98,28 +97,19 @@ router.get('/:provider/test', async (req, res) => {
         },
       });
       if (response.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: 'Notion connection verified' },
-        });
+        sendTestResult(res, { success: true, message: 'Notion connection verified' });
       } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'Notion rejected that token.', reason: 'invalid_credential' as TestReason },
-        });
+        sendTestResult(res, { success: false, message: 'Notion rejected that token.', reason: 'invalid_credential' as TestReason });
       }
       return;
     }
 
     if (provider === 'open-websearch') {
       const connected = getConnectedServers().includes('open-websearch');
-      res.json({
-        success: true,
-        data: {
-          success: connected,
-          message: connected ? 'Web Search is running and connected' : 'Web Search server is not connected',
-          reason: connected ? undefined : ('unknown' as TestReason),
-        },
+      sendTestResult(res, {
+        success: connected,
+        message: connected ? 'Web Search is running and connected' : 'Web Search server is not connected',
+        reason: connected ? undefined : ('unknown' as TestReason),
       });
       return;
     }
@@ -130,15 +120,9 @@ router.get('/:provider/test', async (req, res) => {
       });
       const data = await response.json() as { ok: boolean; user?: string };
       if (data.ok) {
-        res.json({
-          success: true,
-          data: { success: true, message: `Connected as ${data.user ?? 'unknown'}` },
-        });
+        sendTestResult(res, { success: true, message: `Connected as ${data.user ?? 'unknown'}` });
       } else {
-        res.json({
-          success: true,
-          data: { success: false, message: 'Slack rejected that token.', reason: 'invalid_credential' as TestReason },
-        });
+        sendTestResult(res, { success: false, message: 'Slack rejected that token.', reason: 'invalid_credential' as TestReason });
       }
       return;
     }
@@ -146,42 +130,30 @@ router.get('/:provider/test', async (req, res) => {
     if (provider === 'filesystem') {
       const fs = await import('fs');
       const exists = fs.existsSync(credential ?? '');
-      res.json({
-        success: true,
-        data: {
-          success: exists,
-          message: exists ? `Path "${credential}" is accessible` : `That folder doesn't exist. Check the path and try again.`,
-          reason: exists ? undefined : ('invalid_credential' as TestReason),
-        },
+      sendTestResult(res, {
+        success: exists,
+        message: exists ? `Path "${credential}" is accessible` : `That folder doesn't exist. Check the path and try again.`,
+        reason: exists ? undefined : ('invalid_credential' as TestReason),
       });
       return;
     }
 
     // Unknown provider — just confirm credential exists
-    res.json({
-      success: true,
-      data: { success: true, message: `Credential found for "${provider}"` },
-    });
+    sendTestResult(res, { success: true, message: `Credential found for "${provider}"` });
 
   } catch (err) {
     if (isNetworkError(err)) {
-      res.json({
-        success: true,
-        data: {
-          success: false,
-          message: `Couldn't reach the service. Check your internet connection and try again.`,
-          reason: 'network' as TestReason,
-        },
+      sendTestResult(res, {
+        success: false,
+        message: `Couldn't reach the service. Check your internet connection and try again.`,
+        reason: 'network' as TestReason,
       });
       return;
     }
-    res.json({
-      success: true,
-      data: {
-        success: false,
-        message: `Something went wrong while testing this connection. Try again in a moment.`,
-        reason: 'unknown' as TestReason,
-      },
+    sendTestResult(res, {
+      success: false,
+      message: `Something went wrong while testing this connection. Try again in a moment.`,
+      reason: 'unknown' as TestReason,
     });
   }
 });

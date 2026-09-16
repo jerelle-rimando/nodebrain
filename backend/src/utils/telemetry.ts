@@ -12,6 +12,21 @@ const TELEMETRY_PORT = process.env.NODEBRAIN_TELEMETRY_PORT
   ? Number(process.env.NODEBRAIN_TELEMETRY_PORT)
   : null;
 
+// firstLaunchAt lives in electron-store (main process), not SQLite (this
+// process) — main hands it over the same way it hands over the telemetry
+// port: as an env var set at spawn time. Read once at import time since it
+// never changes for the process lifetime.
+const FIRST_LAUNCH_AT_MS = process.env.NODEBRAIN_FIRST_LAUNCH_AT
+  ? new Date(process.env.NODEBRAIN_FIRST_LAUNCH_AT).getTime()
+  : NaN;
+
+// Returns undefined (rather than a bogus number) when main didn't pass the
+// env var — e.g. running the backend standalone outside Electron.
+export function minutesSinceInstall(): number | undefined {
+  if (!Number.isFinite(FIRST_LAUNCH_AT_MS)) return undefined;
+  return Math.floor((Date.now() - FIRST_LAUNCH_AT_MS) / 60000);
+}
+
 // Fire-and-forget: call sites never await this and it never rejects/throws.
 export function telemetry(event: string, properties: Record<string, unknown> = {}): void {
   if (!TELEMETRY_PORT || !Number.isFinite(TELEMETRY_PORT)) return;
