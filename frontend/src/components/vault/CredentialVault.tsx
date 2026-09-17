@@ -314,7 +314,7 @@ export function CredentialVault() {
           <div className="pt-4 border-t border-brain-border flex items-center justify-between gap-4">
             <div>
               <p className="text-sm text-brain-text">Share anonymous usage data</p>
-              <p className="text-xs text-brain-text-dim mt-0.5">Counts and error types only — never prompts, files, or credentials. Off by default.</p>
+              <p className="text-xs text-brain-text-dim mt-0.5">Includes feature usage, agents created and run, connected integrations, model provider type, error categories, and setup completion. Never your prompts, agent names, file paths, message contents, or credentials. Off by default.</p>
             </div>
             <button
               role="switch"
