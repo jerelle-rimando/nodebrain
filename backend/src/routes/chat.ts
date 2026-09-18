@@ -12,6 +12,73 @@ import { deriveAgentEmoji } from '../../shared-types';
 
 const router = Router();
 
+// Cheap creation-intent classifier — the fallback for when the isCreateIntent
+// keyword match misses (e.g. "watch a folder and tell me when new files show
+// up" contains none of the trigger words). Kept to a single-word answer and a
+// short prompt so it stays fast even on a local 4B model, and is bounded by a
+// timeout so a slow/hung provider can never block the message. Any failure or
+// unparseable output falls back to plain chat rather than creating an agent.
+async function classifyCreateIntent(params: {
+  content: string;
+  provider: string;
+  model: string;
+  apiKey: string;
+}): Promise<boolean> {
+  const { content, provider, model, apiKey } = params;
+  const classifierSystemPrompt =
+    'Classify the user message for an AI agent-building app. Reply with exactly one word.\n' +
+    'CREATE - the message asks to set up an agent that performs a recurring or automated task ' +
+    '(examples: watching a folder, monitoring a feed, sending scheduled messages, reacting to an event).\n' +
+    'CHAT - the message is a question, a request for information, or general conversation.\n' +
+    'Reply with only CREATE or CHAT. No punctuation, no explanation.';
+  const classifierUserPrompt = `Message: "${content.slice(0, 500)}"`;
+
+  try {
+    let raw: string | undefined;
+    if (provider === 'anthropic') {
+      const { default: Anthropic } = await import('@anthropic-ai/sdk');
+      const anthropic = new Anthropic({ apiKey });
+      const response = await anthropic.messages.create(
+        {
+          model,
+          max_tokens: 5,
+          temperature: 0,
+          system: classifierSystemPrompt,
+          messages: [{ role: 'user', content: classifierUserPrompt }],
+        },
+        { signal: AbortSignal.timeout(8000) },
+      );
+      const block = response.content.find((b) => b.type === 'text');
+      raw = block && block.type === 'text' ? block.text : undefined;
+    } else {
+      const customBaseUrl = getBaseUrlForProvider(provider);
+      const { default: OpenAI } = await import('openai');
+      const client = new OpenAI({
+        apiKey: apiKey || 'ollama',
+        baseURL: customBaseUrl || (BASE_URLS[provider] ?? BASE_URLS.openai),
+      });
+      const completion = await client.chat.completions.create(
+        {
+          model,
+          messages: [
+            { role: 'system', content: classifierSystemPrompt },
+            { role: 'user', content: classifierUserPrompt },
+          ],
+          temperature: 0,
+          max_tokens: 5,
+        },
+        { signal: AbortSignal.timeout(8000) },
+      );
+      raw = completion.choices[0]?.message?.content ?? undefined;
+    }
+
+    const verdict = raw?.trim().toUpperCase();
+    return verdict?.startsWith('CREATE') ?? false;
+  } catch {
+    return false;
+  }
+}
+
 interface ChatRow {
   id: string;
   role: string;
@@ -118,7 +185,64 @@ router.post('/message', async (req, res) => {
     let assistantContent = '';
     let agentId: string | undefined;
 
-    if (isAgentMode && isCreateIntent) {
+    // Resolve provider/model/credentials up front — needed both for the
+    // plain-chat fallback below and, in Agent mode, for the cheap
+    // creation-intent classifier that runs when the keyword fast path misses.
+    const providerPriority = ['openai', 'groq', 'mistral', 'together', 'fireworks', 'ollama'];
+    const defaultModels: Record<string, string> = {
+      openai: 'gpt-4o-mini',
+      groq: 'openai/gpt-oss-120b',
+      anthropic: 'claude-sonnet-4-6',
+      ollama: 'llama3.2',
+      mistral: 'mistral-small-latest',
+      together: 'meta-llama/Llama-3-70b-chat-hf',
+      fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
+    };
+
+    let apiKey = '';
+    let chosenProvider = 'openai';
+    let chosenModel = '';
+
+    // Only honor an explicitly requested provider when it's actually usable
+    // (has a stored credential, or is ollama which needs none). Otherwise a
+    // stale/default picker selection with no matching credential would hard-fail
+    // chat instead of falling back to whatever the user does have configured.
+    const requestedApiKey = requestedProvider ? getCredentialForProvider(requestedProvider) : undefined;
+    if (requestedProvider && (requestedApiKey || requestedProvider === 'ollama')) {
+      chosenProvider = requestedProvider;
+      apiKey = requestedApiKey ?? '';
+      chosenModel = requestedModel || defaultModels[chosenProvider] || 'gpt-4o-mini';
+    } else {
+      for (const p of providerPriority) {
+        const key = getCredentialForProvider(p);
+        if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
+      }
+      chosenModel = defaultModels[chosenProvider] || 'gpt-4o-mini';
+    }
+    chosenProviderForError = chosenProvider;
+
+    // Keyword match is the fast path. When it misses in Agent mode — and the
+    // message isn't a question and isn't addressed to an existing agent — ask
+    // the model instead of falling straight through to plain chat, since the
+    // keyword list can't cover every phrasing of an agent request ("watch a
+    // folder...", "summarize my PDFs daily...", "text me when X happens...").
+    let shouldCreateAgent = isCreateIntent;
+    if (
+      isAgentMode &&
+      !isCreateIntent &&
+      !isQuestion &&
+      !targetAgentName &&
+      (apiKey || chosenProvider === 'ollama')
+    ) {
+      shouldCreateAgent = await classifyCreateIntent({
+        content: safeContent,
+        provider: chosenProvider,
+        model: chosenModel,
+        apiKey,
+      });
+    }
+
+    if (isAgentMode && shouldCreateAgent) {
       // Tell the client this request was routed to agent creation so it can
       // show "Creating…" instead of the generic "Thinking…" placeholder while
       // parseAgentFromChat runs. Streamed log lines (if any) still take
@@ -215,39 +339,6 @@ router.post('/message', async (req, res) => {
       }
     } else {
       // Fall back to actual AI conversation
-      const providerPriority = ['openai', 'groq', 'mistral', 'together', 'fireworks', 'ollama'];
-      const defaultModels: Record<string, string> = {
-        openai: 'gpt-4o-mini',
-        groq: 'openai/gpt-oss-120b',
-        anthropic: 'claude-sonnet-4-6',
-        ollama: 'llama3.2',
-        mistral: 'mistral-small-latest',
-        together: 'meta-llama/Llama-3-70b-chat-hf',
-        fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
-      };
-
-      let apiKey = '';
-      let chosenProvider = 'openai';
-      let chosenModel = '';
-
-      // Only honor an explicitly requested provider when it's actually usable
-      // (has a stored credential, or is ollama which needs none). Otherwise a
-      // stale/default picker selection with no matching credential would hard-fail
-      // chat instead of falling back to whatever the user does have configured.
-      const requestedApiKey = requestedProvider ? getCredentialForProvider(requestedProvider) : undefined;
-      if (requestedProvider && (requestedApiKey || requestedProvider === 'ollama')) {
-        chosenProvider = requestedProvider;
-        apiKey = requestedApiKey ?? '';
-        chosenModel = requestedModel || defaultModels[chosenProvider] || 'gpt-4o-mini';
-      } else {
-        for (const p of providerPriority) {
-          const key = getCredentialForProvider(p);
-          if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
-        }
-        chosenModel = defaultModels[chosenProvider] || 'gpt-4o-mini';
-      }
-      chosenProviderForError = chosenProvider;
-
       if (!apiKey && chosenProvider !== 'ollama') {
         assistantContent = `No API key found. Add one in the Credential Vault to get started.`;
       } else {
@@ -257,16 +348,31 @@ router.post('/message', async (req, res) => {
             ? `The user has these agents: ${agents.map((a) => a.name).join(', ')}.`
             : 'The user has no agents yet.';
 
+        // Keep replies short — a local 4B model defaults to essay-length
+        // answers (headers, code, a recap section) even for simple questions,
+        // which is unusably slow on local inference. Applies to both modes.
+        const concisenessInstruction =
+          'Answer concisely: a few sentences by default. Use lists or code blocks only when the user asks for them or the answer genuinely requires them. Do not add a recap or summary of what you just said, and do not end with a menu of follow-up questions.';
+
         // Chat mode is conversational only — it never builds anything. Without
         // this framing the model reads "create a filesystem agent" as a coding
         // request and dumps an implementation. Prepended to every Chat-mode
-        // request, so keep it to one tight paragraph. Agent mode keeps its
-        // original prompt untouched.
+        // request, so keep it to one tight paragraph.
         const chatModeFraming = !isAgentMode
           ? `You're NodeBrain's built-in assistant. NodeBrain is a local-first desktop app for building and running AI agents. People create agents just by describing what they want in plain language while in Agent mode — they never write code to make one. So when someone asks you to create an agent, don't write implementation code for it: instead, explain in plain language what that agent would do and which integrations or credentials it would need, then tell them to switch to Agent mode and send the request again. Keep your usual warm, friendly tone and feel free to use emoji. 🧠 `
           : '';
 
-        const systemPrompt = `${chatModeFraming}You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks.`;
+        // Agent mode reaches this branch once the keyword/classifier pair
+        // above has already decided this particular message isn't a creation
+        // request. Without this framing the model has no idea it's inside
+        // NodeBrain at all, and (as seen with "watch a folder...") answers
+        // like a generic coding assistant instead — e.g. writing a Python
+        // tutorial. Give it the same app context Chat mode gets.
+        const agentModeFraming = isAgentMode
+          ? `You're NodeBrain's built-in assistant, currently in Agent mode. NodeBrain is a local-first desktop app for building and running AI agents. Users build agents by describing what they want in plain language — they never write code. This particular message was not detected as a request to create or run an agent, so just respond to it conversationally; only bring up agent creation if it's actually relevant. Keep your usual warm, friendly tone and feel free to use emoji. 🧠 `
+          : '';
+
+        const systemPrompt = `${chatModeFraming}${agentModeFraming}You are NodeBrain, a helpful AI assistant that helps users build and manage AI agents. ${agentContext} You can help create agents, answer questions, and assist with tasks. ${concisenessInstruction}`;
 
         if (chosenProvider === 'anthropic') {
           const { default: Anthropic } = await import('@anthropic-ai/sdk');

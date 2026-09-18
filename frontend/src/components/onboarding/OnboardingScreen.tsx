@@ -40,7 +40,7 @@ export function OnboardingScreen({ onComplete }: Props) {
 
         <h1 className="text-2xl font-bold mb-2">You're set up.</h1>
         <p className="text-brain-text-dim text-sm mb-6">
-          Head to the Dashboard and describe what you want done — NodeBrain will build an agent for it.
+          Head to the Dashboard and describe what you want done and NodeBrain will build an agent for it.
         </p>
 
         <button
