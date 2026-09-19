@@ -12,6 +12,11 @@ import { deriveAgentEmoji } from '../../shared-types';
 
 const router = Router();
 
+// Generous enough to cover a cold Ollama model load (llama-server alone took
+// ~6s to start in testing, before inference began). Exceeding it still falls
+// back to plain chat.
+const CLASSIFIER_TIMEOUT_MS = 30_000;
+
 // Cheap creation-intent classifier — the fallback for when the isCreateIntent
 // keyword match misses (e.g. "watch a folder and tell me when new files show
 // up" contains none of the trigger words). Kept to a single-word answer and a
@@ -49,7 +54,7 @@ async function classifyCreateIntent(params: {
           system: classifierSystemPrompt,
           messages: [{ role: 'user', content: classifierUserPrompt }],
         },
-        { signal: AbortSignal.timeout(8000) },
+        { signal: AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS) },
       );
       const block = response.content.find((b) => b.type === 'text');
       raw = block && block.type === 'text' ? block.text : undefined;
@@ -70,7 +75,7 @@ async function classifyCreateIntent(params: {
           temperature: 0,
           max_tokens: 5,
         },
-        { signal: AbortSignal.timeout(8000) },
+        { signal: AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS) },
       );
       raw = completion.choices[0]?.message?.content ?? undefined;
     }
