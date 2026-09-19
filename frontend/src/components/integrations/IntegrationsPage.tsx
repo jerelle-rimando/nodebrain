@@ -139,9 +139,9 @@ const INTEGRATIONS: Integration[] = [
     hasFolderPicker: true,
     tools: ['Read file', 'Write file', 'List directory', 'Create folder', 'Delete file'],
     setupSteps: [
-      'Enter the folder path you want agents to have access to',
+      'Click "Choose folder…" and select the folder you want agents to use (or paste its path instead)',
       'Agents will only be able to access files inside this folder',
-      'Use an absolute path like C:\\Users\\you\\Documents',
+      'Click Connect to save it',
     ],
   },
 ];
@@ -227,7 +227,7 @@ function ConnectSection(props: ConnectSectionProps) {
           value={tokenInputs[integration.id] ?? ''}
           onChange={(e) => onTokenChange(integration.id, e.target.value)}
           placeholder={
-            hasElectronFolderPicker ? 'Or paste a path here' : integration.credentialPlaceholder
+            hasElectronFolderPicker ? 'Or paste a folder path' : integration.credentialPlaceholder
           }
           className="flex-1 bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
         />

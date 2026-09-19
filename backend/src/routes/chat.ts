@@ -33,6 +33,9 @@ async function classifyCreateIntent(params: {
     'Reply with only CREATE or CHAT. No punctuation, no explanation.';
   const classifierUserPrompt = `Message: "${content.slice(0, 500)}"`;
 
+  // TEMP diagnostics: remove once the Agent-mode routing issue is understood.
+  console.log(`[ChatRoute:diag] classifyCreateIntent reached provider=${provider} model=${model}`);
+
   try {
     let raw: string | undefined;
     if (provider === 'anthropic') {
@@ -73,8 +76,15 @@ async function classifyCreateIntent(params: {
     }
 
     const verdict = raw?.trim().toUpperCase();
-    return verdict?.startsWith('CREATE') ?? false;
-  } catch {
+    const result = verdict?.startsWith('CREATE') ?? false;
+    console.log(
+      `[ChatRoute:diag] classifier raw=${JSON.stringify(raw)} verdict=${JSON.stringify(verdict)} -> create=${result}`,
+    );
+    return result;
+  } catch (err) {
+    console.log(
+      `[ChatRoute:diag] classifier threw (falling back to chat): ${err instanceof Error ? err.message : String(err)}`,
+    );
     return false;
   }
 }
@@ -227,13 +237,18 @@ router.post('/message', async (req, res) => {
     // keyword list can't cover every phrasing of an agent request ("watch a
     // folder...", "summarize my PDFs daily...", "text me when X happens...").
     let shouldCreateAgent = isCreateIntent;
-    if (
-      isAgentMode &&
-      !isCreateIntent &&
-      !isQuestion &&
-      !targetAgentName &&
-      (apiKey || chosenProvider === 'ollama')
-    ) {
+    const hasUsableCredential = Boolean(apiKey || chosenProvider === 'ollama');
+    const classifierGateOpen =
+      isAgentMode && !isCreateIntent && !isQuestion && !targetAgentName && hasUsableCredential;
+    // TEMP diagnostics: remove once the Agent-mode routing issue is understood.
+    console.log(
+      `[ChatRoute:diag] gates mode=${JSON.stringify(mode)} isAgentMode=${isAgentMode} ` +
+        `isCreateIntent=${isCreateIntent} isQuestion=${isQuestion} ` +
+        `targetAgentName=${JSON.stringify(targetAgentName ?? null)} ` +
+        `provider=${chosenProvider} model=${chosenModel} hasCredential=${hasUsableCredential} ` +
+        `classifierGateOpen=${classifierGateOpen} content=${JSON.stringify(safeContent.slice(0, 80))}`,
+    );
+    if (classifierGateOpen) {
       shouldCreateAgent = await classifyCreateIntent({
         content: safeContent,
         provider: chosenProvider,
@@ -241,6 +256,12 @@ router.post('/message', async (req, res) => {
         apiKey,
       });
     }
+
+    console.log(
+      `[ChatRoute:diag] route=${
+        isAgentMode && shouldCreateAgent ? 'create-agent' : isAgentMode && targetAgentName ? 'existing-agent' : 'chat'
+      } shouldCreateAgent=${shouldCreateAgent}`,
+    );
 
     if (isAgentMode && shouldCreateAgent) {
       // Tell the client this request was routed to agent creation so it can
