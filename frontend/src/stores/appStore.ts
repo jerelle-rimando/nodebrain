@@ -9,7 +9,7 @@ export interface ToolApprovalRequest {
   args: Record<string, unknown>;
 }
 
-type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics';
+type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
 
 interface AppState {
   agents: Agent[];

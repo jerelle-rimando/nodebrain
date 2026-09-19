@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud } from 'lucide-react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud, Settings } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -9,6 +9,7 @@ import { api } from './utils/api';
 import { IntegrationsPage } from './components/integrations/IntegrationsPage';
 import { AnalyticsPage } from './components/analytics/AnalyticsPage';
 import { ServersPage } from './components/servers/ServersPage';
+import { SettingsPage } from './components/settings/SettingsPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
@@ -118,6 +119,18 @@ export default function App() {
           <Cloud size={18} />
         </button>
 
+        <button
+          onClick={() => { setShowServers(false); setActiveTab('settings'); }}
+          title="Settings"
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+            !showServers && activeTab === 'settings'
+              ? 'bg-brain-accent/20 border border-brain-accent/30 text-brain-accent'
+              : 'text-brain-text-dim hover:text-brain-text hover:bg-brain-border'
+          }`}
+        >
+          <Settings size={18} />
+        </button>
+
         <div className="mt-auto">
           <StatusDot />
         </div>
@@ -128,7 +141,7 @@ export default function App() {
         {/* Top bar */}
         <header className="h-10 flex items-center px-4 border-b border-brain-border bg-brain-surface flex-shrink-0">
           <span className="text-xs font-semibold text-brain-text-dim uppercase tracking-wider">
-            {showServers ? 'Servers' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
+            {showServers ? 'Servers' : activeTab === 'settings' ? 'Settings' : NAV_ITEMS.find((n) => n.id === activeTab)?.label}
           </span>
           <div className="ml-auto text-xs text-brain-text-dim font-mono">
             v0.4.0
@@ -145,6 +158,7 @@ export default function App() {
             {!showServers && activeTab === 'vault' && <CredentialVault />}
             {!showServers && activeTab === 'integrations' && <IntegrationsPage />}
             {!showServers && activeTab === 'analytics' && <AnalyticsPage />}
+            {!showServers && activeTab === 'settings' && <SettingsPage />}
           </main>
         </div>
       </div>
