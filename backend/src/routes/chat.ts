@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
 import { BASE_URLS, parseAgentFromChat, executeAgentTask, agentEvents, resolveAgentModel, resolveDefaultProvider, DEFAULT_MODELS } from '../agents/agentEngine';
+import type { HistoryTurn } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
 import { scheduleAgent } from '../scheduler/scheduler';
@@ -114,6 +115,37 @@ function getChatHistory(limit = 50): ChatMessage[] {
     timestamp: r.timestamp,
     agentId: r.agent_id ?? undefined,
   }));
+}
+
+// Strips the "ask <agent> to" routing phrase so the agent sees just the task.
+const AGENT_TASK_PREFIX_RE = /(?:ask|tell|use|run|execute)\s+["']?[^"']+?["']?\s+(?:to|agent)\s*/i;
+const AGENT_COMPLETED_PREFIX_RE = /^⚡ \*\*.+?\*\* completed the task:\n\n/;
+
+// chat_messages is one global stream: user rows carry no agent_id, only the
+// agent's reply does. So an agent's conversation is rebuilt from its own
+// completed replies plus the user message that immediately preceded each.
+// Failures and "task sent" placeholders are skipped — they carry no real output.
+// Rows are taken strictly before `beforeTimestamp` so the message being answered
+// (already saved) isn't duplicated as history.
+function getAgentConversationHistory(agentId: string, beforeTimestamp: string, scanLimit = 200): HistoryTurn[] {
+  const rows = dbAll<ChatRow>(
+    `SELECT * FROM (SELECT * FROM chat_messages WHERE timestamp < ? ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC`,
+    [beforeTimestamp, scanLimit],
+  );
+  const turns: HistoryTurn[] = [];
+  let lastUser: string | undefined;
+  for (const r of rows) {
+    if (r.role === 'user') {
+      lastUser = r.content.replace(AGENT_TASK_PREFIX_RE, '').trim();
+    } else if (r.role === 'assistant' && r.agent_id === agentId && lastUser) {
+      if (AGENT_COMPLETED_PREFIX_RE.test(r.content)) {
+        turns.push({ role: 'user', content: lastUser });
+        turns.push({ role: 'assistant', content: r.content.replace(AGENT_COMPLETED_PREFIX_RE, '').trim() });
+      }
+      lastUser = undefined;
+    }
+  }
+  return turns;
 }
 
 router.get('/history', (_req, res) => {
@@ -309,14 +341,13 @@ router.post('/message', async (req, res) => {
       );
 
       if (targetAgent) {
-        const taskInput = safeContent.replace(
-          /(?:ask|tell|use|run|execute)\s+["']?[^"']+?["']?\s+(?:to|agent)\s*/i,
-          '',
-        );
+        const taskInput = safeContent.replace(AGENT_TASK_PREFIX_RE, '');
         agentId = targetAgent.id;
 
-        // Await the task so we can show the output in chat
-        const task = await executeAgentTask(targetAgent, taskInput);
+        // Await the task so we can show the output in chat. This is the only
+        // caller that passes conversation history (capped/trimmed in the engine).
+        const history = getAgentConversationHistory(targetAgent.id, userMsg.timestamp);
+        const task = await executeAgentTask(targetAgent, taskInput, 0, history);
 
         if (task.status === 'completed' && task.output) {
           assistantContent = `⚡ **${targetAgent.name}** completed the task:\n\n${task.output}`;

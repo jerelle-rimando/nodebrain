@@ -189,6 +189,49 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 
 export const FREE_PROVIDERS = new Set(['ollama', 'custom']);
 
+// ── Conversation history ──────────────────────────────────────────────────────
+// Plain user/assistant text from prior turns of a chat with an agent. Tool-call
+// and tool-result messages are deliberately never part of this: replaying stale
+// tool output would mislead the model about what it can see right now.
+export interface HistoryTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+// Caps are in messages (a user message or an assistant reply each count as one).
+const LOCAL_HISTORY_MAX_TURNS = 6;
+const CLOUD_HISTORY_MAX_TURNS = 20;
+
+// Backstop for tool-heavy or verbose conversations, where a turn cap alone can
+// still overflow. Roughly 4 chars/token. Local: the default 4B model has a
+// ~4,096-token window and the system prompt, tool schemas, RAG context and up
+// to 2,000 tokens of output already come out of it, so history gets ~750
+// tokens. Cloud: ~12k tokens is small against 128k+ windows yet leaves ample
+// room for the system prompt and tool loop.
+const LOCAL_HISTORY_MAX_CHARS = 3_000;
+const CLOUD_HISTORY_MAX_CHARS = 48_000;
+
+export function prepareHistory(history: HistoryTurn[] | undefined, provider: string): HistoryTurn[] {
+  if (!history?.length) return [];
+  const isLocal = FREE_PROVIDERS.has(provider);
+  const maxTurns = isLocal ? LOCAL_HISTORY_MAX_TURNS : CLOUD_HISTORY_MAX_TURNS;
+  const maxChars = isLocal ? LOCAL_HISTORY_MAX_CHARS : CLOUD_HISTORY_MAX_CHARS;
+
+  let turns = history.filter((t) => t.content.trim()).slice(-maxTurns);
+
+  // Drop oldest turns until the assembled history fits the budget.
+  let total = turns.reduce((sum, t) => sum + t.content.length, 0);
+  while (turns.length > 0 && total > maxChars) {
+    total -= turns[0].content.length;
+    turns = turns.slice(1);
+  }
+
+  // A window cut must not begin with an assistant reply (Anthropic requires the
+  // first message to be from the user).
+  while (turns.length > 0 && turns[0].role !== 'user') turns = turns.slice(1);
+  return turns;
+}
+
 // ── Telemetry: task-failure classification ────────────────────────────────────
 // A reason code, never the raw exception text — the scrubber would block a raw
 // message anyway (it fails TELEMETRY_MAX_STRING_LEN / looks-like-content checks
@@ -485,11 +528,13 @@ async function runAnthropicAgenticLoop(
   depth = 0,
   destructiveFailRef: { value: boolean } = { value: false },
   toolCallCountRef: { value: number } = { value: 0 },
+  history: HistoryTurn[] = [],
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForAnthropic(tools);
 
   const messages: Anthropic.MessageParam[] = [
+    ...history.map((t): Anthropic.MessageParam => ({ role: t.role, content: t.content })),
     { role: 'user', content: userInput },
   ];
 
@@ -613,7 +658,14 @@ async function runAnthropicAgenticLoop(
   return '(max tool iterations reached)';
 }
 
-export async function executeAgentTask(agent: Agent, userInput: string, depth = 0): Promise<Task> {
+// `history` is opt-in: only interactive chat passes it. Scheduled runs, delegation
+// and the Run button omit it so each starts from a clean slate.
+export async function executeAgentTask(
+  agent: Agent,
+  userInput: string,
+  depth = 0,
+  history?: HistoryTurn[],
+): Promise<Task> {
   const taskId = uuidv4();
   const now = new Date().toISOString();
 
@@ -691,6 +743,10 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
 
     const destructiveFailRef = { value: false };
     let output = '';
+    const preparedHistory = prepareHistory(history, agent.provider);
+    if (preparedHistory.length > 0) {
+      persistLog(makeLog(taskId, agent.id, `Including ${preparedHistory.length} prior message(s) of conversation history`));
+    }
 
     if (agent.provider === 'anthropic') {
       const anthropic = new Anthropic({ apiKey });
@@ -705,11 +761,13 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
         depth,
         destructiveFailRef,
         toolCallCountRef,
+        preparedHistory,
       );
     } else {
       const client = getClient(agent.provider, apiKey, customBaseUrl);
       const messages: OpenAI.ChatCompletionMessageParam[] = [
         { role: 'system', content: fullSystemPrompt },
+        ...preparedHistory.map((t): OpenAI.ChatCompletionMessageParam => ({ role: t.role, content: t.content })),
         { role: 'user', content: userInput },
       ];
       output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth, destructiveFailRef, toolCallCountRef);
