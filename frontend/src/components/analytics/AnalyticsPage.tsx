@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { DollarSign, Cpu, Activity, CheckCircle, Loader2 } from 'lucide-react';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
+import { displayModelName } from '../../utils/modelDisplay';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -315,7 +316,7 @@ export function AnalyticsPage() {
                       {agentName(t.agentId)}
                     </td>
                     <td className="py-2.5 pr-4 text-brain-text-dim font-mono whitespace-nowrap">
-                      {t.model ?? '—'}
+                      {t.model ? displayModelName(t.model) : '—'}
                     </td>
                     <td className="py-2.5 pr-4 text-right text-brain-text font-mono whitespace-nowrap">
                       {fmtCost(t.cost)}

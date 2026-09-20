@@ -120,6 +120,17 @@ export const api = {
 
   getModels: () => request<Record<string, string[]>>('/models'),
 
+  getDefaultModel: () => request<{ provider: string; model: string }>('/models/default'),
+
+  getLocalEngineStatus: () =>
+    request<{
+      available: boolean;
+      engineInstalled: boolean;
+      modelPresent: boolean;
+      provider: string;
+      model: string;
+    }>('/models/local'),
+
   getAnalytics: () =>
     request<{
       totalCost: number;

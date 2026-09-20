@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
+import { toStatusText } from '../../utils/statusText';
 import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 import { ModelPickerButton } from './ModelPickerButton';
@@ -49,6 +50,11 @@ function getNodeText(node: React.ReactNode): string {
 
 // Right column is now just the Active Agents + Live Logs stack (w-72 = 288).
 // Execution Logs moved to an on-demand overlay opened from Live Logs.
+// Cloud fallback used when no local engine is available. Also what every
+// existing install has persisted, since the seed used to be unconditional.
+const CLOUD_DEFAULT_PROVIDER = 'groq';
+const CLOUD_DEFAULT_MODEL = 'openai/gpt-oss-120b';
+
 const RIGHT_PANEL_WIDTH = 288;
 
 // Sticky-bottom threshold: while the chat is scrolled to within this many px of
@@ -185,8 +191,8 @@ export function Dashboard() {
   const scrollTickRef = useRef<number | null>(null);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? 'groq');
-  const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? 'openai/gpt-oss-120b');
+  const [defaultProvider, setDefaultProvider] = useState<string>(() => localStorage.getItem('nb_default_provider') ?? CLOUD_DEFAULT_PROVIDER);
+  const [defaultModel, setDefaultModel] = useState<string>(() => localStorage.getItem('nb_default_model') ?? CLOUD_DEFAULT_MODEL);
   const [chatMode, setChatMode] = useState<ChatMode>(() => (localStorage.getItem('nb_chat_mode') as ChatMode) ?? 'chat');
   const { collapsed: rightCollapsed, toggle: toggleRight, dotState, pulsing } = useRightPanel(logs);
   // Transient view only — never persisted, always starts closed on load.
@@ -226,8 +232,28 @@ export function Dashboard() {
   // overwritten; a deliberate choice of any other model is left untouched.
   useEffect(() => {
     if (localStorage.getItem('nb_default_model') === 'llama-3.3-70b-versatile') {
-      setDefaultModel('openai/gpt-oss-120b');
+      setDefaultModel(CLOUD_DEFAULT_MODEL);
     }
+  }, []);
+
+  // Local-first default: if the local engine + model are installed, seed them
+  // instead of the cloud fallback. Only ever replaces the untouched cloud seed
+  // (never a model the user picked), and never again once the user has picked
+  // anything via the model picker (nb_default_model_chosen). Existing installs
+  // hold the cloud seed in localStorage indistinguishably from a fresh one, so
+  // this also moves a local-onboarded user off it once.
+  useEffect(() => {
+    if (localStorage.getItem('nb_default_model_chosen') === '1') return;
+    const storedProvider = localStorage.getItem('nb_default_provider') ?? CLOUD_DEFAULT_PROVIDER;
+    const storedModel = localStorage.getItem('nb_default_model') ?? CLOUD_DEFAULT_MODEL;
+    if (storedProvider !== CLOUD_DEFAULT_PROVIDER || storedModel !== CLOUD_DEFAULT_MODEL) return;
+    api.getLocalEngineStatus()
+      .then((status) => {
+        if (!status.available) return;
+        setDefaultProvider(status.provider);
+        setDefaultModel(status.model);
+      })
+      .catch(() => { /* backend unreachable: keep the cloud fallback */ });
   }, []);
 
   useEffect(() => {
@@ -302,7 +328,7 @@ export function Dashboard() {
     if (logs.length <= logsMarkRef.current) return;
     logsMarkRef.current = logs.length;
     const latest = logs[logs.length - 1];
-    if (latest) setStatusText(latest.message);
+    if (latest) setStatusText(toStatusText(latest.message));
   }, [logs, sending]);
 
   async function handleSend() {
@@ -608,6 +634,7 @@ export function Dashboard() {
                     model={defaultModel}
                     availableModels={availableModels}
                     onChange={(p, m) => {
+                      localStorage.setItem('nb_default_model_chosen', '1');
                       setDefaultProvider(p);
                       setDefaultModel(m);
                     }}

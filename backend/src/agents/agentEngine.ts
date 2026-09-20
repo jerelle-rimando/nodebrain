@@ -8,9 +8,10 @@ import { updateAgentStatus } from '../db/agentRepository';
 import { queryRelevantContext } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
-import type { Agent, Task, TaskLog } from '../../shared-types';
+import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
 import { deriveAgentEmoji } from '../../shared-types';
 import { EventEmitter } from 'events';
+import { getLocalEngineStatus, LOCAL_MODEL, LOCAL_PROVIDER } from './localEngine';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
 import { getAllAgents } from '../db/agentRepository';
 import { getTasksByAgent } from '../db/taskRepository';
@@ -61,12 +62,12 @@ export const BASE_URLS: Record<string, string> = {
   custom: 'https://api.openai.com/v1',
 };
 
-const DEFAULT_MODELS: Record<string, string> = {
+export const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   groq: 'openai/gpt-oss-120b',
   anthropic: 'claude-sonnet-4-6',
   gemini: 'gemini-2.0-flash',
-  ollama: 'qwen3:4b-instruct-2507-q4_K_M',
+  ollama: LOCAL_MODEL,
   mistral: 'mistral-small-latest',
   together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
   fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
@@ -79,7 +80,7 @@ const DEFAULT_MODELS: Record<string, string> = {
 // Ollama (local) is listed first so the model picker surfaces the local option
 // above all cloud providers. This does not change the app-wide default model.
 export const AVAILABLE_MODELS: Record<string, string[]> = {
-  ollama:    ['qwen3:4b-instruct-2507-q4_K_M'],
+  ollama:    [LOCAL_MODEL],
   openai:    ['gpt-4o', 'gpt-4o-mini'],
   anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6'],
   groq: [
@@ -93,6 +94,35 @@ export const AVAILABLE_MODELS: Record<string, string[]> = {
   fireworks: ['accounts/fireworks/models/llama-v3-70b-instruct'],
   custom:    ['gpt-4o-mini'],
 };
+
+// Picks the provider to use when the caller has no explicit choice. A working
+// local engine (installed + model present) wins outright: someone who set up
+// local AI shouldn't have to go hunting for it, whereas a user with API keys
+// can easily pick a cloud model. Otherwise the first provider in `priority`
+// with a stored credential is used (ollama needs none), falling back to openai.
+export async function resolveDefaultProvider(priority: string[]): Promise<{ provider: string; apiKey: string }> {
+  if ((await getLocalEngineStatus()).available) return { provider: LOCAL_PROVIDER, apiKey: '' };
+  for (const p of priority) {
+    const key = getCredentialForProvider(p);
+    if (key || p === 'ollama') return { provider: p, apiKey: key ?? '' };
+  }
+  return { provider: 'openai', apiKey: '' };
+}
+
+// Returns a model string that is safe to persist on an agent. An LLM (or a
+// stale template) can hand us a model that doesn't exist for the provider,
+// which then 404s on every run. Anything not in AVAILABLE_MODELS[provider] is
+// silently swapped for the provider default and the substitution is logged.
+// 'custom' is exempt: it targets an arbitrary OpenAI-compatible endpoint, so
+// its model list can't be known statically. Unknown providers pass through.
+export function resolveAgentModel(provider: string, model: string | undefined | null, context = 'agent'): string {
+  const allowed = AVAILABLE_MODELS[provider];
+  if (!allowed || provider === 'custom') return model || DEFAULT_MODELS[provider] || 'gpt-4o-mini';
+  if (model && allowed.includes(model)) return model;
+  const fallback = DEFAULT_MODELS[provider] ?? allowed[0];
+  console.warn(`[Agents] ${context}: model "${model ?? ''}" is not available for provider "${provider}"; using "${fallback}"`);
+  return fallback;
+}
 
 // Prices are local estimates used only for cost display — not real billing data.
 // Any model not in this table will show $0.00 cost even though token counts remain accurate.
@@ -726,17 +756,7 @@ export async function executeAgentTask(agent: Agent, userInput: string, depth = 
 export async function parseAgentFromChat(userMessage: string): Promise<Partial<Agent>[] | null> {
   const providerPriority = ['openai', 'anthropic', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'ollama', 'custom'];
 
-  let apiKey = '';
-  let provider = 'openai';
-
-  for (const p of providerPriority) {
-    const key = getCredentialForProvider(p);
-    if (key || p === 'ollama') {
-      apiKey = key ?? '';
-      provider = p;
-      break;
-    }
-  }
+  const { provider, apiKey } = await resolveDefaultProvider(providerPriority);
 
   if (!apiKey && provider !== 'ollama') return null;
 
@@ -786,6 +806,13 @@ Return ONLY the JSON array with no additional text or markdown.`;
     // Emoji is assigned here, deterministically — never asked of the model.
     for (const cfg of configs) {
       cfg.emoji = deriveAgentEmoji(cfg.name, cfg.description);
+      // The model field is LLM output — never trust it. Validate against the
+      // provider the parser ran under; the repository re-checks against the
+      // provider the agent is actually created with.
+      cfg.model = resolveAgentModel(provider, cfg.model, `parseAgentFromChat("${cfg.name ?? ''}")`);
+      // The parser assigns the provider too, so callers can't pair this model
+      // with a different provider than the one it was validated against.
+      cfg.provider = provider as ModelProvider;
     }
     return configs;
   } catch {

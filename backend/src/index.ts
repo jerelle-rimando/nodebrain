@@ -7,7 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import { initDb } from './db/database';
 import { reconcileOrphanedTasks } from './db/taskRepository';
-import { reconcileOrphanedAgents } from './db/agentRepository';
+import { reconcileOrphanedAgents, repairInvalidAgentModels } from './db/agentRepository';
 import { startScheduler } from './scheduler/scheduler';
 import { initRag } from './rag/ragEngine';
 import { initializeToolRegistry } from './mcp/toolRegistry';
@@ -20,7 +20,8 @@ import chatRouter from './routes/chat';
 import eventsRouter from './routes/events';
 import integrationsRouter from './routes/integrations';
 import { parseNaturalSchedule } from './utils/parseSchedule';
-import { AVAILABLE_MODELS } from './agents/agentEngine';
+import { AVAILABLE_MODELS, DEFAULT_MODELS, resolveDefaultProvider } from './agents/agentEngine';
+import { getLocalEngineStatus } from './agents/localEngine';
 import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
@@ -86,6 +87,31 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/models', (_req, res) => {
   res.json({ success: true, data: AVAILABLE_MODELS });
+});
+
+// Whether the bundled local engine + model are installed. The frontend uses
+// this to seed its default provider/model (local when available, else cloud).
+app.get('/api/models/local', async (_req, res) => {
+  try {
+    res.json({ success: true, data: await getLocalEngineStatus() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// The provider/model a newly created agent should get when nothing more
+// specific applies: local engine when available, otherwise the first cloud
+// provider that has a stored credential (openai when none do — ollama is left
+// out of the list so "no local, no key" doesn't resolve to a dead local pick).
+app.get('/api/models/default', async (_req, res) => {
+  try {
+    const { provider } = await resolveDefaultProvider(
+      ['openai', 'anthropic', 'groq', 'gemini', 'mistral', 'together', 'fireworks'],
+    );
+    res.json({ success: true, data: { provider, model: DEFAULT_MODELS[provider] } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
 });
 
 app.get('/api/schedule/parse', (req, res) => {
@@ -173,6 +199,11 @@ async function main() {
       console.log(`♻️  Reconciled ${orphanedTasks} orphaned task(s) and ${orphanedAgents} orphaned agent(s) left running from a previous shutdown`);
     } else {
       console.log('✅ No orphaned tasks or agents from a previous shutdown');
+    }
+
+    const repairedModels = repairInvalidAgentModels();
+    if (repairedModels > 0) {
+      console.log(`🔧 Repaired ${repairedModels} agent(s) with an unrecognized model`);
     }
 
     startScheduler();

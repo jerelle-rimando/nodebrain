@@ -3,7 +3,7 @@ import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/creden
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbRun, dbAll } from '../db/database';
-import { BASE_URLS, parseAgentFromChat, executeAgentTask, agentEvents } from '../agents/agentEngine';
+import { BASE_URLS, parseAgentFromChat, executeAgentTask, agentEvents, resolveAgentModel, resolveDefaultProvider, DEFAULT_MODELS } from '../agents/agentEngine';
 import { getAllAgents, createAgent } from '../db/agentRepository';
 import { createConnection } from '../db/agentConnectionRepository';
 import { scheduleAgent } from '../scheduler/scheduler';
@@ -204,15 +204,6 @@ router.post('/message', async (req, res) => {
     // plain-chat fallback below and, in Agent mode, for the cheap
     // creation-intent classifier that runs when the keyword fast path misses.
     const providerPriority = ['openai', 'groq', 'mistral', 'together', 'fireworks', 'ollama'];
-    const defaultModels: Record<string, string> = {
-      openai: 'gpt-4o-mini',
-      groq: 'openai/gpt-oss-120b',
-      anthropic: 'claude-sonnet-4-6',
-      ollama: 'llama3.2',
-      mistral: 'mistral-small-latest',
-      together: 'meta-llama/Llama-3-70b-chat-hf',
-      fireworks: 'accounts/fireworks/models/llama-v3-70b-instruct',
-    };
 
     let apiKey = '';
     let chosenProvider = 'openai';
@@ -226,13 +217,10 @@ router.post('/message', async (req, res) => {
     if (requestedProvider && (requestedApiKey || requestedProvider === 'ollama')) {
       chosenProvider = requestedProvider;
       apiKey = requestedApiKey ?? '';
-      chosenModel = requestedModel || defaultModels[chosenProvider] || 'gpt-4o-mini';
+      chosenModel = requestedModel || DEFAULT_MODELS[chosenProvider] || 'gpt-4o-mini';
     } else {
-      for (const p of providerPriority) {
-        const key = getCredentialForProvider(p);
-        if (key || p === 'ollama') { apiKey = key ?? ''; chosenProvider = p; break; }
-      }
-      chosenModel = defaultModels[chosenProvider] || 'gpt-4o-mini';
+      ({ provider: chosenProvider, apiKey } = await resolveDefaultProvider(providerPriority));
+      chosenModel = DEFAULT_MODELS[chosenProvider] || 'gpt-4o-mini';
     }
     chosenProviderForError = chosenProvider;
 
@@ -281,31 +269,29 @@ router.post('/message', async (req, res) => {
       if (validConfigs.length > 0) {
         const now = new Date().toISOString();
 
-        const providerPriority = ['openai', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'anthropic', 'ollama'];
-        let detectedProvider = 'openai';
-        for (const p of providerPriority) {
-          const key = getCredentialForProvider(p);
-          if (key || p === 'ollama') { detectedProvider = p; break; }
-        }
-
-        // Pass 1: create every agent
-        const createdAgents: Agent[] = validConfigs.map((cfg) => ({
-          id: uuidv4(),
-          name: cfg.name!,
-          description: (cfg.description ?? '').slice(0, 80),
-          provider: detectedProvider as ModelProvider,
-          model: cfg.model ?? (detectedProvider === 'ollama' ? 'llama3.2' : 'gpt-4o-mini'),
-          systemPrompt: cfg.systemPrompt ?? 'You are a helpful AI assistant.',
-          schedule: cfg.schedule
-            ? (parseNaturalSchedule(cfg.schedule).cron ?? cfg.schedule)
-            : undefined,
-          emoji: cfg.emoji ?? deriveAgentEmoji(cfg.name, cfg.description),
-          toolPermissions: cfg.toolPermissions ?? [],
-          status: 'idle' as const,
-          config: {},
-          createdAt: now,
-          updatedAt: now,
-        }));
+        // Pass 1: create every agent. parseAgentFromChat already resolved the
+        // provider (local engine first, else first credentialed cloud provider)
+        // and validated the model against it; createAgent re-checks as a backstop.
+        const createdAgents: Agent[] = validConfigs.map((cfg) => {
+          const provider = (cfg.provider ?? 'openai') as ModelProvider;
+          return {
+            id: uuidv4(),
+            name: cfg.name!,
+            description: (cfg.description ?? '').slice(0, 80),
+            provider,
+            model: resolveAgentModel(provider, cfg.model, `chat create "${cfg.name}"`),
+            systemPrompt: cfg.systemPrompt ?? 'You are a helpful AI assistant.',
+            schedule: cfg.schedule
+              ? (parseNaturalSchedule(cfg.schedule).cron ?? cfg.schedule)
+              : undefined,
+            emoji: cfg.emoji ?? deriveAgentEmoji(cfg.name, cfg.description),
+            toolPermissions: cfg.toolPermissions ?? [],
+            status: 'idle' as const,
+            config: {},
+            createdAt: now,
+            updatedAt: now,
+          };
+        });
         createdAgents.forEach(createAgent);
         createdAgents.filter((a) => a.schedule).forEach(scheduleAgent);
 

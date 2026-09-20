@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { displayModelName } from '../utils/modelDisplay';
 
 interface Props {
   provider: string;
@@ -51,7 +52,7 @@ export function ModelSelect({ provider, model, availableModels, onChange, classN
       className={`text-xs font-mono bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 text-brain-text cursor-pointer hover:border-brain-accent focus:outline-none ${className}`}
     >
       {knownModels.map((m) => (
-        <option key={m} value={m}>{m}</option>
+        <option key={m} value={m}>{displayModelName(m)}</option>
       ))}
       <option value="__custom__">Other...</option>
     </select>

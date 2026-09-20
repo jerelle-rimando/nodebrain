@@ -9,6 +9,8 @@ import { featuredTemplates, type FeaturedTemplate } from '../../data/featuredTem
 import { toast } from '../shared/Toast';
 import type { Agent } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
+import { displayModelName } from '../../utils/modelDisplay';
+import { getNewAgentDefaults } from '../../utils/newAgentDefaults';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,7 +230,7 @@ function CreateTemplateModal({ agents, onClose, onSave }: CreateModalProps) {
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-brain-text truncate">{a.name}</p>
-                    <p className="text-xs text-brain-text-dim truncate">{a.description || a.model}</p>
+                    <p className="text-xs text-brain-text-dim truncate">{a.description || (a.model ? displayModelName(a.model) : '')}</p>
                   </div>
                 </label>
               ))
@@ -427,13 +429,14 @@ export function TemplatesPage() {
     setInstallingName(template.name);
     try {
       const nameToId = new Map<string, string>();
+      const defaults = await getNewAgentDefaults();
       for (const agentDef of template.agents) {
         const created = await api.createAgent({
           name: agentDef.name,
           description: agentDef.description,
           systemPrompt: agentDef.systemPrompt,
-          provider: 'openai',
-          model: 'gpt-4o-mini',
+          provider: defaults.provider as Agent['provider'],
+          model: defaults.model,
           schedule: agentDef.schedule,
           emoji: deriveAgentEmoji(agentDef.name, agentDef.description),
           toolPermissions: [],
@@ -464,6 +467,15 @@ export function TemplatesPage() {
 
   async function handleUse(template: AgentTemplate) {
     try {
+      // A template's own provider/model is honoured. Only what it omits is
+      // filled from the resolved default; a provider with no model gets '',
+      // which the backend turns into that provider's default model.
+      const defaults = await getNewAgentDefaults();
+      const withDefaults = (provider?: string, model?: string) =>
+        provider
+          ? { provider: provider as Agent['provider'], model: model ?? '' }
+          : { provider: defaults.provider as Agent['provider'], model: model ?? defaults.model };
+
       if (Array.isArray(template.agents) && template.agents.length > 0) {
         const nameToId = new Map<string, string>();
         for (const a of template.agents) {
@@ -471,8 +483,7 @@ export function TemplatesPage() {
             name: a.name,
             description: a.description,
             systemPrompt: a.systemPrompt,
-            provider: (a.provider ?? 'openai') as any,
-            model: a.model ?? 'gpt-4o-mini',
+            ...withDefaults(a.provider, a.model),
             schedule: a.schedule,
             emoji: a.emoji ?? deriveAgentEmoji(a.name, a.description),
             toolPermissions: a.toolPermissions ?? [],
@@ -491,8 +502,7 @@ export function TemplatesPage() {
           name: template.name,
           description: template.description,
           systemPrompt: template.systemPrompt ?? '',
-          provider: (template.provider ?? 'openai') as any,
-          model: template.model ?? 'gpt-4o-mini',
+          ...withDefaults(template.provider, template.model),
           schedule: template.schedule,
           emoji: template.emoji ?? deriveAgentEmoji(template.name, template.description),
           toolPermissions: template.toolPermissions ?? [],

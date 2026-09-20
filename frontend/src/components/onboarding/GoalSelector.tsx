@@ -4,6 +4,8 @@ import { api } from '../../utils/api';
 import { featuredTemplates } from '../../data/featuredTemplates';
 import type { FeaturedTemplate } from '../../data/featuredTemplates';
 import { deriveAgentEmoji } from '@shared/emoji';
+import type { Agent } from '@shared/types';
+import { getNewAgentDefaults } from '../../utils/newAgentDefaults';
 
 export interface GoalDoneOptions {
   starterPrompt?: string;
@@ -88,14 +90,15 @@ const GOALS: Goal[] = [
 
 async function installTemplate(template: FeaturedTemplate): Promise<void> {
   const nameToId = new Map<string, string>();
+  const defaults = await getNewAgentDefaults();
   for (const agentDef of template.agents) {
     const created = await api.createAgent({
       name: agentDef.name,
       description: agentDef.description,
       emoji: deriveAgentEmoji(agentDef.name, agentDef.description),
       systemPrompt: agentDef.systemPrompt,
-      provider: 'openai',
-      model: 'gpt-4o-mini',
+      provider: defaults.provider as Agent['provider'],
+      model: defaults.model,
       schedule: agentDef.schedule,
       toolPermissions: [],
       config: {},

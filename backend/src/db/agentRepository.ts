@@ -1,6 +1,6 @@
 import { dbRun, dbGet, dbAll } from './database';
 import type { Agent, AgentConfig, ModelProvider, AgentStatus } from '../../shared-types';
-import { agentEvents } from '../agents/agentEngine';
+import { agentEvents, resolveAgentModel } from '../agents/agentEngine';
 
 interface AgentRow {
   id: string;
@@ -47,6 +47,9 @@ export function getAgentById(id: string): Agent | null {
 }
 
 export function createAgent(agent: Agent): Agent {
+  // Single chokepoint for every creation path (chat, POST /agents, templates).
+  // Mutates in place so callers that return/emit `agent` see the stored value.
+  agent.model = resolveAgentModel(agent.provider, agent.model, `createAgent("${agent.name}")`);
   dbRun(
     `INSERT INTO agents (id, name, description, provider, model, system_prompt, schedule, emoji, tool_permissions, status, config, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -65,6 +68,9 @@ export function updateAgent(id: string, updates: Partial<Agent>): Agent | null {
   const existing = getAgentById(id);
   if (!existing) return null;
   const updated: Agent = { ...existing, ...updates, id, updatedAt: new Date().toISOString() };
+  // Validate the merged provider/model pair so PATCHing either field alone
+  // can't leave a model that doesn't belong to the provider.
+  updated.model = resolveAgentModel(updated.provider, updated.model, `updateAgent(${id})`);
   dbRun(
     `UPDATE agents SET name=?, description=?, provider=?, model=?, system_prompt=?,
      schedule=?, emoji=?, tool_permissions=?, status=?, config=?, updated_at=? WHERE id=?`,
@@ -89,6 +95,23 @@ export function deleteAgent(id: string): boolean {
 
 export function updateAgentStatus(id: string, status: AgentStatus): void {
   dbRun('UPDATE agents SET status=?, updated_at=? WHERE id=?', [status, new Date().toISOString(), id]);
+}
+
+// Startup repair: rewrites any stored agent whose model isn't valid for its
+// provider (e.g. hallucinated at creation time, before validation existed) to
+// the provider default. Idempotent; a no-op once every row is clean.
+export function repairInvalidAgentModels(): number {
+  const rows = dbAll<{ id: string; name: string; provider: string; model: string }>(
+    'SELECT id, name, provider, model FROM agents',
+  );
+  let repaired = 0;
+  for (const row of rows) {
+    const fixed = resolveAgentModel(row.provider, row.model, `repair "${row.name}"`);
+    if (fixed === row.model) continue;
+    dbRun('UPDATE agents SET model=?, updated_at=? WHERE id=?', [fixed, new Date().toISOString(), row.id]);
+    repaired++;
+  }
+  return repaired;
 }
 
 // Startup reconciliation: an agent left 'running' when the process starts up

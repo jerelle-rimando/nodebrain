@@ -2,6 +2,7 @@ import { Handle, Position } from 'reactflow';
 import { Bot, AlertCircle, Clock } from 'lucide-react';
 import type { Agent } from '@shared/types';
 import { formatCronSchedule } from '../../utils/formatSchedule';
+import { displayModelName } from '../../utils/modelDisplay';
 
 interface AgentNodeData {
   agent: Agent;
@@ -80,7 +81,7 @@ export function AgentNode({ data }: { data: AgentNodeData }) {
 
         <div className="flex gap-2 text-xs text-brain-text-dim flex-wrap">
           <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 font-mono truncate max-w-32">
-            {agent.model}
+            {displayModelName(agent.model)}
           </span>
           {agent.schedule && (
             <span className="bg-brain-bg border border-brain-border rounded px-1.5 py-0.5 flex items-center gap-1">
