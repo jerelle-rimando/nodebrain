@@ -382,6 +382,7 @@ async function runOpenAIAgenticLoop(
   agent: Agent,
   taskId: string,
   signal: AbortSignal,
+  humanPresent: boolean,
   depth = 0,
   destructiveFailRef: { value: boolean } = { value: false },
   toolCallCountRef: { value: number } = { value: 0 },
@@ -428,6 +429,15 @@ async function runOpenAIAgenticLoop(
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
       if (agent.config.approvalMode && requiresApproval(toolCall.function.name, serverName)) {
+        // No human to ask means no one can approve — skip rather than block so
+        // unattended runs (scheduled, delegated) still complete. Distinct from
+        // dryRun below: dryRun simulates every mutating tool for testing regardless
+        // of approvalMode, this only skips the specific tool that needed a human.
+        if (!humanPresent) {
+          persistLog(makeLog(taskId, agent.id, `Skipped tool "${toolCall.function.name}" for safety — destructive action requires approval and no human is present`, 'warn'));
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: '(tool skipped — requires human approval, none present)' });
+          continue;
+        }
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${toolCall.function.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, toolCall.function.name, args);
         if (!approved) {
@@ -482,7 +492,10 @@ async function runOpenAIAgenticLoop(
               toolResult = `Error: No connected agent found with name "${targetName}". Your connected agents are: ${connectedNames || 'none'}`;
             } else {
               persistLog(makeLog(taskId, agent.id, `Delegating to agent "${targetAgent.name}" (depth ${depth + 1})`));
-              const delegatedTask = await executeAgentTask(targetAgent, task, depth + 1);
+              // Delegated sub-agent runs are unattended, regardless of whether the
+              // parent task itself had a human watching — no one is present to
+              // approve destructive tools for the sub-agent either.
+              const delegatedTask = await executeAgentTask(targetAgent, task, false, depth + 1);
               toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
             }
           }
@@ -525,6 +538,7 @@ async function runAnthropicAgenticLoop(
   agent: Agent,
   taskId: string,
   signal: AbortSignal,
+  humanPresent: boolean,
   depth = 0,
   destructiveFailRef: { value: boolean } = { value: false },
   toolCallCountRef: { value: number } = { value: 0 },
@@ -575,6 +589,13 @@ async function runAnthropicAgenticLoop(
       const args = block.input as Record<string, unknown>;
 
       if (agent.config.approvalMode && requiresApproval(block.name, serverName)) {
+        // See the matching comment in runOpenAIAgenticLoop: skip rather than
+        // block when unattended, and this is independent of dryRun.
+        if (!humanPresent) {
+          persistLog(makeLog(taskId, agent.id, `Skipped tool "${block.name}" for safety — destructive action requires approval and no human is present`, 'warn'));
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: '(tool skipped — requires human approval, none present)' });
+          continue;
+        }
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${block.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, block.name, args);
         if (!approved) {
@@ -626,7 +647,7 @@ async function runAnthropicAgenticLoop(
               toolResult = `Error: No connected agent found with name "${targetName}". Your connected agents are: ${connectedNames || 'none'}`;
             } else {
               persistLog(makeLog(taskId, agent.id, `Delegating to agent "${targetAgent.name}" (depth ${depth + 1})`));
-              const delegatedTask = await executeAgentTask(targetAgent, task, depth + 1);
+              const delegatedTask = await executeAgentTask(targetAgent, task, false, depth + 1);
               toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
             }
           }
@@ -660,9 +681,13 @@ async function runAnthropicAgenticLoop(
 
 // `history` is opt-in: only interactive chat passes it. Scheduled runs, delegation
 // and the Run button omit it so each starts from a clean slate.
+// `humanPresent` is set explicitly by every call site rather than inferred: true
+// for interactive chat and the manual Run button (someone can answer an approval
+// prompt), false for scheduled cron runs and delegated sub-agent runs (no one can).
 export async function executeAgentTask(
   agent: Agent,
   userInput: string,
+  humanPresent: boolean,
   depth = 0,
   history?: HistoryTurn[],
 ): Promise<Task> {
@@ -758,6 +783,7 @@ export async function executeAgentTask(
         agent,
         taskId,
         controller.signal,
+        humanPresent,
         depth,
         destructiveFailRef,
         toolCallCountRef,
@@ -770,7 +796,7 @@ export async function executeAgentTask(
         ...preparedHistory.map((t): OpenAI.ChatCompletionMessageParam => ({ role: t.role, content: t.content })),
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, depth, destructiveFailRef, toolCallCountRef);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, humanPresent, depth, destructiveFailRef, toolCallCountRef);
     }
 
     activeTaskControllers.delete(taskId);

@@ -63,7 +63,8 @@ export function scheduleAgent(agent: Agent): void {
     const fresh = getAgentById(agentId);
     if (!fresh) return;
     console.log(`[Scheduler] Running scheduled task for agent "${fresh.name}"`);
-    await executeAgentTask(fresh, fresh.systemPrompt);
+    // No human is present for a cron-triggered run.
+    await executeAgentTask(fresh, fresh.systemPrompt, false);
   });
 
   scheduledJobs.set(agent.id, { agentId: agent.id, task });

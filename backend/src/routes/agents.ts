@@ -30,6 +30,11 @@ const AgentSchema = z.object({
     maxTokens: z.number().optional(),
     credentialIds: z.array(z.string()).optional(),
     telegramChatId: z.string().optional(),
+    // New agents ask before destructive tools by default; an omitted field
+    // here always means "new agent, use the safe default" since PATCH (the
+    // only way to change an existing agent's config) doesn't go through this
+    // schema, so this default can never overwrite an existing agent's choice.
+    approvalMode: z.boolean().default(true),
   }).default({}),
 });
 
@@ -167,7 +172,8 @@ router.post('/:id/execute', async (req, res) => {
     const { input } = req.body as { input?: string };
     if (!input) return res.status(400).json({ success: false, error: 'input is required' });
 
-    const task = await executeAgentTask(agent, input);
+    // The manual Run button is clicked interactively, so a human is present.
+    const task = await executeAgentTask(agent, input, true);
 
     if (task.status === 'completed') {
       res.json({ success: true, data: { message: task.output ?? '(no output)' } });

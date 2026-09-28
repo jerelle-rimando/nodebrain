@@ -298,7 +298,11 @@ router.post('/message', async (req, res) => {
             emoji: cfg.emoji ?? deriveAgentEmoji(cfg.name, cfg.description),
             toolPermissions: cfg.toolPermissions ?? [],
             status: 'idle' as const,
-            config: {},
+            // New agents ask before destructive tools by default. This bypasses
+            // the zod-validated POST /api/agents route (writes to the DB
+            // directly), so the schema's default doesn't apply here — set it
+            // explicitly instead.
+            config: { approvalMode: true },
             createdAt: now,
             updatedAt: now,
           };
@@ -330,6 +334,7 @@ router.post('/message', async (req, res) => {
           `✅ **${createdAgents.length === 1 ? 'Agent' : `${createdAgents.length} Agents`} Created:**`,
           agentLines,
           ...(madeConnections.length ? ['\n**Connections:**', connectionLines] : []),
+          `\n_${createdAgents.length === 1 ? "It'll" : "They'll"} ask before doing anything destructive — scheduled runs skip those steps instead of stopping to wait._`,
         ].join('\n');
       } else {
         assistantContent = `I couldn't parse an agent configuration from that. Try: "Create an agent that summarizes news articles and sends it to me every morning in Telegram."`;
@@ -347,7 +352,8 @@ router.post('/message', async (req, res) => {
         // Await the task so we can show the output in chat. This is the only
         // caller that passes conversation history (capped/trimmed in the engine).
         const history = getAgentConversationHistory(targetAgent.id, userMsg.timestamp);
-        const task = await executeAgentTask(targetAgent, taskInput, 0, history);
+        // Interactive chat — a human is present to answer an approval prompt.
+        const task = await executeAgentTask(targetAgent, taskInput, true, 0, history);
 
         if (task.status === 'completed' && task.output) {
           assistantContent = `⚡ **${targetAgent.name}** completed the task:\n\n${task.output}`;
