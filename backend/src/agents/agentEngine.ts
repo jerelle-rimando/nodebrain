@@ -375,6 +375,20 @@ function parseToolName(fullName: string): { serverName: string; toolName: string
   };
 }
 
+// toolPermissions must be enforced at call time, not only by hiding tools at list
+// time: a model can emit any tool name, and callTool resolves servers globally with
+// no agent context. The permitted set is derived from getToolsForAgent's output so it
+// carries exactly the same rules (empty allowlist = all tools, delegate_to_agent
+// granted by connections) and the two layers can't drift apart.
+function permittedToolNames(tools: Array<{ serverName: string; name: string }>): Set<string> {
+  return new Set(tools.map(t => `${t.serverName}__${t.name}`));
+}
+
+function rejectUnpermittedTool(taskId: string, agent: Agent, fullToolName: string): string {
+  persistLog(makeLog(taskId, agent.id, `Rejected tool "${fullToolName}" — not permitted for agent "${agent.name}" by its tool permissions`, 'warn'));
+  return `Tool "${fullToolName}" is not permitted for this agent. Use only the tools you were given.`;
+}
+
 async function runOpenAIAgenticLoop(
   client: OpenAI,
   model: string,
@@ -389,6 +403,7 @@ async function runOpenAIAgenticLoop(
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForOpenAI(tools);
+  const allowedTools = permittedToolNames(tools);
   let iterations = 0;
 
   while (iterations < MAX_TOOL_ITERATIONS) {
@@ -425,6 +440,12 @@ async function runOpenAIAgenticLoop(
     messages.push(message);
 
     for (const toolCall of message.tool_calls) {
+      if (!allowedTools.has(toolCall.function.name)) {
+        const rejection = rejectUnpermittedTool(taskId, agent, toolCall.function.name);
+        messages.push({ role: 'tool', tool_call_id: toolCall.id, content: `[TOOL ERROR] ${rejection}` });
+        continue;
+      }
+
       const { serverName, toolName } = parseToolName(toolCall.function.name);
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
@@ -546,6 +567,7 @@ async function runAnthropicAgenticLoop(
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForAnthropic(tools);
+  const allowedTools = permittedToolNames(tools);
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map((t): Anthropic.MessageParam => ({ role: t.role, content: t.content })),
@@ -584,6 +606,12 @@ async function runAnthropicAgenticLoop(
 
     for (const block of response.content) {
       if (block.type !== 'tool_use') continue;
+
+      if (!allowedTools.has(block.name)) {
+        const rejection = rejectUnpermittedTool(taskId, agent, block.name);
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: rejection, is_error: true });
+        continue;
+      }
 
       const { serverName, toolName } = parseToolName(block.name);
       const args = block.input as Record<string, unknown>;
