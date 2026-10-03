@@ -26,6 +26,7 @@ import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { toast } from '../shared/Toast';
 import { useMcpServers } from '../../hooks/useMcpServers';
+import { McpAccessBadge, McpAccessConfirmDialog } from './McpAccessNotice';
 
 interface Integration {
   id: string;
@@ -499,6 +500,9 @@ export function IntegrationsPage() {
       <p className="text-xs text-brain-text-dim mt-1.5 px-0.5">
         Paste any MCP install command or SSE URL. Works with npx, uvx, node, and HTTP servers.
       </p>
+      <p className="text-xs text-brain-text-dim mt-1 px-0.5">
+        Servers added by command run on this computer with your full permissions and can access anything that command allows.
+      </p>
     </div>
 
     {/* Advanced toggle */}
@@ -538,6 +542,15 @@ export function IntegrationsPage() {
   </div>
 )}
 
+          {mcp.pendingWarning && (
+            <McpAccessConfirmDialog
+              serverName={mcp.name.trim()}
+              warning={mcp.pendingWarning}
+              onConfirm={mcp.confirmAddServer}
+              onCancel={mcp.cancelAddServer}
+            />
+          )}
+
           {mcp.customServers.length === 0 ? (
             <p className="text-xs text-brain-text-dim py-2">No custom servers connected yet.</p>
           ) : (
@@ -554,6 +567,7 @@ export function IntegrationsPage() {
                       }
                     </p>
                   </div>
+                  {server.accessWarning && <McpAccessBadge warning={server.accessWarning} />}
                   <span className="text-xs text-brain-text-dim bg-brain-surface border border-brain-border rounded px-1.5 py-0.5">
                     {server.transport}
                   </span>

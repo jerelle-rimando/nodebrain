@@ -4,20 +4,24 @@ import {
   getAllCustomMCPServers,
   createCustomMCPServer,
   deleteCustomMCPServer,
+  updateCustomMCPServerAccessWarning,
 } from '../db/mcpServerRepository';
 import { reloadToolRegistry } from '../mcp/toolRegistry';
 import { parseMcpInstallCommand } from '../utils/parseMcpCommand';
+import { assessMcpServerAccess } from '../utils/mcpAccessRisk';
 
 const router = Router();
+
+const InstallCommandSchema = z.object({
+  name: z.string().min(1),
+  installCommand: z.string().min(1),
+  envVars: z.record(z.string()).default({}),
+});
 
 // Accepts either a raw installCommand string or a structured payload
 const CreateMCPServerSchema = z.union([
   // Simple format — just a name and install command
-  z.object({
-    name: z.string().min(1),
-    installCommand: z.string().min(1),
-    envVars: z.record(z.string()).default({}),
-  }),
+  InstallCommandSchema,
   // Legacy structured format — still supported
   z.discriminatedUnion('transport', [
     z.object({
@@ -37,15 +41,44 @@ const CreateMCPServerSchema = z.union([
   ]),
 ]);
 
+const AssessMCPServerSchema = InstallCommandSchema.omit({ name: true });
+
 router.get('/', (_req, res) => {
   try {
-    const servers = getAllCustomMCPServers().map(s => ({
-      ...s,
-      envVars: Object.fromEntries(
-        Object.keys(s.envVars).map(k => [k, '••••••••'])
-      ),
-    }));
+    const servers = getAllCustomMCPServers().map(s => {
+      // Re-derive on every load so a row edited outside the app (or added
+      // before access_warning existed) still gets the right badge. The stored
+      // value is only rewritten when it actually changed.
+      const accessWarning = assessMcpServerAccess(s);
+      if (JSON.stringify(accessWarning) !== JSON.stringify(s.accessWarning)) {
+        updateCustomMCPServerAccessWarning(s.id, accessWarning);
+      }
+      return {
+        ...s,
+        accessWarning,
+        envVars: Object.fromEntries(
+          Object.keys(s.envVars).map(k => [k, '••••••••'])
+        ),
+      };
+    });
     res.json({ success: true, data: servers });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// Dry run for the Add MCP Server form: returns what the server would be able to
+// reach so the user can confirm before anything is saved or spawned. Purely
+// informational — POST / never requires this to have been called.
+router.post('/assess', (req, res) => {
+  try {
+    const parsed = AssessMCPServerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.message });
+    }
+    const { transport, command, args } = parseMcpInstallCommand(parsed.data.installCommand);
+    const accessWarning = assessMcpServerAccess({ transport, command, args, envVars: parsed.data.envVars });
+    res.json({ success: true, data: { accessWarning } });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }
@@ -89,6 +122,7 @@ router.post('/', async (req, res) => {
       args,
       url,
       envVars,
+      accessWarning: assessMcpServerAccess({ transport, command, args, envVars }),
     });
 
     reloadToolRegistry().catch(console.error);

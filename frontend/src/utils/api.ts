@@ -85,6 +85,11 @@ export const api = {
     envVars?: Record<string, string>;
   }) =>
     request<any>('/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
+  assessMcpServer: (data: { installCommand: string; envVars?: Record<string, string> }) =>
+    request<{ accessWarning: import('@shared/types').McpAccessWarning | null }>('/mcp-servers/assess', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   deleteMcpServer: (id: string) =>
     request<{ id: string }>(`/mcp-servers/${id}`, { method: 'DELETE' }),
 

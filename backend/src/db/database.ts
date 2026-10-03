@@ -124,7 +124,8 @@ export async function initDb(): Promise<void> {
       args TEXT NOT NULL DEFAULT '[]',
       url TEXT,
       env_vars TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      access_warning TEXT
     );
     CREATE TABLE IF NOT EXISTS agent_connections (
       id TEXT PRIMARY KEY,
@@ -181,6 +182,22 @@ export async function initDb(): Promise<void> {
     stmt.free();
     if (cols.length > 0 && !cols.includes('emoji')) {
       _db.run('ALTER TABLE agents ADD COLUMN emoji TEXT');
+    }
+  }
+
+  // Migration: add access_warning to existing custom_mcp_servers tables. Same
+  // PRAGMA guard as above. Existing rows start NULL and are assessed on the
+  // next GET /mcp-servers, so servers added before this column get flagged too.
+  {
+    const stmt = _db.prepare('PRAGMA table_info(custom_mcp_servers)');
+    const cols: string[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { name: string };
+      cols.push(row.name);
+    }
+    stmt.free();
+    if (cols.length > 0 && !cols.includes('access_warning')) {
+      _db.run('ALTER TABLE custom_mcp_servers ADD COLUMN access_warning TEXT');
     }
   }
 

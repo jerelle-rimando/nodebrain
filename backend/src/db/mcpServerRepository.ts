@@ -1,6 +1,7 @@
 import { dbRun, dbGet, dbAll } from './database';
 import { v4 as uuidv4 } from 'uuid';
 import { encryptValue, decryptValue } from '../vault/credentialVault';
+import type { McpAccessWarning } from '../../shared-types';
 
 export interface CustomMCPServer {
   id: string;
@@ -11,6 +12,7 @@ export interface CustomMCPServer {
   url?: string;
   envVars: Record<string, string>;
   createdAt: string;
+  accessWarning: McpAccessWarning | null;
 }
 
 interface MCPServerRow {
@@ -22,6 +24,7 @@ interface MCPServerRow {
   url: string | null;
   env_vars: string;
   created_at: string;
+  access_warning: string | null;
 }
 
 function rowToServer(row: MCPServerRow): CustomMCPServer {
@@ -39,6 +42,7 @@ function rowToServer(row: MCPServerRow): CustomMCPServer {
     url: row.url ?? undefined,
     envVars: decryptedEnvVars,
     createdAt: row.created_at,
+    accessWarning: row.access_warning ? (JSON.parse(row.access_warning) as McpAccessWarning) : null,
   };
 }
 
@@ -59,8 +63,8 @@ export function createCustomMCPServer(data: Omit<CustomMCPServer, 'id' | 'create
     encryptedEnvVars[k] = encryptValue(v);
   }
   dbRun(
-    `INSERT INTO custom_mcp_servers (id, name, transport, command, args, url, env_vars, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO custom_mcp_servers (id, name, transport, command, args, url, env_vars, created_at, access_warning)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       data.name,
@@ -70,9 +74,17 @@ export function createCustomMCPServer(data: Omit<CustomMCPServer, 'id' | 'create
       data.url ?? null,
       JSON.stringify(encryptedEnvVars),
       now,
+      data.accessWarning ? JSON.stringify(data.accessWarning) : null,
     ],
   );
   return { ...data, id, createdAt: now };
+}
+
+export function updateCustomMCPServerAccessWarning(id: string, warning: McpAccessWarning | null): void {
+  dbRun('UPDATE custom_mcp_servers SET access_warning = ? WHERE id = ?', [
+    warning ? JSON.stringify(warning) : null,
+    id,
+  ]);
 }
 
 export function deleteCustomMCPServer(id: string): boolean {

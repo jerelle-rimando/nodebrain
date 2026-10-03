@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { McpAccessWarning } from '@shared/types';
 import { api } from '../utils/api';
 import { toast } from '../components/shared/Toast';
 
@@ -10,6 +11,7 @@ export interface CustomMCPServer {
   args?: string[];
   url?: string;
   createdAt: string;
+  accessWarning?: McpAccessWarning | null;
 }
 
 export function useMcpServers() {
@@ -20,6 +22,9 @@ export function useMcpServers() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [envVars, setEnvVars] = useState('');
   const [saving, setSaving] = useState(false);
+  // Set when the command reaches broadly into the disk; the add waits on the
+  // user's confirm. Never blocks — confirming always proceeds.
+  const [pendingWarning, setPendingWarning] = useState<McpAccessWarning | null>(null);
 
   useEffect(() => {
     api.getMcpServers()
@@ -35,23 +40,55 @@ export function useMcpServers() {
     setShowAddForm(false);
   }
 
+  function parseEnvVars(): Record<string, string> {
+    const parsedEnvVars: Record<string, string> = {};
+    if (envVars.trim()) {
+      for (const line of envVars.split('\n')) {
+        const [k, ...rest] = line.split('=');
+        if (k?.trim()) parsedEnvVars[k.trim()] = rest.join('=').trim();
+      }
+    }
+    return parsedEnvVars;
+  }
+
   async function addServer() {
     if (!name.trim() || !installCommand.trim()) return;
 
     setSaving(true);
     try {
-      const parsedEnvVars: Record<string, string> = {};
-      if (envVars.trim()) {
-        for (const line of envVars.split('\n')) {
-          const [k, ...rest] = line.split('=');
-          if (k?.trim()) parsedEnvVars[k.trim()] = rest.join('=').trim();
-        }
+      const { accessWarning } = await api.assessMcpServer({
+        installCommand: installCommand.trim(),
+        envVars: parseEnvVars(),
+      });
+      if (accessWarning) {
+        setPendingWarning(accessWarning);
+        setSaving(false);
+        return;
       }
+    } catch (err) {
+      // The check is advisory. If it can't run, add anyway — the backend still
+      // assesses on save, so the card badge appears either way.
+      console.error(err);
+    }
+    await createServer();
+  }
 
+  async function confirmAddServer() {
+    setPendingWarning(null);
+    await createServer();
+  }
+
+  function cancelAddServer() {
+    setPendingWarning(null);
+  }
+
+  async function createServer() {
+    setSaving(true);
+    try {
       await api.createMcpServer({
         name: name.trim(),
         installCommand: installCommand.trim(),
-        envVars: parsedEnvVars,
+        envVars: parseEnvVars(),
       });
 
       const updated = await api.getMcpServers();
@@ -83,7 +120,10 @@ export function useMcpServers() {
     showAdvanced, setShowAdvanced,
     envVars, setEnvVars,
     saving,
+    pendingWarning,
     addServer,
+    confirmAddServer,
+    cancelAddServer,
     removeServer,
   };
 }

@@ -104,3 +104,18 @@ export interface AgentConnection {
   targetAgentId: string;
   createdAt: string;
 }
+// Broad-access assessment for a custom MCP server, derived from its command,
+// args, and env vars by backend/src/utils/mcpAccessRisk.ts. Tiers are ordered
+// most to least broad; `tier` on the warning is the broadest finding.
+export type McpAccessTier = 'system' | 'profile' | 'unscoped';
+
+export interface McpAccessFinding {
+  tier: McpAccessTier;
+  path?: string;
+  description: string;
+}
+
+export interface McpAccessWarning {
+  tier: McpAccessTier;
+  findings: McpAccessFinding[];
+}
