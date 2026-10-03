@@ -120,12 +120,22 @@ router.patch('/:id', (req, res) => {
 });
 
 // DELETE /api/agents/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     unscheduleAgent(req.params.id);
     deleteConnectionsForAgent(req.params.id);
     const deleted = deleteAgent(req.params.id);
     if (!deleted) return res.status(404).json({ success: false, error: 'Agent not found' });
+    // Queries filter by agentId, so a deleted agent's vectors could never be
+    // retrieved again, yet they'd stay in the index (and in RAM) forever. The
+    // agent is already gone at this point, so a failure here is logged rather
+    // than reported as a failed delete.
+    try {
+      const removed = await clearAgentMemory(req.params.id);
+      if (removed > 0) console.log(`[RAG] Removed ${removed} memories for deleted agent ${req.params.id}`);
+    } catch (err) {
+      console.warn('[RAG] Failed to remove memories for deleted agent:', (err as Error).message ?? err);
+    }
     res.json({ success: true, data: { id: req.params.id } });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });

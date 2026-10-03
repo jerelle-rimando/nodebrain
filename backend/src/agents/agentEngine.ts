@@ -4,8 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getCredentialForProvider, getBaseUrlForProvider } from '../vault/credentialVault';
 import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
 import { dbRun } from '../db/database';
-import { updateAgentStatus } from '../db/agentRepository';
-import { queryRelevantContext } from '../rag/ragEngine';
+import { updateAgentStatus, getAgentById } from '../db/agentRepository';
+import { queryRelevantContext, ingestTaskInstruction } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
@@ -230,6 +230,28 @@ export function prepareHistory(history: HistoryTurn[] | undefined, provider: str
   // first message to be from the user).
   while (turns.length > 0 && turns[0].role !== 'user') turns = turns.slice(1);
   return turns;
+}
+
+// ── Agent memory ──────────────────────────────────────────────────────────────
+
+// Retrieved memories go into the system prompt. A stored instruction is one
+// chunk of at most 500 chars (~125 tokens). Local: the ~4,096-token window
+// already carries the system prompt, tool schemas, history and up to 2,000
+// output tokens, and one file read can be 1,200+ tokens, so a single memory is
+// the most it can spare. Cloud windows absorb 5 (~625 tokens) easily.
+const LOCAL_MEMORY_TOP_K = 1;
+const CLOUD_MEMORY_TOP_K = 5;
+
+// Short instructions ("hi", "run it again") carry nothing worth retrieving later.
+const MIN_INGEST_INSTRUCTION_CHARS = 100;
+
+// Only called on the success path, so failed tasks are already excluded.
+// Scheduled and delegated runs are not skipped: ingestTaskInstruction dedupes
+// identical instructions per agent, so a daily cron stores its text once.
+function shouldIngestInstruction(agent: Agent, instruction: string, signal: AbortSignal): boolean {
+  if (signal.aborted) return false; // stopped: the loop returns a placeholder and lands here
+  if (agent.config.dryRun) return false;
+  return instruction.trim().length >= MIN_INGEST_INSTRUCTION_CHARS;
 }
 
 // ── Telemetry: task-failure classification ────────────────────────────────────
@@ -780,7 +802,11 @@ export async function executeAgentTask(
 
     let relevantContext: string[] = [];
     try {
-      relevantContext = await queryRelevantContext(userInput, agent.id);
+      const topK = FREE_PROVIDERS.has(agent.provider) ? LOCAL_MEMORY_TOP_K : CLOUD_MEMORY_TOP_K;
+      // Drop chunks of the instruction being run right now: a re-run (e.g. a
+      // scheduled agent) would otherwise retrieve its own text at score ~1.0.
+      relevantContext = (await queryRelevantContext(userInput, agent.id, topK))
+        .filter((chunk) => !userInput.includes(chunk));
     } catch {
       // RAG not yet ready or unavailable; proceed without context
     }
@@ -850,6 +876,16 @@ export async function executeAgentTask(
       completedAt: new Date().toISOString(),
     };
     agentEvents.emit('task:complete', completedTask, { toolCallCount: toolCallCountRef.value });
+
+    // Fire-and-forget: the task is already complete and returned; a memory
+    // failure is logged and never touches it.
+    if (shouldIngestInstruction(agent, userInput, controller.signal)) {
+      ingestTaskInstruction(userInput, agent.id, () => getAgentById(agent.id) !== null)
+        .then((stored) => {
+          if (stored) persistLog(makeLog(taskId, agent.id, 'Instruction saved to agent memory'));
+        })
+        .catch((err) => console.warn('[RAG] Instruction ingestion failed:', (err as Error).message ?? err));
+    }
     return completedTask;
 
   } catch (err) {
