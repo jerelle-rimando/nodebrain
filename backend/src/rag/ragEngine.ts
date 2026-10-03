@@ -70,17 +70,18 @@ export async function ingestText(
   }
 }
 
+// agentId is required and always applied: memory is per-agent, and an
+// unfiltered query would return every agent's (i.e. every client's) memories.
 export async function queryRelevantContext(
   query: string,
-  agentId?: string,
+  agentId: string,
   topK = 5,
 ): Promise<string[]> {
+  if (!agentId) return [];
   const idx = await getIndex();
   const queryVector = await getEmbedding(query);
 
-  const filter = agentId ? { agentId: { $eq: agentId } } : undefined;
-
-  const results = await idx.queryItems(queryVector, '', topK, filter);
+  const results = await idx.queryItems(queryVector, '', topK, { agentId: { $eq: agentId } });
 
   return results
     .filter(r => r.score > 0.5)
@@ -102,11 +103,14 @@ export async function listMemories(
     }));
 }
 
-export async function deleteMemory(itemId: string): Promise<boolean> {
+// Deletes only if the item belongs to agentId. A memory owned by another agent
+// is reported as not found, the same as a missing one.
+export async function deleteMemory(agentId: string, itemId: string): Promise<boolean> {
+  if (!agentId) return false;
   const idx = await getIndex();
   const items = await idx.listItems();
-  const exists = items.some((item) => item.id === itemId);
-  if (!exists) return false;
+  const owned = items.some((item) => item.id === itemId && item.metadata.agentId === agentId);
+  if (!owned) return false;
   await idx.deleteItem(itemId);
   return true;
 }

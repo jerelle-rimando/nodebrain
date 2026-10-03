@@ -145,7 +145,7 @@ router.get('/:id/memory', async (req, res) => {
 // DELETE /api/agents/:id/memory/:memoryId
 router.delete('/:id/memory/:memoryId', async (req, res) => {
   try {
-    const deleted = await deleteMemory(req.params.memoryId);
+    const deleted = await deleteMemory(req.params.id, req.params.memoryId);
     if (!deleted) return res.status(404).json({ success: false, error: 'Memory item not found' });
     res.json({ success: true, data: { id: req.params.memoryId } });
   } catch (err) {
