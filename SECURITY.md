@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 0.1.x | ✅ Active |
+| 0.3.x | ✅ Active |
 
 Only the latest release receives security updates. Older versions are not patched.
 
@@ -60,15 +60,15 @@ NodeBrain is a local-first application. Understanding the security model helps c
 
 - All credentials are encrypted with AES-256 before storage
 - `VAULT_SECRET` is auto-generated with 32 cryptographically random bytes on first run
-- The backend only accepts connections from `http://localhost:5173` via CORS
-- No data is transmitted to external servers except explicit API calls made by agents
+- CORS rejects browser requests from any origin other than `localhost` or `127.0.0.1` (any port)
+- Agent and task data is transmitted only through API calls agents make to the configured model provider and connected integrations. Separately, if the user opts in (off by default), anonymous usage telemetry is sent to a NodeBrain-controlled Cloudflare Worker; it contains no prompts, agent names, file paths, message contents, or credentials. See [PRIVACY.md](PRIVACY.md)
 - The filesystem integration is sandboxed to a user-defined path enforced by the MCP server
 
 ---
 
 ## Known Limitations
 
-These are known security considerations that are accepted for v0.1 and will be addressed in future versions:
+These are known security considerations that are accepted in the current release and will be addressed in future versions:
 
 - Agent task prompts are not sanitized — prompt injection is theoretically possible in multi-user or networked deployments. In the default localhost-only configuration this is low risk since only the local user sends input.
 - No rate limiting on the local API

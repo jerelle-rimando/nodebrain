@@ -26,7 +26,7 @@ The system revolves around persistent AI agents that can:
 - pause before destructive actions when Approval Mode is enabled
 - run in Dry-Run mode to simulate tool calls without side effects
 
-**What "local-first" means here:** the NodeBrain app, your agent definitions, your encrypted credentials, your task history, and your RAG memory all live on your machine — there is no NodeBrain server in the middle. However, the *AI reasoning itself* runs on whichever model provider you configure. If you use a hosted provider (OpenAI, Groq, Anthropic, Gemini, Mistral, Together, Fireworks), your prompts and any file or task content the agent processes are sent to that provider's API to be processed, exactly as if you used their app directly. If you want inference to stay entirely on your machine, use **Ollama**, which runs locally with no external API calls. See [Security & Architecture Philosophy](#security--architecture-philosophy-) for the full data-flow picture.
+**What "local-first" means here:** the NodeBrain app, your agent definitions, your encrypted credentials, your task history, and your RAG memory all live on your machine — there is no NodeBrain server between you, your agents, and your model provider. The only data NodeBrain itself can receive is optional usage telemetry, which is off by default and contains no prompts, agent names, file paths, message contents, or credentials (see [PRIVACY.md](PRIVACY.md)). However, the *AI reasoning itself* runs on whichever model provider you configure. If you use a hosted provider (OpenAI, Groq, Anthropic, Gemini, Mistral, Together, Fireworks), your prompts and any file or task content the agent processes are sent to that provider's API to be processed, exactly as if you used their app directly. If you want inference to stay entirely on your machine, use **Ollama**, which runs locally with no external API calls. See [Security & Architecture Philosophy](#security--architecture-philosophy-) for the full data-flow picture.
 
 ---
 
@@ -121,7 +121,7 @@ NodeBrain is model-agnostic and works with any of the following out of the box:
 - `VAULT_SECRET` is auto-generated with 32 cryptographically random bytes on first run
 - The vault key is read once at startup, held in memory, and removed from the process environment before any integration starts — MCP servers cannot read it or decrypt your stored credentials
 - All API keys are encrypted with AES-256 before being stored locally
-- Your agent definitions, credentials, task history, and RAG memory are stored only on your machine. The one exception is the AI inference itself: when you use a hosted provider, the content your agents process is sent to that provider's API. Integrations also send data outward to their own services (e.g. a Telegram message goes to Telegram's API). Use Ollama if you need inference to stay fully local.
+- Your agent definitions, credentials, task history, and RAG memory are stored only on your machine and are never sent to NodeBrain. Data leaves your machine in these cases: when you use a hosted provider, the content your agents process is sent to that provider's API; integrations send data to their own services (e.g. a Telegram message goes to Telegram's API); and, only if you opt in, anonymous usage telemetry (event names, counts, timings, error categories, app version, OS, and a random install ID) is sent to NodeBrain. Telemetry is off by default and never includes prompts, agent names, file paths, message contents, or credentials — see [PRIVACY.md](PRIVACY.md). Use Ollama if you need inference to stay fully local.
 - The database is stored at `%APPDATA%\NodeBrain\data\nodebrain.db` (Windows) or `~/Library/Application Support/NodeBrain/data/nodebrain.db` (Mac). It is never inside the install directory.
 - Never commit your `.env` file — it is already in `.gitignore`
 
@@ -146,7 +146,7 @@ Create and control agents through chat. Click any agent in the Active Agents lis
 Visualize agents and their execution status in a live graph interface. Click any node to open a detail panel showing agent configuration, task history, and a direct run interface. Node border colors reflect live status — purple for running, red for error. Scheduled agents display their next run time directly on the node.
 
 ### Credential Vault 🔒
-Securely store and manage encrypted API keys for AI providers and integrations. Use the Settings section at the bottom to enable launch at startup or reset all data.
+Securely store and manage encrypted API keys for AI providers and integrations. Launch at startup, usage telemetry, and reset all data are in the Settings tab.
 
 ### Integrations 🔌
 Connect external services so your agents can take action in the world. Each integration shows connection status, what tools it unlocks, and step-by-step setup instructions.
@@ -218,7 +218,7 @@ Agents can be scheduled using plain English. NodeBrain converts natural language
 - "every weekday at 8am" → `0 8 * * 1-5`
 - "every 30 minutes" → `*/30 * * * *`
 
-Scheduled agents run only while NodeBrain is running. Use the "Launch at startup" toggle in Vault settings so agents resume automatically after a reboot.
+Scheduled agents run only while NodeBrain is running. Use the "Launch at startup" toggle in Settings so agents resume automatically after a reboot.
 
 ---
 
@@ -261,7 +261,7 @@ Future versions may support web or hosted environments — see [Security & Archi
 - **Tool calling reliability** — varies by AI provider. OpenAI GPT-4o and Anthropic Claude have the most reliable tool calling. Groq works but may need explicit prompts for complex tool use.
 - **Agent delegation depth** — agents can delegate to sub-agents up to 3 levels deep. Wider delegation (1 parent to many children) is unlimited.
 - **Local only** — no cloud deployment, no mobile, no collaboration features yet. Cloud version is planned.
-- **Scheduled agents require the app to be running** — use the "Launch at startup" toggle in Vault settings so agents run automatically after reboot.
+- **Scheduled agents require the app to be running** — use the "Launch at startup" toggle in Settings so agents run automatically after reboot.
 - **Environment inheritance** — MCP servers currently inherit the backend's environment variables. The vault key and database path are removed before any server starts, so stored credentials are protected. However, unrelated secrets you may have set in your own system environment (e.g. a global `OPENAI_API_KEY`) are still visible to a server you connect. Restricting this to a minimal allowlist is planned. Only connect MCP servers you trust.
 - **Dependency and supply-chain risk** — NodeBrain relies on third-party npm packages (including the MCP SDK, OpenAI SDK, and Anthropic SDK) and launches integration MCP servers via `npx`. Built-in integrations are pinned to specific versions to prevent silent upstream changes, but a compromise of any upstream package could still expose data or credentials. If you ever suspect a dependency has been compromised, rotate all credentials stored in the Vault immediately, and keep dependencies updated and monitored (e.g. via Dependabot and npm advisories).
 - **Deprecated Slack package** — still works but will be replaced when Slack's official stdio MCP server is available.
@@ -275,7 +275,7 @@ MCP introduces real security concerns in centralized deployments — unauthorize
 NodeBrain's local-first architecture mitigates many of these risks by design:
 
 - Built-in MCP servers run on your own machine with your own credentials, over a local stdio connection — there is no remote MCP host for the integrations NodeBrain ships
-- There is no central NodeBrain server or shared infrastructure, significantly reducing the external attack surface
+- No NodeBrain server or shared infrastructure handles your agents, credentials, or task data, significantly reducing the external attack surface. The only NodeBrain-operated server is the opt-in telemetry endpoint, which receives anonymous usage events and nothing else
 - Your agents only have access to what you explicitly connect in the Vault
 - The vault's master key is removed from the environment before any MCP server starts, so a server cannot decrypt your stored credentials
 - Built-in integration packages are pinned to specific versions, so a compromised upstream release is not silently pulled in on launch
@@ -286,6 +286,7 @@ NodeBrain's local-first architecture mitigates many of these risks by design:
 - **AI inference** — with a hosted provider, your prompts and the content your agents process are sent to that provider's API. With Ollama, inference is fully local.
 - **Integrations** — by design, integrations send data outward to their own services (Telegram messages to Telegram, commits to GitHub, etc.) using the tokens you provide.
 - **Integration servers** — integration MCP servers are downloaded and run from npm via `npx` on first use. NodeBrain ships integrations from well-known publishers, but these are third-party packages executing on your machine with access to the environment they're given. Only connect integrations you intend to use, and only add custom MCP servers from sources you trust.
+- **Usage telemetry (opt-in)** — off by default. If you turn it on in the setup wizard or Settings, anonymous usage events (event names, counts, timings, error categories, app version, OS, and a random install ID) are sent to a Cloudflare Worker and D1 database controlled by NodeBrain. Prompts, agent names, file paths, message contents, and credentials are never included. Turning it off stops sending and deletes any unsent events. See [PRIVACY.md](PRIVACY.md).
 - **Custom and remote servers** — a custom MCP server you add may run locally or, if you supply an HTTP(S) URL, on a remote host. Some locally-run servers are also thin clients that forward your tool calls and credentials to a third-party cloud. Check what a server actually does before connecting it.
 
 This isn't just a v0.1 limitation — it's a deliberate architectural choice. MCP is still evolving, and the security model for multi-user, web-based deployments is not yet fully mature.
