@@ -13,8 +13,9 @@
 // Schedule: first flush FIRST_FLUSH_DELAY_MS after launch, then every
 // FLUSH_INTERVAL_MS while the app runs (it lives in the tray, so that's most
 // of the time). On failure the next attempt backs off exponentially instead.
-// Nothing runs at quit: a request started during shutdown would be killed
-// mid-flight, and anything unsent is still on disk for the next launch.
+// At quit, main calls flushBeforeQuit() for one last capped send, so a short
+// first session isn't lost if the user never launches again. Whatever doesn't
+// make it within the cap stays on disk for the next launch.
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -229,17 +230,24 @@ async function postBatch(
 // ── Scheduler ────────────────────────────────────────────────────────────────
 export interface TelemetrySender {
   stop(): void;
+  // One final send at quit, then stop. Always resolves (never rejects) within
+  // timeoutMs: at the deadline any in-flight request is aborted and its events
+  // stay queued. Same consent gate as every scheduled flush.
+  flushBeforeQuit(timeoutMs: number): Promise<void>;
 }
 
 export function startTelemetrySender(opts: TelemetrySenderOptions): TelemetrySender {
   const { queuePath, isConsentGranted, log } = opts;
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
+  // Set by flushBeforeQuit: no more scheduling, but the final flush may still run.
+  let closing = false;
+  let inFlight: Promise<unknown> | null = null;
   let consecutiveFailures = 0;
   const abort = new AbortController();
 
   function schedule(delayMs: number): void {
-    if (stopped) return;
+    if (stopped || closing) return;
     timer = setTimeout(() => { void runFlush(); }, delayMs);
     // Never the reason the process stays alive (or delays quitting).
     timer.unref();
@@ -248,13 +256,17 @@ export function startTelemetrySender(opts: TelemetrySenderOptions): TelemetrySen
   async function runFlush(): Promise<void> {
     timer = null;
     let outcome: { ok: true } | { ok: false; retryAfterMs: number | null };
+    const run = flush();
+    inFlight = run;
     try {
-      outcome = await flush();
+      outcome = await run;
     } catch (err) {
       log(`[TELEMETRY] flush failed unexpectedly: ${err}`);
       outcome = { ok: false, retryAfterMs: null };
+    } finally {
+      inFlight = null;
     }
-    if (stopped) return;
+    if (stopped || closing) return;
     if (outcome.ok) {
       consecutiveFailures = 0;
       schedule(FLUSH_INTERVAL_MS);
@@ -312,7 +324,11 @@ export function startTelemetrySender(opts: TelemetrySenderOptions): TelemetrySen
       }
 
       if (result.kind === 'retry') {
-        if (!stopped) log(`[TELEMETRY] send failed (${result.detail}) — will retry; ${sent} sent this flush`);
+        if (closing) {
+          log(`[TELEMETRY] quit flush incomplete (${result.detail}) — rest stays queued for next launch; ${sent} sent`);
+        } else if (!stopped) {
+          log(`[TELEMETRY] send failed (${result.detail}) — will retry; ${sent} sent this flush`);
+        }
         return { ok: false, retryAfterMs: result.retryAfterMs };
       }
       if (result.kind === 'rejected') {
@@ -329,14 +345,47 @@ export function startTelemetrySender(opts: TelemetrySenderOptions): TelemetrySen
     return { ok: true };
   }
 
+  function stop(): void {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    abort.abort();
+  }
+
+  async function flushBeforeQuit(timeoutMs: number): Promise<void> {
+    if (stopped || closing) return;
+    closing = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+
+    const work = (async () => {
+      // A scheduled flush already mid-send finishes first (its lines are read
+      // and partly sent); the second pass picks up anything queued since.
+      // Running both at once would just double-send what the Worker dedups.
+      if (inFlight) await inFlight.catch(() => undefined);
+      await flush();
+    })().catch((err) => log(`[TELEMETRY] quit flush failed: ${err}`));
+
+    // Hard cap on the whole thing, not per request. Aborting ends any pending
+    // fetch, so its batch is treated as unsent and left on disk; the race
+    // guarantees we resolve on time even if something ignores the abort.
+    let deadline: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      deadline = setTimeout(() => {
+        log(`[TELEMETRY] quit flush hit ${timeoutMs}ms cap — leaving remaining events queued`);
+        abort.abort();
+        resolve();
+      }, timeoutMs);
+    });
+    try {
+      await Promise.race([work, timedOut]);
+    } finally {
+      clearTimeout(deadline);
+      stop();
+    }
+  }
+
   schedule(FIRST_FLUSH_DELAY_MS);
 
-  return {
-    stop(): void {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-      timer = null;
-      abort.abort();
-    },
-  };
+  return { stop, flushBeforeQuit };
 }

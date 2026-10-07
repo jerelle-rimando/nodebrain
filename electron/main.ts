@@ -1199,6 +1199,35 @@ async function createWindow(): Promise<void> {
   });
 }
 
+// ── Quit ──────────────────────────────────────────────────────────────────────
+// Tray Quit is the app's real exit path (closing the window only hides it).
+// Child processes die first and synchronously, exactly as before, so nothing
+// below can leave them running. Then one capped telemetry send, so a short
+// first session from someone who never relaunches isn't stuck on disk forever.
+// It returns immediately when consent isn't granted or the queue is empty.
+const TELEMETRY_QUIT_FLUSH_TIMEOUT_MS = 2000;
+let quitStarted = false;
+
+async function quitFromTray(): Promise<void> {
+  if (quitStarted) return;
+  quitStarted = true;
+  // Must precede the kill: the backend's exit handler auto-restarts it on a
+  // non-zero exit unless we're quitting, and we now stay alive for the flush.
+  isQuitting = true;
+  killBackendProcess();
+  if (ollamaSpawnedByUs) ollamaProcess?.kill();
+  // Look gone immediately; the flush happens out of sight.
+  mainWindow?.hide();
+  try { tray?.destroy(); } catch { /* ignore */ }
+  tray = null;
+  try {
+    await telemetrySender?.flushBeforeQuit(TELEMETRY_QUIT_FLUSH_TIMEOUT_MS);
+  } catch (err) {
+    log(`[TELEMETRY] quit flush threw: ${err}`);
+  }
+  app.exit(0);
+}
+
 // ── System tray ───────────────────────────────────────────────────────────────
 function createTray(): void {
   const trayIconPath = isDev
@@ -1221,7 +1250,7 @@ function createTray(): void {
       },
     },
     { type: 'separator' },
-    { label: 'Quit', click: () => { killBackendProcess(); if (ollamaSpawnedByUs) ollamaProcess?.kill(); app.exit(0); } },
+    { label: 'Quit', click: () => { void quitFromTray(); } },
   ]);
 
   tray.setToolTip('NodeBrain');
