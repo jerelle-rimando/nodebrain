@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Every shipped NodeBrain client points at this name's workers.dev URL —
+  // renaming the Worker changes the URL and strands installed clients.
+  "name": "nodebrain-telemetry",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nodebrain-telemetry",
+      "database_id": "ca5f5d79-971a-4d56-b8be-899368336437",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Per-IP cap, checked before the shared secret. A real client sends at most
+  // ~10 sequential batches per flush (1000-event backlog / 100 per batch), so
+  // 60/min leaves headroom for several installs behind one NAT. Counters are
+  // per Cloudflare location and eventually consistent — a soft cap, not exact.
+  "ratelimits": [
+    {
+      "name": "IP_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ]
+
+  // Secret (not in this file): TELEMETRY_SECRETS — set with
+  //   wrangler secret put TELEMETRY_SECRETS
+  // Comma-separated to allow rotation. For `wrangler dev`, put it in .dev.vars.
+}

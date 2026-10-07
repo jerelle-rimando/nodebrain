@@ -1,0 +1,18 @@
+{
+  "name": "nodebrain-telemetry-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that receives NodeBrain telemetry batches and writes them to D1",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "migrate:local": "wrangler d1 migrations apply nodebrain-telemetry --local",
+    "migrate:remote": "wrangler d1 migrations apply nodebrain-telemetry --remote"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "wrangler": "^4.148.0"
+  }
+}

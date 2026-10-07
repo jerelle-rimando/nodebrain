@@ -27,6 +27,10 @@ extraResources:
     to: electron/splash
   - from: electron/assets
     to: electron/assets
+  # Telemetry endpoint + shared secret, read at runtime (not compiled in) so it
+  # can be changed without a rebuild — see electron/telemetrySender.ts.
+  - from: electron/telemetry-config.json
+    to: telemetry-config.json
   - from: backend/dist
     to: backend/dist
   - from: backend/node_modules

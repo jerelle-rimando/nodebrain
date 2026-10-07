@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { autoUpdater } from 'electron-updater';
 import extractZip from 'extract-zip';
+import { startTelemetrySender, TelemetrySender, TELEMETRY_CONFIG_FILE_NAME } from './telemetrySender';
 
 interface TelemetryConsentState {
   installId: string;
@@ -200,8 +201,8 @@ function ensureTelemetryIdentity(): TelemetryConsentState {
 }
 
 // ── Telemetry: on-disk queue ──────────────────────────────────────────────────
-// Append-only JSON-lines file. Nothing drains this yet — that's the deferred
-// transport. Bounded the same way nodebrain-log.txt is bounded, so an
+// Append-only JSON-lines file, drained by the sender in telemetrySender.ts
+// (see startTelemetryTransport below). Bounded the same way nodebrain-log.txt is bounded, so an
 // unattended queue can't fill someone's disk: once it passes the cap we drop
 // the oldest quarter of events rather than the whole file, since (unlike the
 // log) losing everything here means losing real signal for no reason.
@@ -494,6 +495,32 @@ function startTelemetryListener(): Promise<void> {
       resolve();
     });
   });
+}
+
+// ── Telemetry: transport ──────────────────────────────────────────────────────
+// Starts the background sender. Synchronous and cheap — it only arms a timer;
+// the first read of the queue happens a minute later, and only if consent is
+// granted at that moment.
+let telemetrySender: TelemetrySender | null = null;
+
+function startTelemetryTransport(): void {
+  try {
+    telemetrySender = startTelemetrySender({
+      queuePath: getTelemetryQueuePath(),
+      isConsentGranted: () => {
+        const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+        return telemetry?.consent === 'granted';
+      },
+      log,
+      bundledConfigPath: app.isPackaged
+        ? path.join(process.resourcesPath, TELEMETRY_CONFIG_FILE_NAME)
+        : path.join(__dirname, '..', TELEMETRY_CONFIG_FILE_NAME),
+      userConfigPath: path.join(app.getPath('userData'), TELEMETRY_CONFIG_FILE_NAME),
+      isDevBuild: !app.isPackaged,
+    });
+  } catch (err) {
+    log(`[TELEMETRY] sender failed to start: ${err}`);
+  }
 }
 
 // ── Start backend ─────────────────────────────────────────────────────────────
@@ -1583,6 +1610,7 @@ app.whenReady().then(async () => {
   await createWindow();
   log('Window created');
   setupAutoUpdater();
+  startTelemetryTransport();
 });
 
 app.on('window-all-closed', () => {
@@ -1591,6 +1619,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  telemetrySender?.stop();
   killBackendProcess();
   if (ollamaSpawnedByUs) ollamaProcess?.kill();
 });
