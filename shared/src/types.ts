@@ -29,6 +29,19 @@ export interface AgentConfig {
   approvedToolTypes?: string[];
   dryRun?: boolean;
   telegramChatId?: string;
+  // Model turns per run before the run is stopped as failed. Each turn resends
+  // the whole conversation, so cost grows faster than linearly with this.
+  maxToolIterations?: number;
+}
+
+export const DEFAULT_MAX_TOOL_ITERATIONS = 30;
+export const MAX_TOOL_ITERATIONS_LIMIT = 100;
+
+// PATCH isn't schema-validated, so anything stored in config can be any shape;
+// every reader goes through this.
+export function resolveMaxToolIterations(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_MAX_TOOL_ITERATIONS;
+  return Math.min(MAX_TOOL_ITERATIONS_LIMIT, Math.max(1, Math.floor(value)));
 }
 
 export interface Task {

@@ -16,6 +16,7 @@ import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { formatCronSchedule } from '../../utils/formatSchedule';
 import type { Agent, Task } from '@shared/types';
+import { MAX_TOOL_ITERATIONS_LIMIT, resolveMaxToolIterations } from '@shared/types';
 import {
   Bot,
   X,
@@ -300,6 +301,29 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
                   }
                 }}
                 className="w-full bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text placeholder-brain-text-dim focus:outline-none focus:border-brain-accent font-mono"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs pt-1 border-t border-brain-border">
+              <span className="text-brain-text-dim" title="The run fails if the agent hasn't finished within this many steps">
+                Max steps per run
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={MAX_TOOL_ITERATIONS_LIMIT}
+                defaultValue={resolveMaxToolIterations(agent.config.maxToolIterations)}
+                onBlur={async (e) => {
+                  const val = resolveMaxToolIterations(e.target.valueAsNumber);
+                  e.target.value = String(val);
+                  try {
+                    await api.updateAgent(agent.id, {
+                      config: { ...agent.config, maxToolIterations: val },
+                    });
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className="w-16 bg-brain-bg border border-brain-border rounded px-2 py-1 text-xs text-brain-text text-right focus:outline-none focus:border-brain-accent font-mono"
               />
             </div>
           </div>

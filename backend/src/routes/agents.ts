@@ -12,6 +12,7 @@ import { executeAgentTask } from '../agents/agentEngine';
 import { listMemories, deleteMemory, clearAgentMemory } from '../rag/ragEngine';
 import { scheduleAgent, unscheduleAgent } from '../scheduler/scheduler';
 import type { Agent } from '../../shared-types';
+import { MAX_TOOL_ITERATIONS_LIMIT } from '../../shared-types';
 import { deleteConnectionsForAgent } from '../db/agentConnectionRepository';
 
 const router = Router();
@@ -28,6 +29,7 @@ const AgentSchema = z.object({
   config: z.object({
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().optional(),
+    maxToolIterations: z.number().int().min(1).max(MAX_TOOL_ITERATIONS_LIMIT).optional(),
     credentialIds: z.array(z.string()).optional(),
     telegramChatId: z.string().optional(),
     // New agents ask before destructive tools by default; an omitted field

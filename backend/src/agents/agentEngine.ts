@@ -9,7 +9,7 @@ import { queryRelevantContext, ingestTaskInstruction } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
-import { deriveAgentEmoji } from '../../shared-types';
+import { deriveAgentEmoji, resolveMaxToolIterations } from '../../shared-types';
 import { EventEmitter } from 'events';
 import { getLocalEngineStatus, LOCAL_MODEL, LOCAL_PROVIDER } from './localEngine';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
@@ -259,10 +259,11 @@ function shouldIngestInstruction(agent: Agent, instruction: string, signal: Abor
 // message anyway (it fails TELEMETRY_MAX_STRING_LEN / looks-like-content checks
 // most of the time), but classification has to happen here, at the point the
 // original error is still in scope, not downstream where only the code survives.
-export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'approval_required' | 'unknown';
+export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'approval_required' | 'step_limit' | 'unknown';
 
 function classifyTaskError(err: unknown): TelemetryErrorType {
   if (err instanceof UnattendedApprovalError) return 'approval_required';
+  if (err instanceof StepLimitError) return 'step_limit';
   if (err instanceof DelegationFailedError) return 'tool_error';
   if (err instanceof OpenAITimeoutError || err instanceof AnthropicTimeoutError) return 'timeout';
   if (err instanceof OpenAIAPIError || err instanceof AnthropicAPIError) return 'provider_error';
@@ -293,8 +294,6 @@ function recordUsage(
     ],
   );
 }
-
-const MAX_TOOL_ITERATIONS = 15;
 
 const READ_ONLY_TOOL_PREFIXES = [
   'search_',
@@ -375,6 +374,15 @@ class UnattendedApprovalError extends Error {
   constructor(readonly toolName: string) {
     super(`Run stopped: tool "${toolName}" requires human approval, and this run is unattended (scheduled or delegated). Run the agent manually, or turn off approval mode for it.`);
     this.name = 'UnattendedApprovalError';
+  }
+}
+
+// Running out of turns means the model never said it was done, so the run is
+// a failure with its own reason, never a completed task with a stub output.
+class StepLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`Run stopped: reached the limit of ${limit} steps before finishing. If this task genuinely needs more, raise "Max steps per run" for this agent.`);
+    this.name = 'StepLimitError';
   }
 }
 
@@ -461,9 +469,10 @@ async function runOpenAIAgenticLoop(
   const tools = await getToolsForAgent(agent.id);
   const formattedTools = formatToolsForOpenAI(tools);
   const allowedTools = permittedToolNames(tools);
+  const maxIterations = resolveMaxToolIterations(agent.config.maxToolIterations);
   let iterations = 0;
 
-  while (iterations < MAX_TOOL_ITERATIONS) {
+  while (iterations < maxIterations) {
     if (signal.aborted) return '(task cancelled by user)';
     iterations++;
 
@@ -604,7 +613,7 @@ async function runOpenAIAgenticLoop(
     }
   }
 
-  return '(max tool iterations reached)';
+  throw new StepLimitError(maxIterations);
 }
 
 async function runAnthropicAgenticLoop(
@@ -630,9 +639,10 @@ async function runAnthropicAgenticLoop(
     { role: 'user', content: userInput },
   ];
 
+  const maxIterations = resolveMaxToolIterations(agent.config.maxToolIterations);
   let iterations = 0;
 
-  while (iterations < MAX_TOOL_ITERATIONS) {
+  while (iterations < maxIterations) {
     if (signal.aborted) return '(task cancelled by user)';
     iterations++;
 
@@ -765,7 +775,7 @@ async function runAnthropicAgenticLoop(
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return '(max tool iterations reached)';
+  throw new StepLimitError(maxIterations);
 }
 
 // `history` is opt-in: only interactive chat passes it. Scheduled runs, delegation
