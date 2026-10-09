@@ -259,9 +259,11 @@ function shouldIngestInstruction(agent: Agent, instruction: string, signal: Abor
 // message anyway (it fails TELEMETRY_MAX_STRING_LEN / looks-like-content checks
 // most of the time), but classification has to happen here, at the point the
 // original error is still in scope, not downstream where only the code survives.
-export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'unknown';
+export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'approval_required' | 'unknown';
 
 function classifyTaskError(err: unknown): TelemetryErrorType {
+  if (err instanceof UnattendedApprovalError) return 'approval_required';
+  if (err instanceof DelegationFailedError) return 'tool_error';
   if (err instanceof OpenAITimeoutError || err instanceof AnthropicTimeoutError) return 'timeout';
   if (err instanceof OpenAIAPIError || err instanceof AnthropicAPIError) return 'provider_error';
   if (err instanceof Error && /No API key found for provider/.test(err.message)) return 'no_credential';
@@ -366,6 +368,39 @@ function requiresApproval(fullToolName: string, serverName: string): boolean {
   return DESTRUCTIVE_TOOLS.has(fullToolName) || !BUILTIN_SERVERS.has(serverName);
 }
 
+// An unattended run (scheduled, delegated) has no one to approve a gated tool.
+// Skipping the tool and carrying on would let the agent finish part of the job
+// and report success, so the whole run is aborted instead.
+class UnattendedApprovalError extends Error {
+  constructor(readonly toolName: string) {
+    super(`Run stopped: tool "${toolName}" requires human approval, and this run is unattended (scheduled or delegated). Run the agent manually, or turn off approval mode for it.`);
+    this.name = 'UnattendedApprovalError';
+  }
+}
+
+// A delegated sub-agent that failed (or was cancelled) means part of the
+// parent's job didn't happen; the parent fails rather than reporting success.
+class DelegationFailedError extends Error {
+  constructor(targetName: string, reason: string) {
+    super(`Delegated agent "${targetName}" did not complete: ${reason}`);
+    this.name = 'DelegationFailedError';
+  }
+}
+
+// Checked over a whole batch of tool calls before any of them runs, so an
+// unattended run never executes half a batch and then stops. Tools that won't
+// actually execute are exempt: unpermitted ones are rejected anyway, and dryRun
+// only simulates mutating tools.
+function assertNoUnattendedApproval(agent: Agent, humanPresent: boolean, toolNames: string[], allowedTools: Set<string>): void {
+  if (humanPresent || !agent.config.approvalMode) return;
+  for (const fullName of toolNames) {
+    if (!allowedTools.has(fullName)) continue;
+    const { serverName, toolName } = parseToolName(fullName);
+    if (agent.config.dryRun && !isReadOnlyTool(toolName)) continue;
+    if (requiresApproval(fullName, serverName)) throw new UnattendedApprovalError(fullName);
+  }
+}
+
 function getClient(provider: string, apiKey: string, customBaseUrl?: string): OpenAI {
   return new OpenAI({
     apiKey: apiKey || 'ollama',
@@ -461,6 +496,8 @@ async function runOpenAIAgenticLoop(
 
     messages.push(message);
 
+    assertNoUnattendedApproval(agent, humanPresent, message.tool_calls.map(tc => tc.function.name), allowedTools);
+
     for (const toolCall of message.tool_calls) {
       if (!allowedTools.has(toolCall.function.name)) {
         const rejection = rejectUnpermittedTool(taskId, agent, toolCall.function.name);
@@ -471,16 +508,9 @@ async function runOpenAIAgenticLoop(
       const { serverName, toolName } = parseToolName(toolCall.function.name);
       const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
-      if (agent.config.approvalMode && requiresApproval(toolCall.function.name, serverName)) {
-        // No human to ask means no one can approve — skip rather than block so
-        // unattended runs (scheduled, delegated) still complete. Distinct from
-        // dryRun below: dryRun simulates every mutating tool for testing regardless
-        // of approvalMode, this only skips the specific tool that needed a human.
-        if (!humanPresent) {
-          persistLog(makeLog(taskId, agent.id, `Skipped tool "${toolCall.function.name}" for safety — destructive action requires approval and no human is present`, 'warn'));
-          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: '(tool skipped — requires human approval, none present)' });
-          continue;
-        }
+      // Unattended runs never reach this prompt: assertNoUnattendedApproval
+      // aborted the run above, before any tool in the batch executed.
+      if (agent.config.approvalMode && humanPresent && requiresApproval(toolCall.function.name, serverName)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${toolCall.function.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, toolCall.function.name, args);
         if (!approved) {
@@ -539,7 +569,10 @@ async function runOpenAIAgenticLoop(
               // parent task itself had a human watching — no one is present to
               // approve destructive tools for the sub-agent either.
               const delegatedTask = await executeAgentTask(targetAgent, task, false, depth + 1);
-              toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
+              if (delegatedTask.status !== 'completed') {
+                throw new DelegationFailedError(targetAgent.name, delegatedTask.error ?? delegatedTask.status);
+              }
+              toolResult = delegatedTask.output ?? '(no response from sub-agent)';
             }
           }
         } else {
@@ -550,6 +583,7 @@ async function runOpenAIAgenticLoop(
           console.log('[DEBUG:TOOLS] Tool succeeded:', toolCall.function.name);
         }
       } catch (err) {
+        if (err instanceof DelegationFailedError) throw err;
         toolResult = `[TOOL ERROR] ${err instanceof Error ? err.message : String(err)}`;
         toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" failed: ${toolResult}`, 'error'));
@@ -626,6 +660,13 @@ async function runAnthropicAgenticLoop(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
+    assertNoUnattendedApproval(
+      agent,
+      humanPresent,
+      response.content.flatMap(b => (b.type === 'tool_use' ? [b.name] : [])),
+      allowedTools,
+    );
+
     for (const block of response.content) {
       if (block.type !== 'tool_use') continue;
 
@@ -638,14 +679,8 @@ async function runAnthropicAgenticLoop(
       const { serverName, toolName } = parseToolName(block.name);
       const args = block.input as Record<string, unknown>;
 
-      if (agent.config.approvalMode && requiresApproval(block.name, serverName)) {
-        // See the matching comment in runOpenAIAgenticLoop: skip rather than
-        // block when unattended, and this is independent of dryRun.
-        if (!humanPresent) {
-          persistLog(makeLog(taskId, agent.id, `Skipped tool "${block.name}" for safety — destructive action requires approval and no human is present`, 'warn'));
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: '(tool skipped — requires human approval, none present)' });
-          continue;
-        }
+      // See the matching comment in runOpenAIAgenticLoop.
+      if (agent.config.approvalMode && humanPresent && requiresApproval(block.name, serverName)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${block.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, block.name, args);
         if (!approved) {
@@ -698,7 +733,10 @@ async function runAnthropicAgenticLoop(
             } else {
               persistLog(makeLog(taskId, agent.id, `Delegating to agent "${targetAgent.name}" (depth ${depth + 1})`));
               const delegatedTask = await executeAgentTask(targetAgent, task, false, depth + 1);
-              toolResult = delegatedTask.output ?? delegatedTask.error ?? '(no response from sub-agent)';
+              if (delegatedTask.status !== 'completed') {
+                throw new DelegationFailedError(targetAgent.name, delegatedTask.error ?? delegatedTask.status);
+              }
+              toolResult = delegatedTask.output ?? '(no response from sub-agent)';
             }
           }
         } else {
@@ -706,6 +744,7 @@ async function runAnthropicAgenticLoop(
         }
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" completed`));
       } catch (err) {
+        if (err instanceof DelegationFailedError) throw err;
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
         toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" failed: ${toolResult}`, 'error'));
@@ -854,6 +893,14 @@ export async function executeAgentTask(
     }
 
     activeTaskControllers.delete(taskId);
+
+    // The stop route already marked the task cancelled and emitted task:cancelled.
+    // Don't overwrite that with 'completed'; the run stopped partway through.
+    if (controller.signal.aborted) {
+      persistLog(makeLog(taskId, agent.id, 'Task cancelled by user before finishing', 'warn'));
+      updateAgentStatus(agent.id, 'idle');
+      return { ...task, status: 'cancelled' as const, completedAt: new Date().toISOString() };
+    }
 
     if (destructiveFailRef.value) {
       const errorMessage = 'A required action could not be completed — a destructive tool call failed.';
