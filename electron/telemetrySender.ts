@@ -182,7 +182,7 @@ function isSendableLine(line: string): boolean {
 
 // ── Sending ──────────────────────────────────────────────────────────────────
 type SendResult =
-  | { kind: 'ok' }
+  | { kind: 'ok'; rejectedCount: number; detail: string } // stored; rejectedCount invalid events dropped server-side
   | { kind: 'rejected'; badIndex: number | null; detail: string } // 400/413: resending unchanged can't succeed
   | { kind: 'retry'; retryAfterMs: number | null; detail: string }; // network, 401/403, 429, 5xx
 
@@ -205,8 +205,13 @@ async function postBatch(
   }
 
   if (res.status >= 200 && res.status < 300) {
-    res.body?.cancel().catch(() => { /* ignore */ });
-    return { kind: 'ok' };
+    // The Worker drops individually invalid events and still answers 200,
+    // listing them — surface that locally so a client/Worker mismatch shows
+    // up in nodebrain-log.txt instead of looking like a clean send.
+    let ok: { rejectedCount?: unknown; rejected?: unknown } = {};
+    try { ok = await res.json() as typeof ok; } catch { /* empty or non-JSON body */ }
+    const rejectedCount = typeof ok.rejectedCount === 'number' ? ok.rejectedCount : 0;
+    return { kind: 'ok', rejectedCount, detail: rejectedCount > 0 ? JSON.stringify(ok.rejected ?? []) : '' };
   }
 
   let body: { error?: unknown; index?: unknown; reason?: unknown } = {};
@@ -334,7 +339,10 @@ export function startTelemetrySender(opts: TelemetrySenderOptions): TelemetrySen
       if (result.kind === 'rejected') {
         log(`[TELEMETRY] endpoint rejected a batch of ${batch.length} (${result.detail}) — dropping it`);
       } else {
-        sent += batch.length;
+        sent += batch.length - result.rejectedCount;
+        if (result.rejectedCount > 0) {
+          log(`[TELEMETRY] endpoint dropped ${result.rejectedCount} invalid event(s): ${result.detail}`);
+        }
       }
       if (!isConsentGranted()) return { ok: true }; // withdrawn while in flight: main already cleared the file
       removeQueueLines(queuePath, batch, log);

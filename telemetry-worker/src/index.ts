@@ -6,16 +6,26 @@
 //   { installId, event, ts, appVersion, platform, osRelease, properties }
 //
 // Responses (the client keys its retry/clear decision off these):
-//   200  every event in the batch is committed (or was already stored) — clear it
-//   400  malformed batch; body says which event — retrying it unchanged can't succeed
+//   200  every valid event in the batch is committed (or was already stored),
+//        and any invalid ones were dropped and listed in `rejected` — clear it
+//   400  malformed batch (not JSON, not an array) — retrying it unchanged can't succeed
 //   401  missing/wrong shared secret
 //   413  batch or body over the cap
-//   429  per-IP rate limit hit — retry later
+//   429  per-IP or per-install rate limit hit — retry later
 //   503  D1 write failed — retry later
 //
-// The shared secret ships inside the desktop app, so it is a noise filter, not
-// authentication. The per-IP rate limit runs before it so guessing the secret
-// or replaying it can't burn through D1's daily write allowance.
+// The shared secret is committed to a public repo and ships inside the
+// installer, so anyone can have it. It is a noise filter (drive-by scanners,
+// stray requests), never a security boundary. What actually bounds abuse is
+// everything else here: per-IP and per-install rate limits, a per-request
+// event cap, and strict validation of every event against what the app can
+// actually send. The per-IP limit runs before the secret check so hammering
+// the endpoint costs the same whether or not the caller has the key.
+//
+// Invalid events are dropped individually rather than failing the batch: an
+// event that is invalid now (unknown name, stale timestamp) stays invalid
+// forever, and per-event 400s would make the client spend one request per bad
+// event working through a backlog.
 
 const AUTH_HEADER = 'x-nodebrain-telemetry-key';
 
@@ -38,10 +48,38 @@ const PLATFORM_RE = /^[a-z0-9]{1,16}$/;
 const OS_RELEASE_RE = /^[0-9A-Za-z._+-]{1,64}$/;
 const PROPERTY_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
-// Earliest plausible event (well before the first telemetry-enabled release)
-// and how far ahead of server time a client clock may run.
-const MIN_TS_MS = Date.UTC(2025, 0, 1);
-const MAX_CLOCK_SKEW_MS = 2 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Absolute floor: v0.4.0, the first build that queues events, shipped
+// 2026-09-20, so nothing genuine predates it. Rolling floor: the client keeps
+// only its newest 1000 queued events, so anything older than this is a wrong
+// clock or not from the app. Ceiling: how far ahead of server time a client
+// clock may run.
+const MIN_TS_MS = Date.UTC(2026, 8, 1);
+const MAX_EVENT_AGE_MS = 90 * DAY_MS;
+const MAX_CLOCK_SKEW_MS = 2 * DAY_MS;
+
+// Every event name the app emits. Keep in sync with the keys of
+// TELEMETRY_EVENT_ALLOWLIST in electron/main.ts — a name missing here is
+// dropped server-side, so add it here (and deploy) before shipping a client
+// that sends it.
+const KNOWN_EVENTS = new Set([
+  'first_launch',
+  'app_launched',
+  'onboarding_step',
+  'onboarding_completed',
+  'setup_failed',
+  'first_agent_created',
+  'first_agent_run',
+  'task_started',
+  'task_completed',
+  'task_failed',
+  'task_cancelled',
+  'approval_resolved',
+  'usage_snapshot',
+]);
+
+// How many rejection reasons to echo back; the count is always exact.
+const MAX_REJECTIONS_REPORTED = 10;
 
 interface EventRow {
   day: string;
@@ -55,10 +93,11 @@ interface EventRow {
   propertiesJson: string;
 }
 
-class BadEvent extends Error {
-  constructor(readonly index: number, reason: string) {
-    super(reason);
-  }
+class BadEvent extends Error {}
+
+interface Rejection {
+  index: number;
+  reason: string;
 }
 
 export default {
@@ -67,7 +106,8 @@ export default {
     if (url.pathname !== '/events') return json(404, { error: 'not_found' });
     if (request.method !== 'POST') return json(405, { error: 'method_not_allowed' }, { Allow: 'POST' });
 
-    if (!(await withinRateLimit(request, env))) {
+    const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+    if (!(await withinRateLimit(env.IP_RATE_LIMITER, ip))) {
       return json(429, { error: 'rate_limited' }, { 'Retry-After': '60' });
     }
 
@@ -102,13 +142,32 @@ export default {
       return json(413, { error: 'batch_too_large', maxEvents: MAX_EVENTS_PER_BATCH });
     }
 
-    let rows: EventRow[];
-    try {
-      const now = Date.now();
-      rows = payload.map((item, index) => validateEvent(item, index, now));
-    } catch (err) {
-      if (err instanceof BadEvent) return json(400, { error: 'invalid_event', index: err.index, reason: err.message });
-      throw err;
+    // A batch comes from one install's queue, so it carries one installId: the
+    // first valid one seen. Events claiming any other id are dropped, which
+    // keeps the per-install limit below to a single counter per request.
+    const rows: EventRow[] = [];
+    const rejected: Rejection[] = [];
+    const now = Date.now();
+    let batchInstallId: string | null = null;
+    for (const [index, item] of payload.entries()) {
+      try {
+        const row = validateEvent(item, now);
+        batchInstallId ??= row.installId;
+        if (row.installId !== batchInstallId) throw new BadEvent('installId differs from batch');
+        rows.push(row);
+      } catch (err) {
+        if (!(err instanceof BadEvent)) throw err;
+        rejected.push({ index, reason: err.message });
+      }
+    }
+    const rejectionSummary = rejected.length > 0
+      ? { rejectedCount: rejected.length, rejected: rejected.slice(0, MAX_REJECTIONS_REPORTED) }
+      : {};
+    if (rejected.length > 0) console.warn('dropped invalid events', { batchSize: payload.length, ...rejectionSummary });
+    if (batchInstallId === null) return json(200, { accepted: 0, inserted: 0, ...rejectionSummary });
+
+    if (!(await withinRateLimit(env.INSTALL_RATE_LIMITER, batchInstallId))) {
+      return json(429, { error: 'rate_limited' }, { 'Retry-After': '60' });
     }
 
     const receivedAt = new Date().toISOString();
@@ -149,14 +208,13 @@ export default {
 
     // inserted < accepted means some rows were already stored by an earlier
     // attempt whose response never reached the client.
-    return json(200, { accepted: rows.length, inserted });
+    return json(200, { accepted: rows.length, inserted, ...rejectionSummary });
   },
 } satisfies ExportedHandler<Env>;
 
-async function withinRateLimit(request: Request, env: Env): Promise<boolean> {
-  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+async function withinRateLimit(limiter: RateLimit, key: string): Promise<boolean> {
   try {
-    const { success } = await env.IP_RATE_LIMITER.limit({ key: ip });
+    const { success } = await limiter.limit({ key });
     return success;
   } catch (err) {
     // Fail open: a rate limiter outage shouldn't drop legitimate telemetry.
@@ -180,31 +238,32 @@ function secretMatches(provided: string | null, configured: string | undefined):
   return match;
 }
 
-function validateEvent(item: unknown, index: number, now: number): EventRow {
-  if (!isPlainObject(item)) throw new BadEvent(index, 'event must be an object');
+function validateEvent(item: unknown, now: number): EventRow {
+  if (!isPlainObject(item)) throw new BadEvent('event must be an object');
   const { installId, event, ts, appVersion, platform, osRelease, properties } = item;
 
-  if (typeof installId !== 'string' || !UUID_RE.test(installId)) throw new BadEvent(index, 'installId');
-  if (typeof event !== 'string' || !EVENT_RE.test(event)) throw new BadEvent(index, 'event');
-  if (typeof ts !== 'string' || !ISO_TS_RE.test(ts)) throw new BadEvent(index, 'ts');
+  if (typeof installId !== 'string' || !UUID_RE.test(installId)) throw new BadEvent('installId');
+  if (typeof event !== 'string' || !EVENT_RE.test(event)) throw new BadEvent('event');
+  if (!KNOWN_EVENTS.has(event)) throw new BadEvent(`unknown event ${event}`);
+  if (typeof ts !== 'string' || !ISO_TS_RE.test(ts)) throw new BadEvent('ts');
   const tsMs = Date.parse(ts);
-  if (!Number.isFinite(tsMs) || tsMs < MIN_TS_MS || tsMs > now + MAX_CLOCK_SKEW_MS) {
-    throw new BadEvent(index, 'ts out of range');
+  if (!Number.isFinite(tsMs) || tsMs < Math.max(MIN_TS_MS, now - MAX_EVENT_AGE_MS) || tsMs > now + MAX_CLOCK_SKEW_MS) {
+    throw new BadEvent('ts out of range');
   }
-  if (typeof appVersion !== 'string' || !APP_VERSION_RE.test(appVersion)) throw new BadEvent(index, 'appVersion');
-  if (typeof platform !== 'string' || !PLATFORM_RE.test(platform)) throw new BadEvent(index, 'platform');
-  if (typeof osRelease !== 'string' || !OS_RELEASE_RE.test(osRelease)) throw new BadEvent(index, 'osRelease');
+  if (typeof appVersion !== 'string' || !APP_VERSION_RE.test(appVersion)) throw new BadEvent('appVersion');
+  if (typeof platform !== 'string' || !PLATFORM_RE.test(platform)) throw new BadEvent('platform');
+  if (typeof osRelease !== 'string' || !OS_RELEASE_RE.test(osRelease)) throw new BadEvent('osRelease');
 
-  if (!isPlainObject(properties)) throw new BadEvent(index, 'properties must be an object');
+  if (!isPlainObject(properties)) throw new BadEvent('properties must be an object');
   const keys = Object.keys(properties);
-  if (keys.length > MAX_PROPERTY_KEYS) throw new BadEvent(index, 'too many properties');
+  if (keys.length > MAX_PROPERTY_KEYS) throw new BadEvent('too many properties');
   for (const key of keys) {
-    if (!PROPERTY_KEY_RE.test(key)) throw new BadEvent(index, `property key ${JSON.stringify(key.slice(0, 64))}`);
-    if (!isAllowedPropertyValue(properties[key])) throw new BadEvent(index, `property ${key}`);
+    if (!PROPERTY_KEY_RE.test(key)) throw new BadEvent(`property key ${JSON.stringify(key.slice(0, 64))}`);
+    if (!isAllowedPropertyValue(properties[key])) throw new BadEvent(`property ${key}`);
   }
   const propertiesJson = JSON.stringify(properties);
   if (new TextEncoder().encode(propertiesJson).byteLength > MAX_PROPERTIES_JSON_BYTES) {
-    throw new BadEvent(index, 'properties too large');
+    throw new BadEvent('properties too large');
   }
 
   return {

@@ -27,6 +27,9 @@ interface StoreSchema {
   // never transmitted itself. What ships per launch is a single
   // daysSinceInstall number (see recordAppLaunch below).
   telemetryLaunchHistory?: string[];
+  // Set once the upgrade consent prompt has been shown, whatever the answer,
+  // so it is never shown again (see promptUpgraderForTelemetryConsent).
+  telemetryConsentPrompted?: boolean;
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -193,6 +196,11 @@ function ensureTelemetryIdentity(): TelemetryConsentState {
     consent: existing?.consent ?? 'unset',
   };
   store.set('telemetry', telemetry);
+  // An identity minted after setup already completed means an upgrade from a
+  // pre-telemetry build (v0.3.x), not a new install — it isn't their first
+  // launch, and firstLaunchAt is only the upgrade date, so send nothing
+  // rather than a wrong new-install signal.
+  if (store.get('setupComplete')) return telemetry;
   // Consent doesn't exist yet at this point (this is the very first launch) —
   // queue it for emitConsentAwareTelemetry to flush once the wizard's consent
   // screen resolves, same as app_launched below.
@@ -416,6 +424,79 @@ function emitConsentAwareTelemetry(eventName: string, properties: Record<string,
   // same consent check and drops it if denied, exactly like every other
   // post-onboarding event.
   processTelemetryEvent(eventName, properties);
+}
+
+// ── Telemetry: recording a consent decision ───────────────────────────────────
+// The single place consent changes, shared by the wizard and Settings (via
+// telemetry:set-consent) and the upgrade prompt below. Never throws.
+function applyTelemetryConsent(value: 'granted' | 'denied'): 'granted' | 'denied' | 'unset' {
+  try {
+    const telemetry = ensureTelemetryIdentity();
+    store.set('telemetry', { ...telemetry, consent: value });
+    if (value === 'granted') {
+      // Consent just resolved — replay anything minted before this point
+      // (first_launch, day-0 app_launched, an early setup_failed) now that
+      // there's somewhere safe for it to land.
+      for (const evt of pendingPreConsentEvents) {
+        processTelemetryEvent(evt.event, evt.properties);
+      }
+    } else {
+      // Withdrawing (or never giving) consent means nothing queued should
+      // survive — don't keep data staged for a send that won't happen.
+      clearTelemetryQueue();
+    }
+    pendingPreConsentEvents = [];
+    log(`[TELEMETRY] consent set to "${value}"`);
+    return value;
+  } catch (err) {
+    log(`[TELEMETRY] set-consent failed: ${err}`);
+    return 'unset';
+  }
+}
+
+// ── Telemetry: one-time consent prompt for upgraders ──────────────────────────
+// The wizard's consent screen only runs while setupComplete is false, so
+// anyone who finished setup on a pre-telemetry build (v0.3.x) sits at 'unset'
+// forever and is never asked. Ask them exactly once with the same wording,
+// without re-running the wizard. The flag is set before the dialog opens, so
+// quitting or crashing with it open still counts as asked. Only the explicit
+// "Send" button grants; "Don't Send", Esc, and closing the dialog all resolve
+// to the default-off answer.
+async function promptUpgraderForTelemetryConsent(): Promise<void> {
+  try {
+    if (!store.get('setupComplete')) return; // new installs get the wizard's screen
+    if (store.get('telemetryConsentPrompted')) return;
+    const telemetry = store.get('telemetry') as TelemetryConsentState | undefined;
+    if (telemetry && telemetry.consent !== 'unset') return;
+
+    store.set('telemetryConsentPrompted', true);
+    log('[TELEMETRY] showing one-time consent prompt (upgraded install, consent unset)');
+
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: 'NodeBrain — Data Sharing',
+      message: 'Help improve NodeBrain?',
+      detail:
+        'Help improve NodeBrain by sending anonymous data about features used, agents created and run, '
+        + 'which integrations are connected, model provider type, error categories, and setup completion. '
+        + 'Please note that this will not include personal data or any sensitive information, such as your '
+        + 'prompts, agent names, file paths, message contents, or credentials. Nothing from your vault is ever sent.\n\n'
+        + 'Data sharing is off by default. NodeBrain works fully offline either way.\n\n'
+        + 'You can always change this in the Vault tab under Settings.',
+      buttons: ["Don't Send", 'Send Anonymous Statistics'],
+      // Enter, Esc, and the close button all land on "Don't Send".
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const { response } = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+
+    applyTelemetryConsent(response === 1 ? 'granted' : 'denied');
+  } catch (err) {
+    log(`[TELEMETRY] upgrade consent prompt failed: ${err}`);
+  }
 }
 
 // ── Telemetry: per-launch record (retention metrics) ───────────────────────────
@@ -1281,29 +1362,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('telemetry:set-consent', (_event: Electron.IpcMainInvokeEvent, consent: unknown) => {
-    try {
-      const value: 'granted' | 'denied' = consent === 'granted' ? 'granted' : 'denied';
-      const telemetry = ensureTelemetryIdentity();
-      store.set('telemetry', { ...telemetry, consent: value });
-      if (value === 'granted') {
-        // Consent just resolved — replay anything minted before this point
-        // (first_launch, day-0 app_launched, an early setup_failed) now that
-        // there's somewhere safe for it to land.
-        for (const evt of pendingPreConsentEvents) {
-          processTelemetryEvent(evt.event, evt.properties);
-        }
-      } else {
-        // Withdrawing (or never giving) consent means nothing queued should
-        // survive — don't keep data staged for a send that won't happen.
-        clearTelemetryQueue();
-      }
-      pendingPreConsentEvents = [];
-      log(`[TELEMETRY] consent set to "${value}"`);
-      return value;
-    } catch (err) {
-      log(`[TELEMETRY] set-consent failed: ${err}`);
-      return 'unset';
-    }
+    return applyTelemetryConsent(consent === 'granted' ? 'granted' : 'denied');
   });
 
   ipcMain.handle('telemetry:event', (_event: Electron.IpcMainInvokeEvent, eventName: unknown, properties: unknown) => {
@@ -1638,6 +1697,9 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   await createWindow();
   log('Window created');
+  // Not awaited: the dialog waits on the user, startup shouldn't. The sender's
+  // first flush is a minute out and re-checks consent when it runs.
+  void promptUpgraderForTelemetryConsent();
   setupAutoUpdater();
   startTelemetryTransport();
 });
