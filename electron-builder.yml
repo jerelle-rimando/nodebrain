@@ -71,6 +71,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: NodeBrain
+  # No spaces: latest.yml references this exact name, and GitHub turns spaces in
+  # uploaded asset names into dots, which 404s every auto-update download.
+  artifactName: ${productName}-Setup-${version}.${ext}
 
 portable:
   artifactName: NodeBrain-${version}-portable.exe
