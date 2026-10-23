@@ -26,7 +26,8 @@ Each event contains:
 - **Event properties**: counts, durations, true/false flags, and short category codes. Examples:
   - task duration and number of tool calls
   - number of agents, and number of runs in the last 7 days
-  - names of connected integration types (for example `telegram`, `github`) and model provider type
+  - which built-in integrations you have connected (for example `telegram`, `github`). Any other integration, including custom MCP servers and credentials with a provider name you typed yourself, is sent only as the word `custom`, never by its name.
+  - model provider type (local or hosted)
   - whether a task ran in Dry-Run or Approval Mode
   - onboarding step reached, and days since install
   - error categories, sent as reason codes and setup stage. Error messages are never sent.
@@ -47,7 +48,7 @@ All events pass through a scrubbing layer in the app before they are written to 
 
 - Each event type has an allowlist of property keys. Keys not on the allowlist are dropped.
 - Keys such as `input`, `output`, `message`, `name`, `description`, `systemPrompt`, and `config` are blocked even if they are on an allowlist.
-- Only primitive values are kept: numbers, booleans, and short strings. The one exception is a single key that may hold a short list of short strings (connected integration types).
+- Only primitive values are kept: numbers, booleans, and short strings. The one exception is a single key that may hold a short list of short strings (connected built-in integration names, or `custom`).
 - Strings are dropped if they are longer than 100 characters or look like a file path, URL, email address, token, or opaque key.
 - Dropped keys are recorded in the local log file (`nodebrain-log.txt`), and are not sent.
 

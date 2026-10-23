@@ -356,7 +356,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 // Servers NodeBrain ships. Anything else is a user-added custom MCP server whose
 // tools are unvetted, so approval mode must gate them even if they aren't in
 // DESTRUCTIVE_TOOLS — fail closed on the unknown rather than open.
-const BUILTIN_SERVERS = new Set([
+export const BUILTIN_SERVERS: ReadonlySet<string> = new Set([
   ...SERVER_CONFIGS.map((config) => config.name),
   'pdf-reader',
   'file-reader',

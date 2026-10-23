@@ -2,7 +2,7 @@ import { getAllAgents } from '../db/agentRepository';
 import { getTasksPerDay, getRunCountsByProvider } from '../db/usageRepository';
 import { getSuccessRate, getAgentsNeverRunCount } from '../routes/analytics';
 import { getAllCredentials } from '../vault/credentialVault';
-import { FREE_PROVIDERS } from '../agents/agentEngine';
+import { FREE_PROVIDERS, BUILTIN_SERVERS } from '../agents/agentEngine';
 import { telemetry } from '../utils/telemetry';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -24,14 +24,19 @@ function localVsHostedRuns(): { localRuns: number; hostedRuns: number } {
   return { localRuns, hostedRuns };
 }
 
+// A credential's provider is free text and custom MCP servers can be named
+// anything (often after an employer or client), so only names NodeBrain ships
+// are sent as-is. Everything else collapses to 'custom'.
 function connectedIntegrations(): string[] {
-  const providers = new Set(getAllCredentials().map(c => c.provider));
+  const providers = new Set(
+    getAllCredentials().map(c => (BUILTIN_SERVERS.has(c.provider) ? c.provider : 'custom')),
+  );
   return Array.from(providers);
 }
 
 // A single aggregate-counts event, emitted once per app launch. Every value
-// here is a count or a bare provider name — never a task/agent identifier,
-// prompt, or credential value.
+// here is a count, a built-in provider name, or 'custom' — never a
+// user-chosen name, task/agent identifier, prompt, or credential value.
 export async function emitUsageSnapshot(): Promise<void> {
   const agents = getAllAgents();
   const { localRuns, hostedRuns } = localVsHostedRuns();
