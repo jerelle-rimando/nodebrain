@@ -6,7 +6,7 @@ import {
   deleteCustomMCPServer,
   updateCustomMCPServerAccessWarning,
 } from '../db/mcpServerRepository';
-import { reloadToolRegistry } from '../mcp/toolRegistry';
+import { getServerStatus, reloadToolRegistry } from '../mcp/toolRegistry';
 import { parseMcpInstallCommand } from '../utils/parseMcpCommand';
 import { assessMcpServerAccess } from '../utils/mcpAccessRisk';
 
@@ -53,9 +53,12 @@ router.get('/', (_req, res) => {
       if (JSON.stringify(accessWarning) !== JSON.stringify(s.accessWarning)) {
         updateCustomMCPServerAccessWarning(s.id, accessWarning);
       }
+      const status = getServerStatus(s.name);
       return {
         ...s,
         accessWarning,
+        status: status.state,
+        statusMessage: status.message ?? null,
         envVars: Object.fromEntries(
           Object.keys(s.envVars).map(k => [k, '••••••••'])
         ),

@@ -6,7 +6,7 @@ import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
 import { dbRun } from '../db/database';
 import { updateAgentStatus, getAgentById } from '../db/agentRepository';
 import { queryRelevantContext, ingestTaskInstruction } from '../rag/ragEngine';
-import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS } from '../mcp/toolRegistry';
+import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS, getServerStatus, getUnavailableServers } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
 import { deriveAgentEmoji, resolveMaxToolIterations } from '../../shared-types';
@@ -456,7 +456,31 @@ function permittedToolNames(tools: Array<{ serverName: string; name: string }>):
   return new Set(tools.map(t => `${t.serverName}__${t.name}`));
 }
 
+// A tool can be missing from the agent's list because its server never started,
+// not because of permissions. Tell the model (and the logs) the real reason.
+function unavailableServerReason(serverName: string): string | undefined {
+  const status = getServerStatus(serverName);
+  if (status.state === 'failed') return `The "${serverName}" integration isn't available. ${status.message}`;
+  if (status.state === 'starting') return `The "${serverName}" integration is still starting. Try again in a moment.`;
+  return undefined;
+}
+
+// Surfaces, in the task's own log, integrations this agent could have used but
+// that failed to start — otherwise the agent just quietly lacks those tools.
+function logUnavailableIntegrations(taskId: string, agent: Agent): void {
+  const permissions = agent.toolPermissions ?? [];
+  for (const { name, message } of getUnavailableServers()) {
+    if (permissions.length > 0 && !permissions.some(p => p.startsWith(`${name}__`))) continue;
+    persistLog(makeLog(taskId, agent.id, `The "${name}" integration isn't available for this run. ${message}`, 'warn'));
+  }
+}
+
 function rejectUnpermittedTool(taskId: string, agent: Agent, fullToolName: string): string {
+  const unavailable = unavailableServerReason(parseToolName(fullToolName).serverName);
+  if (unavailable) {
+    persistLog(makeLog(taskId, agent.id, `Tool "${fullToolName}" couldn't run. ${unavailable}`, 'warn'));
+    return unavailable;
+  }
   persistLog(makeLog(taskId, agent.id, `Rejected tool "${fullToolName}" — not permitted for agent "${agent.name}" by its tool permissions`, 'warn'));
   return `Tool "${fullToolName}" is not permitted for this agent. Use only the tools you were given.`;
 }
@@ -474,6 +498,7 @@ async function runOpenAIAgenticLoop(
   toolCallCountRef: { value: number } = { value: 0 },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
+  logUnavailableIntegrations(taskId, agent);
   const formattedTools = formatToolsForOpenAI(tools);
   const allowedTools = permittedToolNames(tools);
   const maxIterations = resolveMaxToolIterations(agent.config.maxToolIterations);
@@ -638,6 +663,7 @@ async function runAnthropicAgenticLoop(
   history: HistoryTurn[] = [],
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
+  logUnavailableIntegrations(taskId, agent);
   const formattedTools = formatToolsForAnthropic(tools);
   const allowedTools = permittedToolNames(tools);
 

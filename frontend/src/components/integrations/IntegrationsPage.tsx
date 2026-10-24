@@ -23,7 +23,7 @@ import {
 } from 'react-icons/si';
 import { FiGlobe } from 'react-icons/fi';
 import { useStore } from '../../stores/appStore';
-import { api } from '../../utils/api';
+import { api, type IntegrationServerStatus, type ServerState } from '../../utils/api';
 import { toast } from '../shared/Toast';
 import { useMcpServers } from '../../hooks/useMcpServers';
 import { McpAccessBadge, McpAccessConfirmDialog } from './McpAccessNotice';
@@ -147,7 +147,24 @@ const INTEGRATIONS: Integration[] = [
   },
 ];
 
-type IntegrationStatus = 'connected' | 'warning' | 'disconnected';
+type IntegrationStatus = 'connected' | 'starting' | 'warning' | 'disconnected';
+
+// How often to re-check an integration whose server is still starting up.
+const STARTING_POLL_MS = 3000;
+
+const CUSTOM_SERVER_DOT_CLASS: Record<ServerState, string> = {
+  running: 'bg-brain-success',
+  starting: 'bg-brain-text-dim animate-pulse',
+  failed: 'bg-brain-error',
+  stopped: 'bg-brain-text-dim',
+};
+
+const CUSTOM_SERVER_STATUS_LABEL: Record<ServerState, string> = {
+  running: 'Running',
+  starting: 'Starting',
+  failed: "Couldn't start",
+  stopped: 'Not running',
+};
 
 interface ConnectSectionProps {
   integration: Integration;
@@ -171,7 +188,18 @@ function ConnectSection(props: ConnectSectionProps) {
   const { integration, status, saving, tokenInputs, onTokenChange, onConnect, onDisconnect, onEnable } = props;
   const isBusy = saving === integration.id;
 
-  if (status === 'connected') {
+  if (status === 'starting' && integration.requiresCredential === false) {
+    return (
+      <button
+        disabled
+        className="w-full py-2 text-xs bg-brain-accent-deep opacity-40 text-white rounded-lg"
+      >
+        Starting...
+      </button>
+    );
+  }
+
+  if (status === 'connected' || status === 'starting') {
     return (
       <button
         onClick={() => onDisconnect(integration)}
@@ -310,7 +338,9 @@ export function IntegrationsPage() {
   const [statusMessages, setStatusMessages] = useState<Record<string, string>>({});
   const [tokenInputs, setTokenInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
-  const [serverStatus, setServerStatus] = useState<Record<string, boolean>>({});
+  // Live MCP server state per provider, from the backend's getServerStatus — the
+  // same source the Test route reads, so the badge and a test result can't disagree.
+  const [serverStatus, setServerStatus] = useState<Record<string, IntegrationServerStatus>>({});
   const mcp = useMcpServers();
 
   useEffect(() => {
@@ -319,48 +349,96 @@ export function IntegrationsPage() {
       .catch(console.error);
   }, []);
 
-  useEffect(() => {
-    const credentialLess = INTEGRATIONS.filter((i) => i.requiresCredential === false);
-    if (credentialLess.length === 0) return;
-    Promise.all(
-      credentialLess.map((i) =>
-        api.getIntegrationStatus(i.credentialProvider).then((r) => [i.credentialProvider, r.connected] as const)
+  function refreshServerStatus() {
+    return Promise.all(
+      INTEGRATIONS.map((i) =>
+        api.getIntegrationStatus(i.credentialProvider).then((r) => [i.credentialProvider, r] as const)
       )
     )
       .then((entries) => setServerStatus(Object.fromEntries(entries)))
       .catch(console.error);
+  }
+
+  useEffect(() => {
+    refreshServerStatus();
   }, []);
 
-  // A credential row existing only means something was saved — it says nothing about
-  // whether the service actually accepted it. A credential that failed its last
-  // verification (connect-time or manual Test) reads as "warning", not "connected".
+  // A server that's still starting settles on its own; keep checking until it does.
+  useEffect(() => {
+    if (!Object.values(serverStatus).some((s) => s.state === 'starting')) return;
+    const timer = setTimeout(refreshServerStatus, STARTING_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [serverStatus]);
+
+  function setServerStatusFor(provider: string, status: IntegrationServerStatus) {
+    setServerStatus((prev) => ({ ...prev, [provider]: status }));
+  }
+
+  // "Connected" needs both facts: the credential was accepted (or none is needed)
+  // AND its MCP server is actually running. A saved credential alone says nothing
+  // about either, so a failed verification or a server that didn't start reads as
+  // "warning", never "connected".
   function getStatus(integration: Integration): IntegrationStatus {
+    const server = serverStatus[integration.credentialProvider];
     if (integration.requiresCredential === false) {
-      return (serverStatus[integration.credentialProvider] ?? false) ? 'connected' : 'disconnected';
+      if (server?.state === 'running') return 'connected';
+      if (server?.state === 'starting') return 'starting';
+      if (server?.state === 'failed') return 'warning';
+      return 'disconnected';
     }
     const hasCredential = credentials.some((c) => c.provider === integration.credentialProvider);
     if (!hasCredential) return 'disconnected';
-    return testResults[integration.id] === 'fail' ? 'warning' : 'connected';
+    if (testResults[integration.id] === 'fail') return 'warning';
+    if (!server || server.state === 'starting') return 'starting';
+    return server.state === 'running' ? 'connected' : 'warning';
   }
 
   // Calls the /integrations/:provider/test route and normalizes both its
   // "service said no" replies and outright network failures into one shape.
-  async function verify(integration: Integration): Promise<{ ok: boolean; message: string }> {
+  // The server state it reports is written back to serverStatus, so the badge
+  // reflects exactly what the test found.
+  async function verify(
+    integration: Integration,
+  ): Promise<{ ok: boolean; message: string; starting: boolean; serverFailed: boolean }> {
     try {
       const res = await api.testIntegration(integration.credentialProvider);
-      return { ok: res.success, message: res.message };
+      if (res.serverState) {
+        setServerStatusFor(integration.credentialProvider, {
+          connected: res.connected,
+          state: res.serverState,
+          message: res.connected ? undefined : res.message,
+        });
+      }
+      return {
+        ok: res.success,
+        message: res.message,
+        starting: res.reason === 'server_starting',
+        serverFailed: res.reason === 'server_failed',
+      };
     } catch {
-      return { ok: false, message: BACKEND_UNREACHABLE_MESSAGE };
+      return { ok: false, message: BACKEND_UNREACHABLE_MESSAGE, starting: false, serverFailed: false };
     }
+  }
+
+  // "Still starting" isn't a failed test: leave the result unset so the card
+  // shows Starting and the poll above settles it.
+  function recordTestResult(integration: Integration, ok: boolean, starting: boolean) {
+    setTestResults((prev) => {
+      const next = { ...prev };
+      if (starting) delete next[integration.id];
+      else next[integration.id] = ok ? 'ok' : 'fail';
+      return next;
+    });
   }
 
   async function handleTest(integration: Integration) {
     setTesting(integration.id);
     try {
-      const { ok, message } = await verify(integration);
-      setTestResults((prev) => ({ ...prev, [integration.id]: ok ? 'ok' : 'fail' }));
+      const { ok, message, starting } = await verify(integration);
+      recordTestResult(integration, ok, starting);
       setStatusMessages((prev) => ({ ...prev, [integration.id]: message }));
-      if (!ok) toast.error(message);
+      if (starting) toast.warning(message);
+      else if (!ok) toast.error(message);
     } finally {
       setTesting(null);
     }
@@ -381,12 +459,18 @@ export function IntegrationsPage() {
       setTokenInputs((prev) => ({ ...prev, [integration.id]: '' }));
 
       // Don't declare success yet — actually check whether the service accepts this credential.
-      const { ok, message } = await verify(integration);
-      setTestResults((prev) => ({ ...prev, [integration.id]: ok ? 'ok' : 'fail' }));
+      const { ok, message, starting, serverFailed } = await verify(integration);
+      recordTestResult(integration, ok, starting);
       setStatusMessages((prev) => ({ ...prev, [integration.id]: message }));
 
       if (ok) {
         toast.success(integration.label + ' connected successfully');
+      } else if (starting) {
+        toast.warning(integration.label + ' was saved and is still starting.');
+      } else if (serverFailed) {
+        // The credential is fine; the integration itself didn't start. Say that,
+        // not "could not be verified", so it doesn't read as a bad token.
+        toast.error(message);
       } else {
         // Keep the credential (so a typo can be fixed by just retyping and clicking
         // Retry, rather than having to delete and re-add it) but never show it as connected.
@@ -404,11 +488,13 @@ export function IntegrationsPage() {
     setSaving(integration.id);
     try {
       const result = await api.enableIntegration(integration.credentialProvider);
-      setServerStatus((prev) => ({ ...prev, [integration.credentialProvider]: result.connected }));
+      setServerStatusFor(integration.credentialProvider, result);
       if (result.connected) {
         toast.success(integration.label + ' connected successfully');
+      } else if (result.state === 'starting') {
+        toast.warning(integration.label + ' is still starting.');
       } else {
-        toast.error('Could not connect ' + integration.label + '. Try again in a moment.');
+        toast.error(result.message ?? 'Could not connect ' + integration.label + '. Try again in a moment.');
       }
     } catch (err) {
       toast.error('Failed to enable ' + integration.label + '.');
@@ -426,6 +512,7 @@ export function IntegrationsPage() {
       const creds = await api.getCredentials();
       useStore.getState().setCredentials(creds);
             toast.success(integration.label + ' disconnected');
+      setServerStatusFor(integration.credentialProvider, { connected: false, state: 'stopped' });
       setTestResults((prev) => {
         const next = { ...prev };
         delete next[integration.id];
@@ -557,7 +644,10 @@ export function IntegrationsPage() {
             <div className="space-y-2">
               {mcp.customServers.map(server => (
                 <div key={server.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-brain-bg border border-brain-border">
-                  <div className="w-2 h-2 rounded-full bg-brain-success flex-shrink-0" />
+                  <div
+                    title={CUSTOM_SERVER_STATUS_LABEL[server.status]}
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${CUSTOM_SERVER_DOT_CLASS[server.status]}`}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-brain-text">{server.name}</p>
                     <p className="text-xs text-brain-text-dim font-mono truncate">
@@ -566,6 +656,9 @@ export function IntegrationsPage() {
                         : `${server.command ?? 'npx'} ${server.args?.join(' ') ?? ''}`
                       }
                     </p>
+                    {server.status === 'failed' && server.statusMessage && (
+                      <p className="text-xs text-brain-error mt-0.5">{server.statusMessage}</p>
+                    )}
                   </div>
                   {server.accessWarning && <McpAccessBadge warning={server.accessWarning} />}
                   <span className="text-xs text-brain-text-dim bg-brain-surface border border-brain-border rounded px-1.5 py-0.5">
@@ -586,7 +679,15 @@ export function IntegrationsPage() {
         {INTEGRATIONS.map((integration) => {
           const status = getStatus(integration);
           const testResult = testResults[integration.id];
-          const message = statusMessages[integration.id];
+          // A failed test explains itself. Otherwise, when the server isn't up, its
+          // live status does — so an older "Connected as …" can't sit under a
+          // server that has since failed.
+          const message =
+            testResult === 'fail'
+              ? statusMessages[integration.id]
+              : status === 'warning' || status === 'starting'
+              ? serverStatus[integration.credentialProvider]?.message
+              : statusMessages[integration.id];
           const isExpanded = expanded === integration.id;
           const Icon = integration.icon ?? Plug;
 
@@ -616,13 +717,19 @@ export function IntegrationsPage() {
                         Needs attention
                       </span>
                     )}
+                    {status === 'starting' && (
+                      <span className="flex items-center gap-1 text-xs text-brain-text-dim">
+                        <Loader size={11} className="animate-spin" />
+                        Starting...
+                      </span>
+                    )}
                     {status === 'disconnected' && (
                       <span className="flex items-center gap-1 text-xs text-brain-text-dim">
                         <XCircle size={11} />
                         Not connected
                       </span>
                     )}
-                    {testResult === 'ok' && (
+                    {testResult === 'ok' && status === 'connected' && (
                       <span className="text-xs text-brain-success bg-brain-success/10 px-2 py-0.5 rounded-full">
                         Working
                       </span>
@@ -634,6 +741,8 @@ export function IntegrationsPage() {
                       className={
                         status === 'warning'
                           ? 'text-xs text-brain-error mt-1'
+                          : status === 'starting'
+                          ? 'text-xs text-brain-text-dim mt-1'
                           : 'text-xs text-brain-success mt-1'
                       }
                     >

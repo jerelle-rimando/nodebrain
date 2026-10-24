@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { telemetry } from '../utils/telemetry';
+import { describeMcpError } from '../utils/describeMcpError';
 
 export interface MCPTool {
   name: string;
@@ -38,7 +39,27 @@ export function getConnectionError(name: string): string | undefined {
   return connectionErrors.get(name);
 }
 
+// Names of servers whose most recent connect attempt failed. An entry is cleared
+// when a new attempt starts or the server is disconnected, so this never lists a
+// server that has since come up.
+export function getFailedServers(): string[] {
+  return Array.from(connectionErrors.keys());
+}
+
+export function clearConnectionError(name: string): void {
+  connectionErrors.delete(name);
+}
+
+// How much of a server's startup stderr to keep for diagnosing a failed connect.
+const STDERR_TAIL_CHARS = 4000;
+
 export async function connectToServer(server: MCPServer, fingerprint = ''): Promise<MCPTool[]> {
+  connectionErrors.delete(server.name);
+  // On Windows cross-spawn runs an unresolvable command through cmd.exe, so a
+  // missing npx surfaces only as "Connection closed" plus cmd's "is not
+  // recognized" on stderr. Keep a tail of stderr so the failure can say why.
+  // Everything is still forwarded to our own stderr, as 'inherit' did.
+  let stderrTail = '';
   try {
     const transport = new StdioClientTransport({
       command: server.command,
@@ -47,6 +68,11 @@ export async function connectToServer(server: MCPServer, fingerprint = ''): Prom
         ...process.env,
         ...server.env,
       } as Record<string, string>,
+      stderr: 'pipe',
+    });
+    transport.stderr?.on('data', (chunk: Buffer) => {
+      process.stderr.write(chunk);
+      stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
     });
 
     const client = new Client(
@@ -69,7 +95,7 @@ export async function connectToServer(server: MCPServer, fingerprint = ''): Prom
     return tools;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    connectionErrors.set(server.name, msg);
+    connectionErrors.set(server.name, stderrTail ? `${msg}\n${stderrTail}` : msg);
     console.error(`[MCP] Failed to connect to "${server.name}":`, err);
     telemetry('setup_failed', { stage: 'mcp', reasonCode: 'mcp_spawn_failed' });
     return [];
@@ -77,6 +103,7 @@ export async function connectToServer(server: MCPServer, fingerprint = ''): Prom
 }
 
 export async function connectToSSEServer(server: MCPSSEServer, fingerprint = ''): Promise<MCPTool[]> {
+  connectionErrors.delete(server.name);
   try {
     const transport = new SSEClientTransport(new URL(server.url));
 
@@ -108,6 +135,7 @@ export async function connectToSSEServer(server: MCPSSEServer, fingerprint = '')
 }
 
 export async function disconnectServer(name: string): Promise<void> {
+  connectionErrors.delete(name);
   const conn = activeConnections.get(name);
   if (!conn) return;
   try { await conn.client.close(); } catch { /* ignore */ }
@@ -126,7 +154,12 @@ export async function callTool(
 ): Promise<string> {
   const connection = activeConnections.get(serverName);
   if (!connection) {
-    throw new Error(`MCP server "${serverName}" is not connected. Add the credential in the Vault.`);
+    // A missing connection almost never means a missing credential (servers without
+    // one are never offered as tools) — it means the server didn't start. Say why.
+    const error = connectionErrors.get(serverName);
+    throw new Error(error
+      ? `The "${serverName}" integration isn't available. ${describeMcpError(error)}`
+      : `The "${serverName}" integration isn't running right now. Check it on the Integrations page.`);
   }
 
   const result = await connection.client.callTool({

@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { McpAccessWarning } from '@shared/types';
-import { api } from '../utils/api';
+import { api, type ServerState } from '../utils/api';
 import { toast } from '../components/shared/Toast';
+
+// How often to re-check while any server is still starting up.
+const STARTING_POLL_MS = 3000;
 
 export interface CustomMCPServer {
   id: string;
@@ -12,6 +15,8 @@ export interface CustomMCPServer {
   url?: string;
   createdAt: string;
   accessWarning?: McpAccessWarning | null;
+  status: ServerState;
+  statusMessage?: string | null;
 }
 
 export function useMcpServers() {
@@ -31,6 +36,18 @@ export function useMcpServers() {
       .then(setCustomServers)
       .catch(console.error);
   }, []);
+
+  // A just-added server connects in the background; keep checking until every
+  // server has settled so its dot reflects the real outcome.
+  useEffect(() => {
+    if (!customServers.some(s => s.status === 'starting')) return;
+    const timer = setTimeout(() => {
+      api.getMcpServers()
+        .then(setCustomServers)
+        .catch(console.error);
+    }, STARTING_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [customServers]);
 
   function resetForm() {
     setName('');
@@ -94,7 +111,8 @@ export function useMcpServers() {
       const updated = await api.getMcpServers();
       setCustomServers(updated);
       resetForm();
-      toast.success('MCP server connected');
+      // Saved, not yet connected — it starts in the background and the dot shows how that goes.
+      toast.success('MCP server added');
     } catch {
       toast.error('Failed to connect MCP server');
     } finally {

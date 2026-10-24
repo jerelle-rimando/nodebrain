@@ -2,6 +2,15 @@ import { useStore } from '../stores/appStore';
 
 const BASE_URL = '/api';
 
+// Live state of an MCP server, as the backend's getServerStatus derives it.
+export type ServerState = 'running' | 'failed' | 'starting' | 'stopped';
+
+export interface IntegrationServerStatus {
+  connected: boolean;
+  state: ServerState;
+  message?: string;
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -112,13 +121,19 @@ export const api = {
       request<{ saved: number }>('/chat/save', { method: 'POST', body: JSON.stringify({ messages }) }),
 
   testIntegration: (provider: string) =>
-    request<{ success: boolean; message: string; reason?: 'invalid_credential' | 'not_configured' | 'network' | 'unknown' }>(
+    request<{
+      success: boolean;
+      message: string;
+      reason?: 'invalid_credential' | 'not_configured' | 'network' | 'unknown' | 'server_failed' | 'server_starting';
+      connected: boolean;
+      serverState?: ServerState;
+    }>(
       `/integrations/${provider}/test`
     ),
   getIntegrationStatus: (provider: string) =>
-    request<{ connected: boolean }>(`/integrations/${provider}/status`),
+    request<IntegrationServerStatus>(`/integrations/${provider}/status`),
   enableIntegration: (provider: string) =>
-    request<{ connected: boolean }>(`/integrations/${provider}/enable`, { method: 'POST' }),
+    request<IntegrationServerStatus>(`/integrations/${provider}/enable`, { method: 'POST' }),
 
   parseSchedule: (input: string) =>
     request<{ cron: string | null; human: string | null }>(`/schedule/parse?input=${encodeURIComponent(input)}`),

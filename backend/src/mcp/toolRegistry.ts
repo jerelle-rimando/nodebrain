@@ -1,4 +1,5 @@
-import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
+import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, getFailedServers, clearConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
+import { describeMcpError } from '../utils/describeMcpError';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { readSpreadsheetAsText, readDocumentAsText } from '../utils/fileReaders';
@@ -104,6 +105,59 @@ export const toolRegistryReady: Promise<void> = new Promise(resolve => {
 
 const REGISTRY_READY_TIMEOUT_MS = 30_000;
 
+let registryInitialized = false;
+let idleWaiters: Array<() => void> = [];
+
+// True while the boot pass or a reload is still connecting servers — a server
+// that isn't up yet may simply not have had its turn.
+function isRegistryBusy(): boolean {
+  return !registryInitialized || reloadInProgress;
+}
+
+function notifyIfIdle(): void {
+  if (isRegistryBusy()) return;
+  const waiters = idleWaiters;
+  idleWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+// Resolves true once no connect pass is running, or false if that takes longer
+// than timeoutMs (a first-run npx download can).
+export function waitForRegistryIdle(timeoutMs: number): Promise<boolean> {
+  if (!isRegistryBusy()) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const done = () => { clearTimeout(timer); resolve(true); };
+    const timer = setTimeout(() => {
+      idleWaiters = idleWaiters.filter(w => w !== done);
+      resolve(false);
+    }, timeoutMs);
+    idleWaiters.push(done);
+  });
+}
+
+export type ServerState = 'running' | 'failed' | 'starting' | 'stopped';
+
+export interface ServerStatus {
+  state: ServerState;
+  message?: string; // plain language, never raw error text
+}
+
+// The one place a server's live state is derived from. The integration cards,
+// the Test button, the custom server list and agent tool errors all read this,
+// so none of them can claim a server is up when it never started.
+export function getServerStatus(name: string): ServerStatus {
+  if (getConnectedServers().includes(name)) return { state: 'running' };
+  const error = getConnectionError(name);
+  if (error) return { state: 'failed', message: describeMcpError(error) };
+  if (isRegistryBusy()) return { state: 'starting', message: 'This integration is still starting.' };
+  return { state: 'stopped' };
+}
+
+// Servers NodeBrain tried to start and couldn't, with a plain-language reason each.
+export function getUnavailableServers(): Array<{ name: string; message: string }> {
+  return getFailedServers().map(name => ({ name, message: getServerStatus(name).message ?? '' }));
+}
+
 export async function initializeToolRegistry(): Promise<void> {
   try {
     console.log('[ToolRegistry] Checking available integrations...');
@@ -173,7 +227,9 @@ export async function initializeToolRegistry(): Promise<void> {
 
     console.log(`[ToolRegistry] Ready — ${tools.length} tools available`);
   } finally {
+    registryInitialized = true;
     resolveRegistryReady();
+    notifyIfIdle();
   }
 }
 
@@ -348,11 +404,18 @@ async function syncConnections(): Promise<void> {
 
   const currentNames = new Set(getConnectedServers());
 
-  // Disconnect servers that are no longer desired
-  for (const name of currentNames) {
+  // Disconnect servers that are no longer desired. Failed ones are included so a
+  // removed server doesn't keep reporting its old failure.
+  for (const name of new Set([...currentNames, ...getFailedServers()])) {
     if (!desired.has(name)) {
       await disconnectServer(name);
     }
+  }
+
+  // Every desired server that isn't up is retried below. Drop its old failure now
+  // so it reads as starting, not failed, until this pass reaches it.
+  for (const name of getFailedServers()) {
+    if (desired.has(name)) clearConnectionError(name);
   }
 
   // Connect new servers and reconnect any whose credential changed
@@ -391,5 +454,6 @@ export async function reloadToolRegistry(): Promise<void> {
     }
   } finally {
     reloadInProgress = false;
+    notifyIfIdle();
   }
 }
