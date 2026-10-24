@@ -189,6 +189,13 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 
 export const FREE_PROVIDERS = new Set(['ollama', 'custom']);
 
+// Every model provider an agent can use. 'custom' is the vault's "Custom / Other"
+// entry, an OpenAI-compatible endpoint. Telemetry excludes these from
+// connectedIntegrations; keep LLM_PROVIDERS in telemetry-worker/src/index.ts in sync.
+export const LLM_PROVIDERS: ReadonlySet<string> = new Set([
+  'openai', 'anthropic', 'groq', 'gemini', 'ollama', 'mistral', 'together', 'fireworks', 'custom',
+]);
+
 // ── Conversation history ──────────────────────────────────────────────────────
 // Plain user/assistant text from prior turns of a chat with an agent. Tool-call
 // and tool-result messages are deliberately never part of this: replaying stale
@@ -356,7 +363,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 // Servers NodeBrain ships. Anything else is a user-added custom MCP server whose
 // tools are unvetted, so approval mode must gate them even if they aren't in
 // DESTRUCTIVE_TOOLS — fail closed on the unknown rather than open.
-export const BUILTIN_SERVERS: ReadonlySet<string> = new Set([
+const BUILTIN_SERVERS = new Set([
   ...SERVER_CONFIGS.map((config) => config.name),
   'pdf-reader',
   'file-reader',

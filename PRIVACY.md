@@ -26,7 +26,7 @@ Each event contains:
 - **Event properties**: counts, durations, true/false flags, and short category codes. Examples:
   - task duration and number of tool calls
   - number of agents, and number of runs in the last 7 days
-  - which built-in integrations you have connected (for example `telegram`, `github`). Any other integration, including custom MCP servers and credentials with a provider name you typed yourself, is sent only as the word `custom`, never by its name.
+  - which built-in integrations you have connected (for example `telegram`, `github`). Any other integration, including custom MCP servers and credentials with a provider name you typed yourself, is sent only as the word `custom`, never by its name. API keys for model providers (OpenAI, Anthropic, and so on) are not counted as integrations and are left out of this list.
   - model provider type (local or hosted)
   - whether a task ran in Dry-Run or Approval Mode
   - onboarding step reached, and days since install

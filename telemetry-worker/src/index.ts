@@ -78,6 +78,30 @@ const KNOWN_EVENTS = new Set([
   'usage_snapshot',
 ]);
 
+// usage_snapshot.connectedIntegrations may only hold built-in integration names
+// or 'custom'. Clients up to 0.4.1 send every vault credential's raw provider
+// name, which is free text and can name an employer or client, so the Worker
+// rewrites the list itself rather than trusting the client to have done it.
+//
+// BUILTIN_INTEGRATIONS: keep in sync with the `credentialProvider` values in
+// SERVER_CONFIGS (backend/src/mcp/toolRegistry.ts). When a built-in integration
+// is added there, add its credentialProvider here and deploy before shipping the
+// client, or its name is stored as 'custom'.
+const BUILTIN_INTEGRATIONS = new Set([
+  'telegram', 'github', 'slack', 'notion', 'filesystem', 'open-websearch',
+]);
+// LLM_PROVIDERS: keep in sync with LLM_PROVIDERS in backend/src/agents/agentEngine.ts.
+// Model provider keys aren't integrations and are dropped. A new provider
+// missing here is stored as 'custom'.
+const LLM_PROVIDERS = new Set([
+  'openai', 'anthropic', 'groq', 'gemini', 'ollama', 'mistral', 'together', 'fireworks', 'custom',
+]);
+// Up to this version the client sent raw provider names, so a 'custom' from it
+// is the vault's "Custom / Other" LLM endpoint credential and gets dropped. From
+// later clients 'custom' is already the rewritten value (a custom MCP server or
+// a non-built-in credential) and is kept.
+const LAST_RAW_INTEGRATIONS_VERSION = [0, 4, 1];
+
 // How many rejection reasons to echo back; the count is always exact.
 const MAX_REJECTIONS_REPORTED = 10;
 
@@ -261,6 +285,9 @@ function validateEvent(item: unknown, now: number): EventRow {
     if (!PROPERTY_KEY_RE.test(key)) throw new BadEvent(`property key ${JSON.stringify(key.slice(0, 64))}`);
     if (!isAllowedPropertyValue(properties[key])) throw new BadEvent(`property ${key}`);
   }
+  if (event === 'usage_snapshot' && Array.isArray(properties.connectedIntegrations)) {
+    properties.connectedIntegrations = normalizeIntegrations(properties.connectedIntegrations, appVersion);
+  }
   const propertiesJson = JSON.stringify(properties);
   if (new TextEncoder().encode(propertiesJson).byteLength > MAX_PROPERTIES_JSON_BYTES) {
     throw new BadEvent('properties too large');
@@ -277,6 +304,31 @@ function validateEvent(item: unknown, now: number): EventRow {
     properties,
     propertiesJson,
   };
+}
+
+// Built-in names pass through, model providers are dropped, anything else
+// becomes 'custom'. Deduplicated, first-seen order.
+function normalizeIntegrations(names: string[], appVersion: string): string[] {
+  const rawClient = !isNewerThan(appVersion, LAST_RAW_INTEGRATIONS_VERSION);
+  const out = new Set<string>();
+  for (const name of names) {
+    if (BUILTIN_INTEGRATIONS.has(name)) out.add(name);
+    else if (name === 'custom' && !rawClient) out.add('custom');
+    else if (!LLM_PROVIDERS.has(name)) out.add('custom');
+  }
+  return Array.from(out);
+}
+
+// Compares the leading major.minor.patch only. An unparseable version counts
+// as old, so its 'custom' is dropped rather than misreported.
+function isNewerThan(appVersion: string, than: number[]): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(appVersion);
+  if (!match) return false;
+  for (let i = 0; i < 3; i++) {
+    const part = Number(match[i + 1]);
+    if (part !== than[i]) return part > than[i];
+  }
+  return false;
 }
 
 function isAllowedPropertyValue(value: unknown): boolean {
