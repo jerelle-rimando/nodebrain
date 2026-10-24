@@ -628,6 +628,16 @@ async function startBackend(): Promise<void> {
   log(`Backend cwd: ${cwd}`);
   log(`process.execPath: ${process.execPath}`);
 
+  // The pinned npm and node shim the built-in MCP servers run on, so they work
+  // without a system Node.js install (see backend/src/mcp/nodeRuntime.ts).
+  const resourcesRoot = isDev ? path.join(__dirname, '../vendor') : process.resourcesPath;
+  const npxCli = isDev
+    ? path.join(resourcesRoot, 'npm-runtime/node_modules/npm/bin/npx-cli.js')
+    : path.join(resourcesRoot, 'npm/bin/npx-cli.js');
+  const nodeShimDir = path.join(resourcesRoot, 'node-shim');
+  const hasBundledNpm = fs.existsSync(npxCli);
+  log(`Bundled npx: ${npxCli} (exists: ${hasBundledNpm})`);
+
   backendProcess = spawn(command, args, {
     env: {
       ...process.env,
@@ -639,6 +649,7 @@ async function startBackend(): Promise<void> {
       ...(telemetryListenerPort && { NODEBRAIN_TELEMETRY_PORT: String(telemetryListenerPort) }),
       NODEBRAIN_FIRST_LAUNCH_AT: telemetryIdentity.firstLaunchAt,
       ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
+      ...(hasBundledNpm && { NODEBRAIN_NPX_CLI: npxCli, NODEBRAIN_NODE_SHIM_DIR: nodeShimDir }),
     },
     shell: false,
     // On Windows this sets CREATE_NEW_PROCESS_GROUP, giving the backend its own

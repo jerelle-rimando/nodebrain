@@ -1,5 +1,6 @@
 import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, getFailedServers, clearConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
 import { describeMcpError } from '../utils/describeMcpError';
+import { withBundledRuntime, describeNodeRuntime } from './nodeRuntime';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { readSpreadsheetAsText, readDocumentAsText } from '../utils/fileReaders';
@@ -91,6 +92,12 @@ export const SERVER_CONFIGS: ServerConfig[] = [
   },
 ];
 
+// Every built-in server is started through here, so all of them run on the
+// bundled npm and never need a system Node.js install.
+function buildBuiltinServer(config: ServerConfig, credential: string): MCPServer {
+  return withBundledRuntime(config.buildServer(credential));
+}
+
 export function providerRequiresCredential(provider: string): boolean {
   const config = SERVER_CONFIGS.find(c => c.credentialProvider === provider);
   return config?.requiresCredential ?? true;
@@ -161,6 +168,7 @@ export function getUnavailableServers(): Array<{ name: string; message: string }
 export async function initializeToolRegistry(): Promise<void> {
   try {
     console.log('[ToolRegistry] Checking available integrations...');
+    console.log(`[ToolRegistry] MCP runtime: ${describeNodeRuntime()}`);
 
     const diag: DiagEntry[] = [];
 
@@ -174,7 +182,7 @@ export async function initializeToolRegistry(): Promise<void> {
         continue;
       }
 
-      const server = config.buildServer(credential ?? '');
+      const server = buildBuiltinServer(config, credential ?? '');
       const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
       await connectToServer(server, fingerprint);
 
@@ -381,7 +389,7 @@ async function syncConnections(): Promise<void> {
     const requiresCredential = config.requiresCredential ?? true;
     const credential = requiresCredential ? getCredentialForProvider(config.credentialProvider) : '';
     if (requiresCredential && !credential) continue;
-    const server = config.buildServer(credential ?? '');
+    const server = buildBuiltinServer(config, credential ?? '');
     const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
     desired.set(config.name, { type: 'stdio', server, fingerprint });
   }

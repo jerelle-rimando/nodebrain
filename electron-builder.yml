@@ -56,6 +56,16 @@ extraResources:
       - "!@esbuild/**"
   - from: backend/package.json
     to: backend/package.json
+  # Pinned npm + node shim so the built-in MCP servers run with no system
+  # Node.js (see backend/src/mcp/nodeRuntime.ts). Installed by install:all.
+  - from: vendor/npm-runtime/node_modules/npm
+    to: npm
+  # Listed on its own: electron-builder silently drops a nested node_modules
+  # from the entry above, and npm can't run without its bundled dependencies.
+  - from: vendor/npm-runtime/node_modules/npm/node_modules
+    to: npm/node_modules
+  - from: vendor/node-shim
+    to: node-shim
 
 win:
   icon: electron/assets/icon.ico

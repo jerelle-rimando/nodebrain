@@ -34,7 +34,6 @@ The system revolves around persistent AI agents that can:
 
 ### Prerequisites
 
-- Node.js v18 or higher — download from [nodejs.org](https://nodejs.org) (LTS version)
 - An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.), or [Ollama](https://ollama.com) for fully local inference
 
 ### Installation (Recommended)
@@ -49,7 +48,7 @@ NodeBrain is currently unsigned. Windows may show a SmartScreen warning — clic
 
 ### Installation (Development)
 
-Clone the repository and install dependencies for all three parts of the project.
+Building from source requires [Node.js](https://nodejs.org) 20 or higher. Clone the repository and install dependencies for all three parts of the project.
 ```bash
 git clone https://github.com/jerelle-rimando/nodebrain.git
 cd nodebrain
@@ -58,7 +57,10 @@ cd nodebrain
 npm install
 npm install --prefix backend
 npm install --prefix frontend
+npm ci --prefix vendor/npm-runtime --ignore-scripts
 ```
+
+The last line fetches the pinned npm that packaged builds ship for the built-in integrations. `npm run install:all` runs all three `--prefix` installs.
 
 ### Configuration
 
@@ -179,7 +181,7 @@ NodeBrain supports the following integrations and their agent-accessible tools:
 
 Built-in integrations are pinned to specific, tested package versions — they do not silently pull new code from npm on launch. Versions are updated deliberately in each NodeBrain release.
 
-You can also connect **any custom MCP server** via the Integrations tab by providing its install command. Custom servers may run locally (via `npx`, `uvx`, or `node`) or connect to a remote host if you provide an HTTP(S) URL. Remote servers execute on someone else's infrastructure, not yours — only add servers from sources you trust.
+You can also connect **any custom MCP server** via the Integrations tab by providing its install command. Custom servers may run locally (via `npx`, `uvx`, or `node`; these need [Node.js](https://nodejs.org) or, for `uvx`, [uv](https://docs.astral.sh/uv/) installed — the built-in integrations don't) or connect to a remote host if you provide an HTTP(S) URL. Remote servers execute on someone else's infrastructure, not yours — only add servers from sources you trust.
 
 > Google Workspace integrations require setting up your own Google Cloud project and OAuth credentials. See [docs/google-oauth-setup.md](docs/google-oauth-setup.md) for instructions.
 

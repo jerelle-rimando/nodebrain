@@ -1,0 +1,8 @@
+{
+  "name": "nodebrain-npm-runtime",
+  "private": true,
+  "description": "The npm that NodeBrain ships so the built-in MCP servers run without a system Node.js install. Pinned exactly; installed with npm ci from the committed lockfile.",
+  "dependencies": {
+    "npm": "10.9.9"
+  }
+}
