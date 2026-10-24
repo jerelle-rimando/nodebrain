@@ -1,3 +1,5 @@
+import os from 'os';
+import path from 'path';
 import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, getFailedServers, clearConnectionError, recordConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
 import { describeMcpError } from '../utils/describeMcpError';
 import { withBundledRuntime, describeNodeRuntime } from './nodeRuntime';
@@ -90,6 +92,26 @@ export const SERVER_CONFIGS: ServerConfig[] = [
         DEFAULT_SEARCH_ENGINE: 'duckduckgo',
         ALLOWED_SEARCH_ENGINES: 'duckduckgo,bing',
       },
+    }),
+  },
+  {
+    // SPIKE (docs/spikes/browser-automation-biberk.md): not ready to ship. With no
+    // credential it starts for everyone and adds ~25 tools to every agent's prompt.
+    // Drives the system Edge install; no Chromium download.
+    name: 'playwright',
+    credentialProvider: 'playwright',
+    requiresCredential: false,
+    buildServer: () => ({
+      name: 'playwright',
+      command: 'npx',
+      args: [
+        '-y', '@playwright/mcp@0.0.83',
+        '--browser', 'msedge',
+        // Snapshots and screenshots are written to disk; the default is the cwd,
+        // which in the packaged app is the install folder.
+        '--output-dir', path.join(os.tmpdir(), 'nodebrain-playwright'),
+      ],
+      env: {},
     }),
   },
 ];

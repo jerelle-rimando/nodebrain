@@ -352,6 +352,21 @@ const DESTRUCTIVE_TOOLS = new Set([
   'notion__API-update-a-block',
   'notion__API-patch-block-children',
   'notion__API-move-page',
+  // playwright (@playwright/mcp@0.0.83). Gated: anything that can submit a form or
+  // run arbitrary code. Approval is by tool name, so every click is gated, even
+  // one that only opens a dropdown, and browser_type is gated for its `submit` arg.
+  // Not gated: navigate/back, snapshot, screenshot, find, wait_for, console/network
+  // reads, tabs, hover, resize, close, fill_form, select_option, emulate_media.
+  // See docs/spikes/browser-automation-biberk.md.
+  'playwright__browser_click',
+  'playwright__browser_press_key',
+  'playwright__browser_type',
+  'playwright__browser_handle_dialog',
+  'playwright__browser_evaluate',
+  'playwright__browser_run_code_unsafe',
+  'playwright__browser_file_upload',
+  'playwright__browser_drag',
+  'playwright__browser_drop',
   // pdf-reader — reads arbitrary absolute paths; gated behind approval mode
   // even though it's a read, since it isn't confined to the filesystem sandbox.
   'pdf-reader__read_pdf',
