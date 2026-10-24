@@ -8,6 +8,7 @@ import {
   waitForRegistryIdle,
   type ServerStatus,
 } from '../mcp/toolRegistry';
+import { slackAuthTest } from '../mcp/slackAuth';
 import { telemetry } from '../utils/telemetry';
 
 const router = Router();
@@ -72,7 +73,7 @@ interface CredentialResult {
 function isNetworkError(err: unknown): boolean {
   if (err instanceof TypeError) return true; // fetch() throws TypeError on DNS/connection failures
   if (err instanceof Error) {
-    return /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(err.message);
+    return err.name === 'TimeoutError' || /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(err.message);
   }
   return false;
 }
@@ -133,10 +134,7 @@ async function checkCredential(provider: string, credential: string | null | und
     }
 
     if (provider === 'slack') {
-      const response = await fetch('https://slack.com/api/auth.test', {
-        headers: { Authorization: `Bearer ${credential}` },
-      });
-      const data = await response.json() as { ok: boolean; user?: string };
+      const data = await slackAuthTest(credential ?? '');
       return data.ok
         ? { ok: true, message: `Connected as ${data.user ?? 'unknown'}` }
         : { ok: false, message: 'Slack rejected that token.', reason: 'invalid_credential' };

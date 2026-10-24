@@ -26,6 +26,10 @@ export function describeMcpError(raw: string): string {
       ?? `The program "${program}" it runs with isn't installed on this computer.`;
     return `NodeBrain couldn't start this integration. ${hint}`;
   }
+  // Slack's auth.test error codes, from looking up the workspace before start.
+  if (/auth\.test failed: (invalid_auth|not_authed|account_inactive|token_revoked|token_expired)/.test(raw)) {
+    return "NodeBrain couldn't start Slack because Slack rejected the saved token. Paste a new bot token, then try again.";
+  }
   if (/ENOENT/i.test(raw)) {
     return "NodeBrain couldn't start this integration because a program or file it needs is missing.";
   }

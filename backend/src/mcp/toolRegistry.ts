@@ -1,6 +1,7 @@
-import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, getFailedServers, clearConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
+import { connectToServer, connectToSSEServer, getAllAvailableTools, getConnectedServers, getConnectionError, getFailedServers, clearConnectionError, recordConnectionError, disconnectServer, getCredentialFingerprint, type MCPServer, type MCPSSEServer, type MCPToolWithServer } from './mcpClient';
 import { describeMcpError } from '../utils/describeMcpError';
 import { withBundledRuntime, describeNodeRuntime } from './nodeRuntime';
+import { getSlackTeamId } from './slackAuth';
 import { getCredentialForProvider } from '../vault/credentialVault';
 import { readPdfAsText } from '../utils/pdfReader';
 import { readSpreadsheetAsText, readDocumentAsText } from '../utils/fileReaders';
@@ -12,7 +13,7 @@ interface ServerConfig {
   name: string;
   credentialProvider: string;
   requiresCredential?: boolean; // defaults to true when omitted
-  buildServer: (credential: string) => MCPServer;
+  buildServer: (credential: string) => MCPServer | Promise<MCPServer>;
 }
 
 // Versions are pinned deliberately — do NOT automate updates or remove the @version suffix.
@@ -43,11 +44,12 @@ export const SERVER_CONFIGS: ServerConfig[] = [
   {
     name: 'slack',
     credentialProvider: 'slack',
-    buildServer: (token) => ({
+    // The server exits at startup without SLACK_TEAM_ID; it's looked up from the token.
+    buildServer: async (token) => ({
       name: 'slack',
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-slack@2025.4.25'],
-      env: { SLACK_BOT_TOKEN: token },
+      env: { SLACK_BOT_TOKEN: token, SLACK_TEAM_ID: await getSlackTeamId(token) },
     }),
   },
   {
@@ -94,8 +96,16 @@ export const SERVER_CONFIGS: ServerConfig[] = [
 
 // Every built-in server is started through here, so all of them run on the
 // bundled npm and never need a system Node.js install.
-function buildBuiltinServer(config: ServerConfig, credential: string): MCPServer {
-  return withBundledRuntime(config.buildServer(credential));
+// Building can fail (Slack's needs a network lookup); the error is returned
+// rather than thrown so callers can record it as that server's failure.
+async function buildBuiltinServer(config: ServerConfig, credential: string): Promise<MCPServer | { error: string }> {
+  try {
+    return withBundledRuntime(await config.buildServer(credential));
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[ToolRegistry] Couldn't prepare "${config.name}":`, err);
+    return { error };
+  }
 }
 
 export function providerRequiresCredential(provider: string): boolean {
@@ -182,7 +192,12 @@ export async function initializeToolRegistry(): Promise<void> {
         continue;
       }
 
-      const server = buildBuiltinServer(config, credential ?? '');
+      const server = await buildBuiltinServer(config, credential ?? '');
+      if ('error' in server) {
+        recordConnectionError(config.name, server.error);
+        diag.push({ name: config.name, status: 'failed', detail: server.error });
+        continue;
+      }
       const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
       await connectToServer(server, fingerprint);
 
@@ -380,7 +395,8 @@ export function formatToolsForAnthropic(tools: MCPToolWithServer[]): Array<{
 
 type DesiredEntry =
   | { type: 'stdio'; server: MCPServer; fingerprint: string }
-  | { type: 'sse'; server: MCPSSEServer; fingerprint: string };
+  | { type: 'sse'; server: MCPSSEServer; fingerprint: string }
+  | { type: 'unbuildable'; error: string; fingerprint: string };
 
 async function syncConnections(): Promise<void> {
   const desired = new Map<string, DesiredEntry>();
@@ -389,7 +405,11 @@ async function syncConnections(): Promise<void> {
     const requiresCredential = config.requiresCredential ?? true;
     const credential = requiresCredential ? getCredentialForProvider(config.credentialProvider) : '';
     if (requiresCredential && !credential) continue;
-    const server = buildBuiltinServer(config, credential ?? '');
+    const server = await buildBuiltinServer(config, credential ?? '');
+    if ('error' in server) {
+      desired.set(config.name, { type: 'unbuildable', error: server.error, fingerprint: credential ?? '' });
+      continue;
+    }
     const fingerprint = requiresCredential ? (credential ?? '') : `${server.command}|${server.args.join('|')}`;
     desired.set(config.name, { type: 'stdio', server, fingerprint });
   }
@@ -435,7 +455,9 @@ async function syncConnections(): Promise<void> {
     if (currentNames.has(name)) {
       await disconnectServer(name); // credential changed — tear down old connection only
     }
-    if (entry.type === 'sse') {
+    if (entry.type === 'unbuildable') {
+      recordConnectionError(name, entry.error);
+    } else if (entry.type === 'sse') {
       await connectToSSEServer(entry.server, entry.fingerprint);
     } else {
       await connectToServer(entry.server, entry.fingerprint);

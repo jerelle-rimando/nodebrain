@@ -50,6 +50,12 @@ export function clearConnectionError(name: string): void {
   connectionErrors.delete(name);
 }
 
+// For a server that failed before it could be spawned (e.g. its config couldn't
+// be built), so it still reports as failed rather than never tried.
+export function recordConnectionError(name: string, error: string): void {
+  connectionErrors.set(name, error);
+}
+
 // How much of a server's startup stderr to keep for diagnosing a failed connect.
 const STDERR_TAIL_CHARS = 4000;
 
