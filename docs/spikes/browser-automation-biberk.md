@@ -1,7 +1,8 @@
 # Spike: browser automation on biBerk's GL quote flow — PAUSED
 
-Status as of 2026-10-24: **wiring done, run not started.** Branch `spike/playwright-biberk`.
-Paused because no model can drive the agent yet (see "To resume").
+Status as of 2026-10-27: **three runs done, all blocked by biBerk** (see "Runs"). The run-3
+evidence points at automated-browser detection. Branch `spike/playwright-biberk`.
+Paused after run 3 for a cost review. Spend so far: $1.63.
 
 Goal (unchanged): learn where live browser automation breaks on a real portal,
 not ship a feature. One day timebox; about an hour used so far, all on wiring.
@@ -71,9 +72,83 @@ change in its three call sites.
 - Browser profile: the default is persistent (`%LOCALAPPDATA%\ms-playwright\mcp-msedge-profile`),
   so cookies survive between runs. For the timeout test, decide whether to add `--isolated`.
 
+## Runs (2026-10-27)
+
+Model `claude-sonnet-5-5` (ID and $2 / $10 per MTok checked against Anthropic's models
+and pricing pages). Max 20 steps, approval mode off, human present. The agent can use only
+the 25 playwright tools. Harness: `backend/src/_harness.ts`, with the cookie script in
+`docs/spikes/biberk-accept-cookies.js`. The API key is read from a file outside the repo.
+Run logs are in a session scratch folder, not the repo.
+
+To make this model usable, `claude-sonnet-5-5` was added to `AVAILABLE_MODELS.anthropic`
+and `MODEL_PRICING`. Without the first, `createAgent` silently swaps it for `claude-sonnet-4-6`.
+
+**Network: all traffic in runs 2 and 3 went Philippines → US VPN (Hotspot Shield) → biBerk.**
+Run 2 used the New York exit. Run 3 used a different exit, on which the user confirmed by
+hand that the industry search works. Page-load times are inflated by VPN latency. Don't read
+them as browser-automation overhead.
+
+| Run | Network | Steps | Input tok | Output tok | Cost | Result |
+|---|---|---|---|---|---|---|
+| 1 | Philippines, direct | 4 | 28,903 | 638 | $0.064 | Homepage 403 from Azure Application Gateway. biBerk blocks Philippine IPs; the user's normal browser was blocked too. |
+| 2 | US VPN | 13 | 259,182 | 2,014 | $0.539 | Homepage and quote page loaded. biBerk's API returned 403 from the quote page's first load, then the page showed "Access is temporarily restricted / unusual activity" and went to `/get-a-quote/error/0`. |
+| 3 | US VPN, new exit | 20 of 20 | 501,012 | 2,349 | $1.026 | Same block as run 2, by both routes to the quote page (direct URL, and homepage → GL tile → Get a Quote). Task marked `failed` (see below). |
+
+Run 3 detail:
+- **Cookie banner handled at launch.** An init script (`docs/spikes/biberk-accept-cookies.js`,
+  passed as `PLAYWRIGHT_MCP_INIT_SCRIPT` by the harness; it runs only on biberk.com) clicked biBerk's "Accept all" 0.4–3s after each
+  page load. The agent made zero cookie-related tool calls (run 2: 2). The browser profile
+  started empty (`PLAYWRIGHT_MCP_ISOLATED`), so no cookies carried over from run 2.
+- **The block points at the automated browser, not the network.** On a VPN exit where the
+  user's own browser gets industry suggestions, the automated Edge got 403 from
+  `bspuser/current`, `LoadQuote` and `Keywords/Get` on every quote-page load. That included
+  a load reached by ordinary clicks. The agent's report says the second route "loaded
+  normally". The console log contradicts it: the 403s came at load both times.
+  Caveat: run 3's first direct navigation could have flagged the session before the second
+  route, and nobody has re-checked by hand since run 3.
+- **New field facts:** the industry box is a read-only Angular Material input
+  (`data-qa="autocompleteIndustryControl"`, `required`). `browser_type` on it times out
+  after 5s; you have to click it to open the search dialog. A five-step progress bar
+  suggests 5 pages of questions.
+- **NodeBrain bug: a recovered tool error fails the whole task.** Three gated calls errored:
+  two stale snapshot refs and one read-only fill. The agent recovered each time and finished
+  normally on step 20. But the engine sets `destructiveFailRef` when any tool in
+  `DESTRUCTIVE_TOOLS` fails, so the task ended `failed` ("a destructive tool call failed").
+  The same set controls both approval and "a failure is fatal", so putting browser
+  click/type in it makes every stale ref fatal. These need to be two separate lists.
+- **Approval gate:** 9 of 21 tool calls would have stopped. None of them was a submit.
+- **Stale refs:** the agent clicked `e96` while the element had become `f7e96` (refs gain a
+  frame prefix after re-render). Two calls were lost to this.
+- **Cost:** input reached about 36k tokens per step by step 20, about $0.07 per step. The
+  20-step cap was hit without getting past the first field.
+- **Timing:** 44.2s model, 33.0s tools (navigations took 8.3s, 5.5s and 1.6s over the VPN;
+  the read-only timeout took 5.0s), 88s wall.
+
+Run 2 detail:
+- The quote page's API calls (`spa/api/bspuser/current`, `spa/api/Keywords/Get`,
+  `quote/api/GetAQuote/LoadQuote`) were already **403 when the page first loaded**,
+  before any typing. Typing "Roofing" in the industry dialog only made the block visible.
+- **Cause not yet separated:** VPN IP reputation versus automated-browser detection. Next
+  check: the user runs the same steps by hand in their normal browser over the same VPN.
+  Don't try to evade the detection.
+- Field inventory so far: one field. "What's your industry?" is an autocomplete text box
+  with the placeholder "e.g. Handyman or Accountant". Clicking it opens a modal search
+  dialog that asks you to pick the closest match, so the test data needs biBerk's own
+  category name, not a NAICS code. A cookie banner appears on both the home and quote pages.
+- **Approval gate:** 4 of the 15 tool calls would have stopped. Two were "Accept all
+  cookies" clicks, and two were `browser_type` with no submit. None of the 4 submitted
+  anything, which backs up the gate-by-target problem above.
+- **Cost:** the first homepage snapshot (27 KB) raised input from about 7k to about 17.5k
+  tokens per step, and it stays in context for the rest of the run. Late steps cost about
+  $0.05 each and keep rising. The about-7k floor is the 25 tool schemas plus the system prompt.
+- **Timing:** 40.2s model, 17.8s tools (the two navigations took 6.1s and 4.2s over the
+  VPN), 69s wall. About 20s of the wall time was harness startup.
+- Agent behaviour: it noticed the block, reported it accurately and didn't try to bypass
+  it. It took 2 redundant snapshots of the same dialog.
+
 ## Not done
 
-- The quote run itself: nothing has been sent to biberk.com yet.
+- A quote run that gets past the first field (blocked, see Runs).
 - The session-timeout test.
 - All the actual deliverables: the field inventory, the break-point list, timing
   (model vs. page load), the record/replay analysis, model and cost per run.

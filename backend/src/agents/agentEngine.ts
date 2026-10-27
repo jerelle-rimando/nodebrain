@@ -82,7 +82,7 @@ export const DEFAULT_MODELS: Record<string, string> = {
 export const AVAILABLE_MODELS: Record<string, string[]> = {
   ollama:    [LOCAL_MODEL],
   openai:    ['gpt-4o', 'gpt-4o-mini'],
-  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-sonnet-5-5'],
   groq: [
     'openai/gpt-oss-120b',
     'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -144,6 +144,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'claude-opus-4-8':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
   'claude-opus-4-7':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
   'claude-opus-4-6':            { input:  5.00, output: 25.00 }, // official docs (verified Jun 2026)
+  'claude-sonnet-5-5':          { input:  2.00, output: 10.00 }, // official docs (verified Oct 2026)
   'claude-sonnet-4-6':          { input:  3.00, output: 15.00 }, // official docs (verified Jun 2026)
   'claude-haiku-4-5':           { input:  1.00, output:  5.00 }, // official docs (verified Jun 2026)
   'claude-opus-4-20250514':     { input: 15.00, output: 75.00 }, // retired alias; last known price
