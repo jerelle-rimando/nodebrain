@@ -31,6 +31,8 @@ router.get('/', (req: Request, res: Response) => {
   const onTaskFailed = (task: Task) => sendEvent('task:failed', task);
   const onTaskCancelled = (task: Task) => sendEvent('task:cancelled', task);
   const onApprovalNeeded = (payload: unknown) => sendEvent('tool:approval_needed', payload);
+  const onTakeControlNeeded = (payload: unknown) => sendEvent('browser:take_control_needed', payload);
+  const onTakeControlResolved = (payload: unknown) => sendEvent('browser:take_control_resolved', payload);
   const onAgentCreated = (agent: Agent) => sendEvent('agent:created', agent);
   const onAgentUpdated = (agent: Agent) => sendEvent('agent:updated', agent);
   const onAgentDeleted = (payload: { id: string }) => sendEvent('agent:deleted', payload);
@@ -43,6 +45,8 @@ router.get('/', (req: Request, res: Response) => {
   agentEvents.on('task:failed', onTaskFailed);
   agentEvents.on('task:cancelled', onTaskCancelled);
   agentEvents.on('tool:approval_needed', onApprovalNeeded);
+  agentEvents.on('browser:take_control_needed', onTakeControlNeeded);
+  agentEvents.on('browser:take_control_resolved', onTakeControlResolved);
   agentEvents.on('agent:created', onAgentCreated);
   agentEvents.on('agent:updated', onAgentUpdated);
   agentEvents.on('agent:deleted', onAgentDeleted);
@@ -57,6 +61,8 @@ router.get('/', (req: Request, res: Response) => {
     agentEvents.off('task:failed', onTaskFailed);
     agentEvents.off('task:cancelled', onTaskCancelled);
     agentEvents.off('tool:approval_needed', onApprovalNeeded);
+    agentEvents.off('browser:take_control_needed', onTakeControlNeeded);
+    agentEvents.off('browser:take_control_resolved', onTakeControlResolved);
     agentEvents.off('agent:created', onAgentCreated);
     agentEvents.off('agent:updated', onAgentUpdated);
     agentEvents.off('agent:deleted', onAgentDeleted);

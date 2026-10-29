@@ -6,7 +6,7 @@ import { createTask, updateTaskStatus, createLog } from '../db/taskRepository';
 import { dbRun } from '../db/database';
 import { updateAgentStatus, getAgentById } from '../db/agentRepository';
 import { queryRelevantContext, ingestTaskInstruction } from '../rag/ragEngine';
-import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS, getServerStatus, getUnavailableServers } from '../mcp/toolRegistry';
+import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS, getServerStatus, getUnavailableServers, TAKE_CONTROL_TOOL } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
 import { deriveAgentEmoji, resolveMaxToolIterations } from '../../shared-types';
@@ -270,7 +270,7 @@ function shouldIngestInstruction(agent: Agent, instruction: string, signal: Abor
 export type TelemetryErrorType = 'provider_error' | 'tool_error' | 'timeout' | 'no_credential' | 'approval_required' | 'step_limit' | 'unknown';
 
 function classifyTaskError(err: unknown): TelemetryErrorType {
-  if (err instanceof UnattendedApprovalError) return 'approval_required';
+  if (err instanceof UnattendedApprovalError || err instanceof TakeControlUnattendedError) return 'approval_required';
   if (err instanceof StepLimitError) return 'step_limit';
   if (err instanceof DelegationFailedError) return 'tool_error';
   if (err instanceof OpenAITimeoutError || err instanceof AnthropicTimeoutError) return 'timeout';
@@ -317,7 +317,25 @@ function isReadOnlyTool(toolName: string): boolean {
   return READ_ONLY_TOOL_PREFIXES.some((prefix) => toolName.startsWith(prefix));
 }
 
-const DESTRUCTIVE_TOOLS = new Set([
+// Every tool call gets two separate answers, kept apart on purpose:
+//   approvalLevel()  — does a person have to OK this call before it runs?
+//   failureIsFatal() — if this call fails, does the whole task fail?
+// They used to be one set (DESTRUCTIVE_TOOLS), so a browser click that failed on a
+// stale element marked the task failed even after the agent recovered and finished.
+//
+// Approval levels:
+//   'none'   — never stops for a person.
+//   'ask'    — stops for a person when the agent's approval mode is on.
+//   'always' — stops for a person even with approval mode off: the call submits,
+//              pays, deletes, or runs code NodeBrain can't inspect.
+export type ApprovalLevel = 'none' | 'ask' | 'always';
+
+const TAKE_CONTROL_FULL_NAME = `${TAKE_CONTROL_TOOL.serverName}__${TAKE_CONTROL_TOOL.name}`;
+
+// Tools that change something outside NodeBrain. Gated in approval mode, and a
+// failure is fatal: the call may have half-happened (a message posted, a file
+// written), so the agent retrying it isn't safe.
+const EXTERNAL_WRITE_TOOLS = new Set([
   // telegram (@iqai/mcp-telegram) — tools/send-message.js, forward-message.js, pin-message.js
   'telegram__SEND_MESSAGE',
   'telegram__FORWARD_MESSAGE',
@@ -353,21 +371,10 @@ const DESTRUCTIVE_TOOLS = new Set([
   'notion__API-update-a-block',
   'notion__API-patch-block-children',
   'notion__API-move-page',
-  // playwright (@playwright/mcp@0.0.83). Gated: anything that can submit a form or
-  // run arbitrary code. Approval is by tool name, so every click is gated, even
-  // one that only opens a dropdown, and browser_type is gated for its `submit` arg.
-  // Not gated: navigate/back, snapshot, screenshot, find, wait_for, console/network
-  // reads, tabs, hover, resize, close, fill_form, select_option, emulate_media.
-  // See docs/spikes/browser-automation-biberk.md.
-  'playwright__browser_click',
-  'playwright__browser_press_key',
-  'playwright__browser_type',
-  'playwright__browser_handle_dialog',
-  'playwright__browser_evaluate',
-  'playwright__browser_run_code_unsafe',
-  'playwright__browser_file_upload',
-  'playwright__browser_drag',
-  'playwright__browser_drop',
+]);
+
+// Gated in approval mode, but a failure changes nothing and the agent can recover.
+const ASK_ONLY_TOOLS = new Set([
   // pdf-reader — reads arbitrary absolute paths; gated behind approval mode
   // even though it's a read, since it isn't confined to the filesystem sandbox.
   'pdf-reader__read_pdf',
@@ -376,27 +383,106 @@ const DESTRUCTIVE_TOOLS = new Set([
   'file-reader__read_document',
 ]);
 
+// playwright (@playwright/mcp@0.0.83). Tools that only read the page or move around
+// it. Any other playwright tool, including one a future version adds, is at least 'ask'.
+// See docs/spikes/browser-automation-biberk.md.
+const BROWSER_READ_TOOLS = new Set([
+  'browser_navigate', 'browser_navigate_back', 'browser_snapshot', 'browser_take_screenshot',
+  'browser_find', 'browser_wait_for', 'browser_console_messages', 'browser_network_requests',
+  'browser_network_request', 'browser_tabs', 'browser_hover', 'browser_resize', 'browser_close',
+  'browser_emulate_media',
+]);
+// Arbitrary page code, or sending local files to a site: can't tell what it does.
+const BROWSER_ALWAYS_TOOLS = new Set(['browser_evaluate', 'browser_run_code_unsafe', 'browser_file_upload']);
+// A button or link with one of these words in its label is treated as a submit.
+const SUBMIT_LABEL = /\b(submit|save|confirm|pay|purchase|buy|bind|order|checkout|delete|remove|send)\b/i;
+const CLICKABLE_ROLES = new Set(['button', 'link', 'menuitem']);
+
+// Looks up what a click target is in the last snapshot the agent took. The label
+// comes from the page, never from the model-written `element` argument, which can
+// say anything. Undefined when it can't tell (a CSS selector, or a ref the last
+// snapshot doesn't have).
+function resolveSnapshotTarget(snapshot: string, target: unknown): { role: string; name: string } | undefined {
+  if (typeof target !== 'string' || !/^[a-z0-9]+$/i.test(target)) return undefined;
+  const line = snapshot.split('\n').find(l => l.includes(`[ref=${target}]`));
+  const m = line?.match(/^\s*- (\w+)(?: "((?:[^"\\]|\\.)*)")?(?:.*?\]: (.+))?/);
+  if (!m) return undefined;
+  return { role: m[1], name: (m[2] || m[3] || '').trim() };
+}
+
+function browserApprovalLevel(toolName: string, args: Record<string, unknown>, lastSnapshot: string): ApprovalLevel {
+  if (BROWSER_READ_TOOLS.has(toolName)) return 'none';
+  if (BROWSER_ALWAYS_TOOLS.has(toolName)) return 'always';
+  if (toolName === 'browser_type') return args.submit ? 'always' : 'ask';
+  if (toolName === 'browser_press_key') return /^(Numpad)?Enter$/.test(String(args.key)) ? 'always' : 'ask';
+  // Accepting a confirm() is often the submit itself.
+  if (toolName === 'browser_handle_dialog') return args.accept ? 'always' : 'ask';
+  if (toolName === 'browser_click') {
+    const el = resolveSnapshotTarget(lastSnapshot, args.target);
+    // Fail closed: an element we can't identify, or a button with no readable label
+    // (an icon, often a trash can; icon fonts name it with a symbol), might be the submit.
+    if (!el) return 'always';
+    if (el.role === 'button' && !/[\p{L}\p{N}]/u.test(el.name)) return 'always';
+    return CLICKABLE_ROLES.has(el.role) && SUBMIT_LABEL.test(el.name) ? 'always' : 'ask';
+  }
+  // type into a field, fill_form, select_option, drag/drop, and anything unknown.
+  return 'ask';
+}
+
 // Servers NodeBrain ships. Anything else is a user-added custom MCP server whose
-// tools are unvetted, so approval mode must gate them even if they aren't in
-// DESTRUCTIVE_TOOLS — fail closed on the unknown rather than open.
+// tools are unvetted, so approval mode must gate them even if they aren't
+// classified here — fail closed on the unknown rather than open.
 const BUILTIN_SERVERS = new Set([
   ...SERVER_CONFIGS.map((config) => config.name),
   'pdf-reader',
   'file-reader',
   'agent-coordinator',
+  TAKE_CONTROL_TOOL.serverName,
 ]);
 
-function requiresApproval(fullToolName: string, serverName: string): boolean {
-  return DESTRUCTIVE_TOOLS.has(fullToolName) || !BUILTIN_SERVERS.has(serverName);
+export function approvalLevel(fullToolName: string, args: Record<string, unknown>, lastSnapshot: string): ApprovalLevel {
+  const { serverName, toolName } = parseToolName(fullToolName);
+  if (serverName === 'playwright') return browserApprovalLevel(toolName, args, lastSnapshot);
+  if (EXTERNAL_WRITE_TOOLS.has(fullToolName) || ASK_ONLY_TOOLS.has(fullToolName)) return 'ask';
+  return BUILTIN_SERVERS.has(serverName) ? 'none' : 'ask';
+}
+
+function needsApproval(level: ApprovalLevel, agent: Agent): boolean {
+  return level === 'always' || (level === 'ask' && !!agent.config.approvalMode);
+}
+
+// Browser errors that mean the action never reached the page: a stale or missing
+// element, or a timeout waiting for it. The agent can take a new snapshot and retry.
+const BROWSER_NEVER_RAN = /not found in the current page snapshot|Timeout \d+ms exceeded|not visible|not enabled|not editable|strict mode violation|outside of the viewport/i;
+
+export function failureIsFatal(fullToolName: string, level: ApprovalLevel, errorText: string): boolean {
+  if (EXTERNAL_WRITE_TOOLS.has(fullToolName)) return true;
+  // A browser failure is fatal only for a submit-type action whose error doesn't
+  // show it never ran: the form may have gone through.
+  if (parseToolName(fullToolName).serverName === 'playwright') {
+    return level === 'always' && !BROWSER_NEVER_RAN.test(errorText);
+  }
+  return false;
 }
 
 // An unattended run (scheduled, delegated) has no one to approve a gated tool.
 // Skipping the tool and carrying on would let the agent finish part of the job
 // and report success, so the whole run is aborted instead.
 class UnattendedApprovalError extends Error {
-  constructor(readonly toolName: string) {
-    super(`Run stopped: tool "${toolName}" requires human approval, and this run is unattended (scheduled or delegated). Run the agent manually, or turn off approval mode for it.`);
+  constructor(readonly toolName: string, level: ApprovalLevel = 'ask') {
+    super(level === 'always'
+      ? `Run stopped: tool "${toolName}" submits something and always needs a person to OK it, and this run is unattended (scheduled or delegated). Run the agent manually.`
+      : `Run stopped: tool "${toolName}" requires human approval, and this run is unattended (scheduled or delegated). Run the agent manually, or turn off approval mode for it.`);
     this.name = 'UnattendedApprovalError';
+  }
+}
+
+// Take Control needs a person at the browser. A scheduled or delegated run has
+// no one, so it stops with a reason a non-technical user can act on.
+class TakeControlUnattendedError extends Error {
+  constructor() {
+    super('Run stopped: this task needed a person to finish a step in the browser (like typing a code), but no one was there because it ran on its own. Start it yourself from the agent and stay nearby.');
+    this.name = 'TakeControlUnattendedError';
   }
 }
 
@@ -422,14 +508,68 @@ class DelegationFailedError extends Error {
 // unattended run never executes half a batch and then stops. Tools that won't
 // actually execute are exempt: unpermitted ones are rejected anyway, and dryRun
 // only simulates mutating tools.
-function assertNoUnattendedApproval(agent: Agent, humanPresent: boolean, toolNames: string[], allowedTools: Set<string>): void {
-  if (humanPresent || !agent.config.approvalMode) return;
-  for (const fullName of toolNames) {
+function assertNoUnattendedApproval(
+  agent: Agent,
+  humanPresent: boolean,
+  calls: Array<{ name: string; args: Record<string, unknown> }>,
+  allowedTools: Set<string>,
+  lastSnapshot: string,
+): void {
+  if (humanPresent) return;
+  for (const { name: fullName, args } of calls) {
     if (!allowedTools.has(fullName)) continue;
-    const { serverName, toolName } = parseToolName(fullName);
+    const { toolName } = parseToolName(fullName);
     if (agent.config.dryRun && !isReadOnlyTool(toolName)) continue;
-    if (requiresApproval(fullName, serverName)) throw new UnattendedApprovalError(fullName);
+    if (fullName === TAKE_CONTROL_FULL_NAME) throw new TakeControlUnattendedError();
+    const level = approvalLevel(fullName, args, lastSnapshot);
+    if (needsApproval(level, agent)) throw new UnattendedApprovalError(fullName, level);
   }
+}
+
+// Take Control: the agent hands the live browser to the person (a one-time code,
+// a CAPTCHA, anything it can't or mustn't do), the run waits, and resumes when the
+// person says they're done. The same pause as an approval, but the person acts in
+// the browser instead of clicking Approve. Cancelling the task ends the wait.
+const pendingTakeControls = new Map<string, (done: boolean) => void>();
+
+export function resolveTakeControl(requestId: string, done: boolean): boolean {
+  const resolve = pendingTakeControls.get(requestId);
+  if (!resolve) return false;
+  pendingTakeControls.delete(requestId);
+  resolve(done);
+  return true;
+}
+
+function requestTakeControl(taskId: string, agentId: string, reason: string, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const requestId = uuidv4();
+    const finish = (done: boolean) => {
+      signal.removeEventListener('abort', onAbort);
+      agentEvents.emit('browser:take_control_resolved', { taskId, requestId });
+      resolve(done);
+    };
+    const onAbort = () => {
+      if (pendingTakeControls.delete(requestId)) finish(false);
+    };
+    pendingTakeControls.set(requestId, finish);
+    signal.addEventListener('abort', onAbort);
+    agentEvents.emit('browser:take_control_needed', { taskId, agentId, requestId, reason });
+  });
+}
+
+async function handOverBrowser(taskId: string, agent: Agent, humanPresent: boolean, reason: unknown, signal: AbortSignal): Promise<string> {
+  if (!humanPresent) throw new TakeControlUnattendedError();
+  const ask = typeof reason === 'string' && reason.trim()
+    ? reason.trim()
+    : 'The agent needs you to finish a step in the browser.';
+  persistLog(makeLog(taskId, agent.id, `Waiting for you in the browser: ${ask}`, 'warn'));
+  const done = await requestTakeControl(taskId, agent.id, ask, signal);
+  if (!done) {
+    persistLog(makeLog(taskId, agent.id, 'You chose to stop instead of continuing in the browser', 'warn'));
+    return 'The person chose not to continue. Do not use the browser again. Stop now and report what you finished and where you stopped.';
+  }
+  persistLog(makeLog(taskId, agent.id, 'You handed the browser back. The agent is continuing.'));
+  return 'The person finished and handed the browser back. The page has probably changed: take a new snapshot before doing anything else.';
 }
 
 function getClient(provider: string, apiKey: string, customBaseUrl?: string): OpenAI {
@@ -510,13 +650,16 @@ async function runOpenAIAgenticLoop(
   signal: AbortSignal,
   humanPresent: boolean,
   depth = 0,
-  destructiveFailRef: { value: boolean } = { value: false },
+  fatalFailRef: { value: boolean } = { value: false },
   toolCallCountRef: { value: number } = { value: 0 },
 ): Promise<string> {
   const tools = await getToolsForAgent(agent.id);
   logUnavailableIntegrations(taskId, agent);
   const formattedTools = formatToolsForOpenAI(tools);
   const allowedTools = permittedToolNames(tools);
+  // The last snapshot the agent took (whole page or part), for telling what a click
+  // targets. A ref outside it can't be identified, so that click fails closed.
+  let lastSnapshot = '';
   const maxIterations = resolveMaxToolIterations(agent.config.maxToolIterations);
   let iterations = 0;
 
@@ -553,7 +696,13 @@ async function runOpenAIAgenticLoop(
 
     messages.push(message);
 
-    assertNoUnattendedApproval(agent, humanPresent, message.tool_calls.map(tc => tc.function.name), allowedTools);
+    assertNoUnattendedApproval(
+      agent,
+      humanPresent,
+      message.tool_calls.map(tc => ({ name: tc.function.name, args: JSON.parse(tc.function.arguments || '{}') as Record<string, unknown> })),
+      allowedTools,
+      lastSnapshot,
+    );
 
     for (const toolCall of message.tool_calls) {
       if (!allowedTools.has(toolCall.function.name)) {
@@ -567,7 +716,8 @@ async function runOpenAIAgenticLoop(
 
       // Unattended runs never reach this prompt: assertNoUnattendedApproval
       // aborted the run above, before any tool in the batch executed.
-      if (agent.config.approvalMode && humanPresent && requiresApproval(toolCall.function.name, serverName)) {
+      const level = approvalLevel(toolCall.function.name, args, lastSnapshot);
+      if (humanPresent && needsApproval(level, agent)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${toolCall.function.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, toolCall.function.name, args);
         if (!approved) {
@@ -632,15 +782,18 @@ async function runOpenAIAgenticLoop(
               toolResult = delegatedTask.output ?? '(no response from sub-agent)';
             }
           }
+        } else if (serverName === TAKE_CONTROL_TOOL.serverName && toolName === TAKE_CONTROL_TOOL.name) {
+          toolResult = await handOverBrowser(taskId, agent, humanPresent, args.reason, signal);
         } else {
           toolResult = await callTool(serverName, toolName, args);
+          if (serverName === 'playwright' && toolName === 'browser_snapshot') lastSnapshot = toolResult;
         }
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" completed`));
         if (process.env.NODEBRAIN_DEBUG_TOOLS) {
           console.log('[DEBUG:TOOLS] Tool succeeded:', toolCall.function.name);
         }
       } catch (err) {
-        if (err instanceof DelegationFailedError) throw err;
+        if (err instanceof DelegationFailedError || err instanceof TakeControlUnattendedError) throw err;
         toolResult = `[TOOL ERROR] ${err instanceof Error ? err.message : String(err)}`;
         toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${toolCall.function.name}" failed: ${toolResult}`, 'error'));
@@ -649,8 +802,8 @@ async function runOpenAIAgenticLoop(
         }
       }
 
-      if (toolFailed && DESTRUCTIVE_TOOLS.has(toolCall.function.name)) {
-        destructiveFailRef.value = true;
+      if (toolFailed && failureIsFatal(toolCall.function.name, level, toolResult)) {
+        fatalFailRef.value = true;
       }
 
       messages.push({
@@ -674,7 +827,7 @@ async function runAnthropicAgenticLoop(
   signal: AbortSignal,
   humanPresent: boolean,
   depth = 0,
-  destructiveFailRef: { value: boolean } = { value: false },
+  fatalFailRef: { value: boolean } = { value: false },
   toolCallCountRef: { value: number } = { value: 0 },
   history: HistoryTurn[] = [],
 ): Promise<string> {
@@ -682,6 +835,9 @@ async function runAnthropicAgenticLoop(
   logUnavailableIntegrations(taskId, agent);
   const formattedTools = formatToolsForAnthropic(tools);
   const allowedTools = permittedToolNames(tools);
+  // The last snapshot the agent took (whole page or part), for telling what a click
+  // targets. A ref outside it can't be identified, so that click fails closed.
+  let lastSnapshot = '';
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map((t): Anthropic.MessageParam => ({ role: t.role, content: t.content })),
@@ -722,8 +878,9 @@ async function runAnthropicAgenticLoop(
     assertNoUnattendedApproval(
       agent,
       humanPresent,
-      response.content.flatMap(b => (b.type === 'tool_use' ? [b.name] : [])),
+      response.content.flatMap(b => (b.type === 'tool_use' ? [{ name: b.name, args: b.input as Record<string, unknown> }] : [])),
       allowedTools,
+      lastSnapshot,
     );
 
     for (const block of response.content) {
@@ -739,7 +896,8 @@ async function runAnthropicAgenticLoop(
       const args = block.input as Record<string, unknown>;
 
       // See the matching comment in runOpenAIAgenticLoop.
-      if (agent.config.approvalMode && humanPresent && requiresApproval(block.name, serverName)) {
+      const level = approvalLevel(block.name, args, lastSnapshot);
+      if (humanPresent && needsApproval(level, agent)) {
         persistLog(makeLog(taskId, agent.id, `Awaiting approval for tool: ${block.name}`, 'warn'));
         const approved = await requestApproval(taskId, agent.id, block.name, args);
         if (!approved) {
@@ -798,19 +956,22 @@ async function runAnthropicAgenticLoop(
               toolResult = delegatedTask.output ?? '(no response from sub-agent)';
             }
           }
+        } else if (serverName === TAKE_CONTROL_TOOL.serverName && toolName === TAKE_CONTROL_TOOL.name) {
+          toolResult = await handOverBrowser(taskId, agent, humanPresent, args.reason, signal);
         } else {
           toolResult = await callTool(serverName, toolName, args);
+          if (serverName === 'playwright' && toolName === 'browser_snapshot') lastSnapshot = toolResult;
         }
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" completed`));
       } catch (err) {
-        if (err instanceof DelegationFailedError) throw err;
+        if (err instanceof DelegationFailedError || err instanceof TakeControlUnattendedError) throw err;
         toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
         toolFailed = true;
         persistLog(makeLog(taskId, agent.id, `Tool "${block.name}" failed: ${toolResult}`, 'error'));
       }
 
-      if (toolFailed && DESTRUCTIVE_TOOLS.has(block.name)) {
-        destructiveFailRef.value = true;
+      if (toolFailed && failureIsFatal(block.name, level, toolResult)) {
+        fatalFailRef.value = true;
       }
 
       toolResults.push({
@@ -918,7 +1079,7 @@ export async function executeAgentTask(
     const toolNudge = '\n\nYou have real, working tools available to you (file access, messaging, and more). When a task requires reading files, sending messages, or taking actions, you MUST call the appropriate tool directly. Never tell the user to do it themselves, and never write example code instead of calling a tool.';
     const fullSystemPrompt = (agent.systemPrompt || 'You are a helpful AI assistant.') + contextBlock + connectionContext + telegramHint + toolNudge;
 
-    const destructiveFailRef = { value: false };
+    const fatalFailRef = { value: false };
     let output = '';
     const preparedHistory = prepareHistory(history, agent.provider);
     if (preparedHistory.length > 0) {
@@ -937,7 +1098,7 @@ export async function executeAgentTask(
         controller.signal,
         humanPresent,
         depth,
-        destructiveFailRef,
+        fatalFailRef,
         toolCallCountRef,
         preparedHistory,
       );
@@ -948,7 +1109,7 @@ export async function executeAgentTask(
         ...preparedHistory.map((t): OpenAI.ChatCompletionMessageParam => ({ role: t.role, content: t.content })),
         { role: 'user', content: userInput },
       ];
-      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, humanPresent, depth, destructiveFailRef, toolCallCountRef);
+      output = await runOpenAIAgenticLoop(client, model, messages, agent, taskId, controller.signal, humanPresent, depth, fatalFailRef, toolCallCountRef);
     }
 
     activeTaskControllers.delete(taskId);
@@ -961,8 +1122,8 @@ export async function executeAgentTask(
       return { ...task, status: 'cancelled' as const, completedAt: new Date().toISOString() };
     }
 
-    if (destructiveFailRef.value) {
-      const errorMessage = 'A required action could not be completed — a destructive tool call failed.';
+    if (fatalFailRef.value) {
+      const errorMessage = 'An action that changes something outside NodeBrain failed, and it may have partly gone through. Check the result before running this again.';
       persistLog(makeLog(taskId, agent.id, `Task failed: ${errorMessage}`, 'error'));
       updateTaskStatus(taskId, 'failed', undefined, errorMessage);
       updateAgentStatus(agent.id, 'error');

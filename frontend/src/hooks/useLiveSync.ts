@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useStore } from '../stores/appStore';
-import type { ToolApprovalRequest } from '../stores/appStore';
+import type { ToolApprovalRequest, TakeControlRequest } from '../stores/appStore';
 import type { TaskLog, Task, Agent } from '@shared/types';
 import { pushToken } from '../utils/tokenStreamBuffer';
 
@@ -54,6 +54,17 @@ export function useLiveSync() {
       es.addEventListener('tool:approval_needed', (e) => {
         const req: ToolApprovalRequest = JSON.parse((e as MessageEvent).data);
         useStore.getState().addPendingApproval(req);
+      });
+
+      es.addEventListener('browser:take_control_needed', (e) => {
+        const req: TakeControlRequest = JSON.parse((e as MessageEvent).data);
+        useStore.getState().addPendingTakeControl(req);
+      });
+
+      // Also fires when the task is stopped while waiting, so the prompt closes.
+      es.addEventListener('browser:take_control_resolved', (e) => {
+        const { requestId } = JSON.parse((e as MessageEvent).data) as { requestId: string };
+        useStore.getState().removePendingTakeControl(requestId);
       });
 
       es.addEventListener('agent:created', (e) => {

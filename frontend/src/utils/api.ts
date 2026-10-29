@@ -76,6 +76,12 @@ export const api = {
       body: JSON.stringify({ approved }),
     }),
 
+  respondToTakeControl: (taskId: string, requestId: string, done: boolean) =>
+    request<{ requestId: string; done: boolean }>(`/tasks/${taskId}/take-control/${requestId}`, {
+      method: 'POST',
+      body: JSON.stringify({ done }),
+    }),
+
   getLogs: () => request<import('@shared/types').TaskLog[]>('/logs'),
   getAgentLogs: (agentId: string) => request<import('@shared/types').TaskLog[]>(`/logs/agent/${agentId}`),
 

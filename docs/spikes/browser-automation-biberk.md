@@ -1,4 +1,7 @@
-# Spike: browser automation on biBerk's GL quote flow — PAUSED
+# Spike: browser automation — biBerk (abandoned), then OrangeHRM + Take Control
+
+The second attempt (2026-10-29) is at the end of this file. Everything above it is the
+biBerk record from 2026-10-27.
 
 Status as of 2026-10-27: **three runs done, all blocked by biBerk** (see "Runs"). The run-3
 evidence points at automated-browser detection. Branch `spike/playwright-biberk`.
@@ -185,3 +188,116 @@ Run 2 detail:
 
 ABC Roofing LLC · 123 Main St, Dallas, TX 75201 · FEIN 12-3456789 · LLC, est. 2019 ·
 NAICS 238160 (roofing contractors) · 3 trucks, 3 drivers · no prior coverage, no claims.
+
+---
+
+# Second attempt (2026-10-29): OrangeHRM and Take Control
+
+biBerk is abandoned: it is a direct-to-consumer site and defends itself like one. The real
+target is authenticated carrier portals; one practitioner says those don't challenge you
+after the first OTP. New targets: the OrangeHRM demo (Admin / admin123) for a full workflow,
+and practice.expandtesting.com/otp-login for Take Control. VPN off: every run below went
+direct from a Philippine residential ISP (PLDT). No evasion of any kind.
+
+Spend this attempt: $1.19 (4 model runs). Total spike spend: $2.82.
+
+## Engine changes (agentEngine.ts, toolRegistry.ts, routes, frontend)
+
+**`DESTRUCTIVE_TOOLS` is split into two independent functions.**
+- `approvalLevel(tool, args, lastSnapshot)` returns `'none' | 'ask' | 'always'`.
+  - `none`: never stops. Browser navigate/read/screenshot/wait, NodeBrain's own servers.
+  - `ask`: stops when approval mode is on. Typing into a field (`browser_type`, `fill_form`,
+    `select_option`), ordinary clicks, keys other than Enter, every old `DESTRUCTIVE_TOOLS`
+    entry, unknown custom servers, and any playwright tool a future version adds (this used
+    to be open by default).
+  - `always`: stops even with approval mode off, and aborts an unattended run.
+    - A click on a button/link/menuitem whose label matches
+      submit|save|confirm|pay|purchase|buy|bind|order|checkout|delete|remove|send.
+      The label is read from the last snapshot by its ref, never from the model's `element` text.
+    - Fail-closed cases: a button with no readable label (OrangeHRM's trash/edit icons are
+      named with icon-font glyphs), a ref the last snapshot doesn't contain, a CSS-selector target.
+    - Also: Enter, `type` with `submit: true`, accepting a dialog, `evaluate`,
+      `run_code_unsafe`, `file_upload`.
+- `failureIsFatal(tool, level, error)`.
+  - Fatal: the external-write tools (Slack/GitHub/Telegram/filesystem/Notion writes), and an
+    `always`-level browser action whose error doesn't show it never reached the page.
+  - Not fatal: stale ref, `Timeout ...ms exceeded`, not visible/enabled/editable, all other
+    browser errors, and pdf/file reader failures. The readers *were* fatal before, as a side
+    effect of sharing the approval set: a behaviour change outside the browser.
+- Unchanged: "fatal" only marks the task failed at the end. The loop keeps running, so an
+  agent can still retry a failed submit.
+- Check: `npx tsx src/_classify_check.ts <pagerep dir>` runs 27 cases against real
+  OrangeHRM snapshots. All pass.
+
+**Take Control.**
+- An `ask_person_to_take_over` tool (server `browser-handoff`, arg `reason`: plain words for
+  the person) is added to any agent that has playwright tools.
+- The engine emits `browser:take_control_needed` and waits on a Promise. The Promise resolves
+  on `POST /api/tasks/:taskId/take-control/:requestId {done}`, or when the task is cancelled
+  (approval's wait can't be cancelled; see below).
+- On resume the agent is told to take a new snapshot. Unattended runs stop with a plain message.
+- Frontend `TakeControlModal`: "Your turn in the browser", the agent's sentence, and
+  "Done, continue" / "Stop the task". No tool names, no JSON.
+- Emits no telemetry. The scrubber allowlist is untouched.
+
+**Known gap left alone (approval semantics):** `requestApproval`'s Promise isn't tied to the
+task's abort signal. Stopping a task while an approval is open leaves the loop waiting forever.
+
+## Runs (claude-sonnet-5-5, 8 browser tools + take control, approval mode off, human present)
+
+The harness approves `always` calls itself and logs each one.
+
+| Run | Steps | Input tok | Cost | Status | What actually happened |
+|---|---|---|---|---|---|
+| OrangeHRM 1 | 29 | 417,857 | $0.874 | completed | Logged in, opened Add Employee, filled names. Save gated `always` (correct). Site said "Employee Id already exists": the shared demo suggests IDs that are already taken. The task said leave other fields alone, so the agent stopped and asked. Nothing created. |
+| OrangeHRM 2 | 13 | 51,521 | $0.117 | completed | Every navigation hit NodeBrain's 60s MCP request timeout (-32001). Page title loaded, body blank. Agent reported honestly and stopped. |
+| OrangeHRM 3 | 12 | 47,224 | $0.108 | completed | Same as run 2. |
+| OTP 1 | 6 | ~43k | $0.088 | completed | Typed email, clicked Send (gated `always`), saw the code page and handed over. Didn't use the code printed on the page. Nobody answered within the 20-minute wait, which the harness counts as "stop". The agent stopped cleanly. **Pause and stop paths verified; hand-back-and-resume not yet.** |
+
+**All four ended `completed` even though none did the job.** This is separate from the
+fatal-failure split: an agent that stops early and explains why is recorded as a success.
+
+**OrangeHRM blank page, unresolved.**
+- Reproducible through NodeBrain's launch path (`connectToServer` + `SERVER_CONFIGS.playwright`):
+  7 of 8 navigations timed out at 60s.
+- Launching the same package directly with the MCP SDK: 9 of 9 loaded, in 0.5–11s.
+- example.com and expandtesting load fine through NodeBrain.
+- Ruled out: proxy env, stderr pipe, client name, open-websearch running alongside,
+  importing the backend.
+- One lead: adding the `--isolated` *flag* got through once (23.8s), while
+  `PLAYWRIGHT_MCP_ISOLATED` in the env did not. Too few samples to call it.
+- Separately: NodeBrain's MCP request timeout (SDK default 60s) equals Playwright's 60s
+  navigation timeout, so a slow page surfaces as an opaque protocol error.
+
+Also from run 1: the agent's partial snapshots (`target`/`depth`) weren't tracked, so the
+second Save was judged against the old page and landed on `always` only via fail-closed.
+Fixed: the last snapshot of any kind is used now.
+
+## Page representation (question for offline / local models; not fixed)
+
+Measured with `src/_pagerep.ts` and `src/_collapse.ts` using count_tokens (Claude's
+tokenizer; Qwen's will differ somewhat), on real OrangeHRM pages:
+
+| Page | Raw HTML | Full a11y snapshot | Interactive-only (refs kept) | Rows collapsed (refs kept) | innerText (no refs) |
+|---|---|---|---|---|---|
+| Login | 8,524 | 884 | 132 | 54 | 141 |
+| Dashboard | 201,957 | 4,850 | 502 | 305 | 1,001 |
+| Employee list (grid, 50 rows) | 242,717 | 17,638 | 10,924 | 2,985 | 1,380 |
+| Add employee | 174,633 | 2,476 | 577 | 347 | 317 |
+
+Tool schemas: all 25 playwright tools are 6,161 tokens; the 8 used here are 2,077. Measured
+per-step floor with 9 tools + system prompt + task: ~2,700 tokens before any page.
+
+Findings:
+- The smallest view the agent can still act on is the accessibility tree reduced to
+  actionable elements with refs, with tables collapsed to one line per row. Raw HTML is out
+  of the question; innerText has no refs, so the agent can't click anything.
+- Forms fit a 4k context (54–577 tokens). Grids don't, unless paged (~3k for 50 rows).
+- History is the real problem. Even the frontier run reached 36k input by step 27, because
+  every earlier snapshot stays in context. A 4k model would need ≤3–4 tool schemas (~1k),
+  only the current page, a one-line action log instead of transcripts, and paged grids.
+  That is a different agent loop from today's, not a setting.
+- Verdict: a 4B CPU model can't drive *exploratory* browser automation in NodeBrain's
+  current loop. It might work for *replaying* a recorded workflow, where the model only
+  matches one field per step against a compact page view. Untested: no local model was run,
+  and 4B accuracy on these views is unknown.

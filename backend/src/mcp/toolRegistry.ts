@@ -346,6 +346,24 @@ const DELEGATE_TOOL: MCPToolWithServer = {
   },
 };
 
+// Take Control: handled by agentEngine, not an MCP server. `reason` is shown to the
+// person as-is, so the description asks for plain words.
+export const TAKE_CONTROL_TOOL: MCPToolWithServer = {
+  serverName: 'browser-handoff',
+  name: 'ask_person_to_take_over',
+  description: 'Hand the browser to the person and wait until they hand it back. Use this when you hit something you must not or cannot do yourself: a one-time code sent to their phone or email, a CAPTCHA, a password you were not given, or anything else that blocks you. Do not guess codes or passwords, and do not use one shown on the page. When this returns, the page has probably changed: take a new snapshot before doing anything else.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        description: 'One or two short sentences, in plain everyday words, telling the person what to do in the browser. Example: "The site sent a code to your email. Please type it in and press Verify." Never mention tools, code, errors, or technical terms.',
+      },
+    },
+    required: ['reason'],
+  },
+};
+
 export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithServer[]> {
   await Promise.race([
     toolRegistryReady,
@@ -372,6 +390,11 @@ export async function getToolsForAgent(agentId?: string): Promise<MCPToolWithSer
   // delegation the user already wired up via a connection.
   if (agentId && getConnectionsForAgent(agentId).length > 0) {
     result = [...result, DELEGATE_TOOL];
+  }
+
+  // Take Control comes with the browser: any agent that can drive it can hand it over.
+  if (result.some(t => t.serverName === 'playwright')) {
+    result = [...result, TAKE_CONTROL_TOOL];
   }
 
   return result;

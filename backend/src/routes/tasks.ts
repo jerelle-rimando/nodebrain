@@ -8,7 +8,7 @@ import {
   getAllRecentLogs,
   updateTaskStatus,
 } from '../db/taskRepository';
-import { cancelTask, agentEvents, resolveApproval } from '../agents/agentEngine';
+import { cancelTask, agentEvents, resolveApproval, resolveTakeControl } from '../agents/agentEngine';
 
 const router = Router();
 
@@ -76,6 +76,24 @@ router.post('/:taskId/approve/:approvalId', (req, res) => {
   }
 
   res.json({ success: true, data: { approvalId, approved } });
+});
+
+// POST /api/tasks/:taskId/take-control/:requestId — the person is done in the
+// browser (done: true) or wants the agent to stop (done: false).
+router.post('/:taskId/take-control/:requestId', (req, res) => {
+  const { requestId } = req.params;
+  const { done } = req.body as { done: boolean };
+
+  if (typeof done !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'Body must include "done" boolean' });
+  }
+
+  const found = resolveTakeControl(requestId, done);
+  if (!found) {
+    return res.status(404).json({ success: false, error: 'Take Control request not found or already resolved' });
+  }
+
+  res.json({ success: true, data: { requestId, done } });
 });
 
 // GET /api/tasks/:id/logs

@@ -13,6 +13,7 @@ import { SettingsPage } from './components/settings/SettingsPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
+import { TakeControlModal } from './components/shared/TakeControlModal';
 import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
 import { ConnectionBanner } from './components/shared/ConnectionBanner';
@@ -164,6 +165,7 @@ export default function App() {
       </div>
       </div>
       <ApprovalModal />
+      <TakeControlModal />
       <ToastContainer />
     </div>
   );

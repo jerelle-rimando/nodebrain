@@ -9,6 +9,14 @@ export interface ToolApprovalRequest {
   args: Record<string, unknown>;
 }
 
+// The agent handed the browser to the person (Take Control) and is waiting.
+export interface TakeControlRequest {
+  taskId: string;
+  agentId: string;
+  requestId: string;
+  reason: string;
+}
+
 type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
 
 interface AppState {
@@ -26,6 +34,7 @@ interface AppState {
   selectedAgentId: string | null;
   logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
+  pendingTakeControls: TakeControlRequest[];
   // Whether the Electron-proxied backend is currently reachable. Driven by
   // useLiveSync's SSE connection (primary) and api.ts's request() (secondary).
   backendConnected: boolean;
@@ -57,6 +66,8 @@ interface AppState {
   setLogsFilterAgentId: (id: string | null) => void;
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
+  addPendingTakeControl: (req: TakeControlRequest) => void;
+  removePendingTakeControl: (requestId: string) => void;
   setBackendConnected: (connected: boolean) => void;
 }
 
@@ -72,6 +83,7 @@ export const useStore = create<AppState>((set) => ({
   selectedAgentId: null,
   logsFilterAgentId: null,
   pendingApprovals: [],
+  pendingTakeControls: [],
   backendConnected: true,
 
   setAvailableModels: (availableModels) => set({ availableModels }),
@@ -101,5 +113,7 @@ export const useStore = create<AppState>((set) => ({
   setLogsFilterAgentId: (logsFilterAgentId) => set({ logsFilterAgentId }),
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
   removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
+  addPendingTakeControl: (req) => set((s) => ({ pendingTakeControls: [...s.pendingTakeControls, req] })),
+  removePendingTakeControl: (requestId) => set((s) => ({ pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId) })),
   setBackendConnected: (backendConnected) => set({ backendConnected }),
 }));
