@@ -72,7 +72,8 @@ change in its three call sites.
 - Not updated: the frontend integration cards (`IntegrationsPage.tsx`, `statusText.ts`),
   and `BUILTIN_INTEGRATIONS` in `telemetry-worker/src/index.ts` (it would be reported as
   'custom'). Not needed for the spike.
-- Browser profile: the default is persistent (`%LOCALAPPDATA%\ms-playwright\mcp-msedge-profile`),
+- Browser profile: the default is persistent (`%LOCALAPPDATA%\ms-playwright-mcp\mcp-msedge-<hash>`,
+  where the hash is of the server's cwd; from `backend/` it is `mcp-msedge-e2bc99f`),
   so cookies survive between runs. For the timeout test, decide whether to add `--isolated`.
 
 ## Runs (2026-10-27)
@@ -257,17 +258,92 @@ The harness approves `always` calls itself and logs each one.
 **All four ended `completed` even though none did the job.** This is separate from the
 fatal-failure split: an agent that stops early and explains why is recorded as a success.
 
-**OrangeHRM blank page, unresolved.**
-- Reproducible through NodeBrain's launch path (`connectToServer` + `SERVER_CONFIGS.playwright`):
-  7 of 8 navigations timed out at 60s.
-- Launching the same package directly with the MCP SDK: 9 of 9 loaded, in 0.5–11s.
-- example.com and expandtesting load fine through NodeBrain.
-- Ruled out: proxy env, stderr pipe, client name, open-websearch running alongside,
-  importing the backend.
-- One lead: adding the `--isolated` *flag* got through once (23.8s), while
-  `PLAYWRIGHT_MCP_ISOLATED` in the env did not. Too few samples to call it.
-- Separately: NodeBrain's MCP request timeout (SDK default 60s) equals Playwright's 60s
-  navigation timeout, so a slow page surfaces as an opaque protocol error.
+**OrangeHRM blank page: not a NodeBrain bug as far as can be measured (re-investigated 2026-10-30).**
+
+What 10-29 reported: 7 of 8 navigations through NodeBrain's launch path timed out at 60s, while
+9 of 9 direct MCP SDK launches loaded. Runs 2 and 3 reached the login URL and title, but the
+body stayed empty for minutes, through repeated navigations. That was a real stall, not a
+slow render. Two of the conclusions drawn from it were wrong:
+
+- **The 7-of-8 rate didn't reproduce.** On 2026-10-30, same machine, same network, no model
+  calls: 58 of 58 launches loaded on every path.
+
+  | Path | Launches | Loaded | navigate | Form visible |
+  |---|---|---|---|---|
+  | Same spawn as `connectToServer` (full env, stderr piped) | 19 | 19 | 1.9–6.3s | 4.3–10.4s |
+  | Real `initializeToolRegistry` + `callTool`, with open-websearch running too | 13 | 13 | 2.3–4.4s | 4.3–8.1s |
+  | Direct SDK launch (SDK default env) | 10 | 10 | 4.4–8.2s | 6.9–13.3s |
+  | `PLAYWRIGHT_MCP_ISOLATED=true` | 10 | 10 | 7.2–16.4s | 9.2–22.5s |
+  | `--isolated` flag | 6 | 6 | 8.6–12.7s | 14.7–16.8s |
+
+- **`--isolated` was never a lead.** `_harness.ts` already sets `PLAYWRIGHT_MCP_ISOLATED=true`
+  before starting the registry, so the failing runs were already isolated. The flag and the
+  env var set the same field (`config.browser.isolated`) and produce the same Edge launch:
+  a fresh `%TEMP%\playwright_chromiumdev_profile-*` profile, not the persistent one. "Env failed,
+  flag passed once" was a setting compared against itself. The 10-29 failures also happened
+  on the persistent profile: the Playwright browser registry entry for the 21:25 NodeBrain
+  launch (`%LOCALAPPDATA%\ms-playwright\b\browser@f76eb6…`) lists `mcp-msedge-e2bc99f` as its
+  user data dir. Isolated mode is only slower (2–3×, nothing cached).
+
+**Measurement trap: a blank snapshot right after navigate doesn't mean the page failed.**
+`browser_navigate` returns at DOMContentLoaded plus at most 5s of `load`, before OrangeHRM's Vue
+app renders the form. A `browser_snapshot` taken straight after shows the title and an empty
+body even on a good load; the form appears about 2s later. Poll for a known element (here
+"Username") before calling a load failed.
+
+**Where the time goes** (isolated launch, the slowest of the day, `DEBUG=pw:api,pw:browser`):
+
+```
+     0ms  spawn npx
+  2060ms  Edge launching
+  2068ms  Edge launched (pid)                    launch: 8ms
+  2361ms  MCP initialized, tools listed
+  2590ms  goto https://opensource-demo.orangehrmlive.com
+ 11030ms  "commit" after redirect to /auth/login  8.4s waiting on the server
+ 18413ms  "domcontentloaded" + "load"             7.4s fetching head assets
+ 20470ms  form appears in snapshot
+```
+
+Spawn, Edge launch and connect are about 2.4s together, and no run waited on a profile lock.
+The rest is network. The login page's `<head>` loads ~3.5 MB of render-blocking files
+(`chunk-vendors.js` 1.67 MB, `app.js` 1.5 MB, two CSS files) after an HTML response that
+sometimes took 5.5s, and the persistent profile re-downloaded them too. The 10-29 symptom
+(URL and title, then no body) fits one of those downloads stalling on the shared public
+demo server, until Playwright's 60s navigation timeout and NodeBrain's 60s MCP timeout fire.
+
+**Launch paths compared.**
+- Edge command line: identical, flag for flag (including
+  `--disable-blink-features=AutomationControlled`, `--user-data-dir`, `--remote-debugging-pipe`).
+  MCP args identical: `-y @playwright/mcp@0.0.83 --browser msedge --output-dir %TEMP%\nodebrain-playwright`.
+- Environment: the direct SDK launch gets the SDK's 12 defaults (APPDATA, HOMEDRIVE, HOMEPATH,
+  LOCALAPPDATA, PATH, PROCESSOR_ARCHITECTURE, SYSTEMDRIVE, SYSTEMROOT, TEMP, USERNAME,
+  USERPROFILE, PROGRAMFILES). NodeBrain passes all of `process.env`, which adds 65 more
+  (terminal, VS Code, git-askpass, TMP, PATHEXT…). None is a proxy, TLS, Node or Playwright
+  setting. The one Chromium reads, `CHROME_CRASHPAD_PIPE_NAME` (inherited from VS Code), is
+  moot under `--disable-breakpad` and was present in all 32 passing NodeBrain-path runs.
+- Spawn options: identical in dev. cross-spawn, never `detached`, `windowsHide` only under
+  Electron. The failing runs were dev mode ("system npx, no bundled npm"), so
+  `withBundledRuntime` and the Node-removal work didn't apply.
+
+**Also ruled out:** stale Edge processes or profile locks (none before or after any run; close
+takes ~280ms; a real lock throws "Browser is already in use", it doesn't hang);
+`%TEMP%\nodebrain-playwright` (124 small files, 679 KB, never read at launch); a service
+worker (none; just the `/` → `/web/index.php/auth/login` redirect).
+
+Caveat: the 10-29 direct-launch results weren't saved, so whether they ran at the same time
+as the failures can't be checked. If they didn't, the server was simply slow then and fine now.
+
+**Recommendations (not implemented):**
+1. Give playwright calls an MCP request timeout longer than Playwright's 60s navigation
+   timeout (e.g. 90s). Today the two are equal, so a slow page surfaces as an opaque
+   `-32001 Request timed out`. With the larger timeout the agent gets Playwright's own
+   `Timeout 60000ms exceeded`, which it can act on.
+2. Don't use the shared OrangeHRM demo for timing. Its server speed is the main variable
+   (navigate drifted from 2s to 10s within an hour on 10-30).
+3. Drop `PLAYWRIGHT_MCP_ISOLATED` from the harness unless a run needs a clean profile. It
+   slows every load and doesn't prevent the hang.
+4. If it hangs again, capture it with `DEBUG=pw:api,pw:browser` and the page's resource
+   timings at that moment, to see which file stalls.
 
 Also from run 1: the agent's partial snapshots (`target`/`depth`) weren't tracked, so the
 second Save was judged against the old page and landed on `always` only via fail-closed.
