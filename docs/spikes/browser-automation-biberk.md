@@ -200,7 +200,7 @@ after the first OTP. New targets: the OrangeHRM demo (Admin / admin123) for a fu
 and practice.expandtesting.com/otp-login for Take Control. VPN off: every run below went
 direct from a Philippine residential ISP (PLDT). No evasion of any kind.
 
-Spend this attempt: $1.19 (4 model runs). Total spike spend: $2.82.
+Spend this attempt: $1.38 (6 model runs). Total spike spend: $3.01.
 
 ## Engine changes (agentEngine.ts, toolRegistry.ts, routes, frontend)
 
@@ -253,10 +253,22 @@ The harness approves `always` calls itself and logs each one.
 | OrangeHRM 1 | 29 | 417,857 | $0.874 | completed | Logged in, opened Add Employee, filled names. Save gated `always` (correct). Site said "Employee Id already exists": the shared demo suggests IDs that are already taken. The task said leave other fields alone, so the agent stopped and asked. Nothing created. |
 | OrangeHRM 2 | 13 | 51,521 | $0.117 | completed | Every navigation hit NodeBrain's 60s MCP request timeout (-32001). Page title loaded, body blank. Agent reported honestly and stopped. |
 | OrangeHRM 3 | 12 | 47,224 | $0.108 | completed | Same as run 2. |
-| OTP 1 | 6 | ~43k | $0.088 | completed | Typed email, clicked Send (gated `always`), saw the code page and handed over. Didn't use the code printed on the page. Nobody answered within the 20-minute wait, which the harness counts as "stop". The agent stopped cleanly. **Pause and stop paths verified; hand-back-and-resume not yet.** |
+| OTP 1 | 6 | ~43k | $0.088 | completed | Typed email, clicked Send (gated `always`), saw the code page and handed over. Didn't use the code printed on the page. Nobody answered, and the *harness's own* 20-minute limit treated that as "stop" and exited, which closed the browser. The engine has no time limit. The agent stopped cleanly. **Pause and stop paths verified; hand-back-and-resume not yet.** |
+| OTP 2 (10-30) | 6 | 48,564 | $0.104 | completed | **Hand-back and resume verified.** The harness limit was removed, and the profile was persistent. Email, Send (`always`), then handover. The person typed the code in the open Edge window, clicked Verify and said done after 152s. The agent's first action after resuming was a snapshot of the current page, with no re-navigation and no repeated email/Send. It saw `/secure` "You logged into a secure area!" and reported success. 4 model calls before the pause, 2 after. |
+| OTP 3 (10-30) | 6 | 39,879 | $0.087 | **cancelled** | Same steps, and the harness answered Stop at the handover. Checks the new early-stop status (below): the agent's report ("I didn't finish the login…") is kept as the output. |
 
-**All four ended `completed` even though none did the job.** This is separate from the
-fatal-failure split: an agent that stops early and explains why is recorded as a success.
+**OTP 1 and the OrangeHRM runs ended `completed` even though none did the job.** This is
+separate from the fatal-failure split: an agent that stops early and explains why is recorded
+as a success.
+- Fixed (contained, engine only): when the person chooses Stop at a handover, the task ends
+  `cancelled` with the agent's report as output, and emits `task:cancelled`. It reuses the
+  existing status and event; nothing new in the frontend, DB or telemetry. Verified by OTP 3.
+- Not fixed, needs a design decision: an agent that gives up on its own (OrangeHRM 1–3) is
+  still `completed`. The engine can't tell "done" from "stopped and explained" without a
+  signal from the model. Proposal: a required `finish(outcome: done | blocked, summary)` tool,
+  or a structured last message, mapped to a new status such as `needs_attention` (or
+  `completed` plus an outcome field). That touches the task type, the DB, the task list UI and
+  the telemetry allowlist, so it isn't contained. Don't infer it from the report's wording.
 
 **OrangeHRM blank page: not a NodeBrain bug as far as can be measured (re-investigated 2026-10-30).**
 
@@ -340,8 +352,8 @@ as the failures can't be checked. If they didn't, the server was simply slow the
    `Timeout 60000ms exceeded`, which it can act on.
 2. Don't use the shared OrangeHRM demo for timing. Its server speed is the main variable
    (navigate drifted from 2s to 10s within an hour on 10-30).
-3. Drop `PLAYWRIGHT_MCP_ISOLATED` from the harness unless a run needs a clean profile. It
-   slows every load and doesn't prevent the hang.
+3. ~~Drop `PLAYWRIGHT_MCP_ISOLATED` from the harness.~~ Done 10-30: the harness uses the
+   persistent profile now. It was slowing every load and didn't prevent the hang.
 4. If it hangs again, capture it with `DEBUG=pw:api,pw:browser` and the page's resource
    timings at that moment, to see which file stalls.
 

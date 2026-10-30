@@ -4,8 +4,9 @@
 // Run from backend/, with a fresh data dir each time (the vault secret changes per run):
 //   NODEBRAIN_DATA_DIR=<scratch> VAULT_SECRET=<x> HARNESS_OUT=<scratch> HARNESS_TASK=orangehrm|otp npx tsx src/_harness.ts
 // Approval mode is off and a human is present, so only 'always' calls stop; the harness
-// approves those itself and logs each one. Take Control waits for a file named
-// `handback` (or `stop`) in the run dir, which stands in for the Done / Stop buttons.
+// approves those itself and logs each one. Take Control waits, with no time limit, for a
+// file named `handback` (or `stop`) in the run dir, which stands in for the Done / Stop buttons.
+// The browser uses the persistent profile: isolated mode was 2-3x slower and prevented nothing.
 import './agents/agentEngine'; // must load before ./mcp/toolRegistry (circular import)
 import fs from 'fs';
 import os from 'os';
@@ -168,7 +169,8 @@ agentEvents.on('browser:take_control_needed', (req: { requestId: string; reason:
   console.log(`\n=== TAKE CONTROL ===\n${req.reason}\nWaiting for ${handback} (or ${stop})\n`);
   const timer = setInterval(() => {
     const done = fs.existsSync(handback);
-    if (!done && !fs.existsSync(stop) && Date.now() - start < 20 * 60_000) return;
+    // No time limit: the run waits as long as the person needs, as the app does.
+    if (!done && !fs.existsSync(stop)) return;
     clearInterval(timer);
     totals.pausedMs += Date.now() - start;
     log({ ev: 'take_control_resolved', done, pausedMs: Date.now() - start });
@@ -185,8 +187,6 @@ async function main() {
   await initDb();
   initVaultKey();
   createCredential('Anthropic (spike)', 'anthropic', apiKey);
-  // Start from an in-memory profile so no earlier run's cookies carry over.
-  process.env.PLAYWRIGHT_MCP_ISOLATED = 'true';
   await initializeToolRegistry();
 
   const available = new Set((await getToolsForAgent()).filter(t => t.serverName === 'playwright').map(t => t.name));

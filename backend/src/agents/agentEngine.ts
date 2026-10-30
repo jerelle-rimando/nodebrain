@@ -531,6 +531,9 @@ function assertNoUnattendedApproval(
 // person says they're done. The same pause as an approval, but the person acts in
 // the browser instead of clicking Approve. Cancelling the task ends the wait.
 const pendingTakeControls = new Map<string, (done: boolean) => void>();
+// Tasks where the person chose Stop at a handover. The agent still writes its report,
+// but the task ends 'cancelled', not 'completed': it didn't get to finish.
+const declinedHandovers = new Set<string>();
 
 export function resolveTakeControl(requestId: string, done: boolean): boolean {
   const resolve = pendingTakeControls.get(requestId);
@@ -565,6 +568,7 @@ async function handOverBrowser(taskId: string, agent: Agent, humanPresent: boole
   persistLog(makeLog(taskId, agent.id, `Waiting for you in the browser: ${ask}`, 'warn'));
   const done = await requestTakeControl(taskId, agent.id, ask, signal);
   if (!done) {
+    if (!signal.aborted) declinedHandovers.add(taskId);
     persistLog(makeLog(taskId, agent.id, 'You chose to stop instead of continuing in the browser', 'warn'));
     return 'The person chose not to continue. Do not use the browser again. Stop now and report what you finished and where you stopped.';
   }
@@ -1113,6 +1117,7 @@ export async function executeAgentTask(
     }
 
     activeTaskControllers.delete(taskId);
+    const handoverDeclined = declinedHandovers.delete(taskId);
 
     // The stop route already marked the task cancelled and emitted task:cancelled.
     // Don't overwrite that with 'completed'; the run stopped partway through.
@@ -1130,6 +1135,15 @@ export async function executeAgentTask(
       const failedTask = { ...task, status: 'failed' as const, error: errorMessage, completedAt: new Date().toISOString() };
       agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: 'tool_error' as TelemetryErrorType });
       return failedTask;
+    }
+
+    if (handoverDeclined) {
+      persistLog(makeLog(taskId, agent.id, 'Task stopped: you chose not to continue in the browser', 'warn'));
+      updateTaskStatus(taskId, 'cancelled', output);
+      updateAgentStatus(agent.id, 'idle');
+      const cancelledTask = { ...task, status: 'cancelled' as const, output, completedAt: new Date().toISOString() };
+      agentEvents.emit('task:cancelled', cancelledTask);
+      return cancelledTask;
     }
 
     persistLog(makeLog(taskId, agent.id, `Task completed successfully.`));
@@ -1157,6 +1171,7 @@ export async function executeAgentTask(
 
   } catch (err) {
     activeTaskControllers.delete(taskId);
+    declinedHandovers.delete(taskId);
     const errorMessage = err instanceof Error ? err.message : String(err);
     persistLog(makeLog(taskId, agent.id, `Task failed: ${errorMessage}`, 'error'));
     updateTaskStatus(taskId, 'failed', undefined, errorMessage);
