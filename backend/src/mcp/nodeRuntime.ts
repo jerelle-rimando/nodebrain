@@ -56,14 +56,28 @@ export function describeNodeRuntime(): string {
 export function withBundledRuntime(server: MCPServer): MCPServer {
   if (!bundledNpxCli) return server;
 
+  // Both branches go through run-hidden.js on Windows. Since 5a77b71 moved the
+  // built-ins onto bundled Node, the top of the spawn chain is NodeBrain.exe —
+  // a GUI-subsystem exe that never gets a console, hidden or otherwise. Before,
+  // it was cmd.exe (via cross-spawn), which got a hidden console from the MCP
+  // SDK's windowsHide and passed it down. Now the cmd.exe that npm spawns for
+  // the package bin has nothing to inherit, and without windowsHide Windows
+  // opens a visible terminal window for it. The launcher defaults windowsHide
+  // on for everything npm (or the script) spawns.
+  const launcher = process.platform === 'win32' && nodeShimDir
+    ? [path.join(nodeShimDir, 'run-hidden.js')]
+    : [];
+
   let command: string;
   let args: string[];
   if (server.command === 'npx') {
     command = process.execPath;
-    args = [bundledNpxCli, ...server.args];
+    args = [...launcher, bundledNpxCli, ...server.args];
   } else if (server.command === 'node') {
+    // The launcher takes the script as its first argument, so this assumes
+    // args start with the script rather than node flags.
     command = process.execPath;
-    args = server.args;
+    args = [...launcher, ...server.args];
   } else {
     return server;
   }
