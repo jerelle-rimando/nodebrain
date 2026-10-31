@@ -59,6 +59,28 @@ export function recordConnectionError(name: string, error: string): void {
 // How much of a server's startup stderr to keep for diagnosing a failed connect.
 const STDERR_TAIL_CHARS = 4000;
 
+// The environment a stdio server is spawned with: ours, overlaid with its own.
+// On Windows, env keys are case-insensitive but a JS object's aren't, and the
+// MCP SDK always adds its own upper-case PATH (unmodified, from process.env)
+// underneath what we pass. A normal launch gives us "Path", so a server's PATH
+// change (e.g. the bundled-Node shim dir) landed in "Path" next to the SDK's
+// "PATH", and the child saw the copy without it. Collapsing every casing into
+// one upper-case PATH, with the server's value winning, makes ours override the
+// SDK's and leaves a single copy for the child.
+function buildServerEnv(serverEnv: Record<string, string> = {}): Record<string, string> {
+  const env = { ...process.env, ...serverEnv } as Record<string, string>;
+  if (process.platform !== 'win32') return env;
+
+  const isPathKey = (k: string) => k.toUpperCase() === 'PATH';
+  const serverPath = Object.keys(serverEnv).filter(isPathKey).map(k => serverEnv[k]).pop();
+  const pathValue = serverPath ?? process.env.PATH;
+  for (const k of Object.keys(env)) {
+    if (isPathKey(k)) delete env[k];
+  }
+  if (pathValue !== undefined) env.PATH = pathValue;
+  return env;
+}
+
 export async function connectToServer(server: MCPServer, fingerprint = ''): Promise<MCPTool[]> {
   connectionErrors.delete(server.name);
   // On Windows cross-spawn runs an unresolvable command through cmd.exe, so a
@@ -70,10 +92,7 @@ export async function connectToServer(server: MCPServer, fingerprint = ''): Prom
     const transport = new StdioClientTransport({
       command: server.command,
       args: server.args,
-      env: {
-        ...process.env,
-        ...server.env,
-      } as Record<string, string>,
+      env: buildServerEnv(server.env),
       stderr: 'pipe',
     });
     transport.stderr?.on('data', (chunk: Buffer) => {

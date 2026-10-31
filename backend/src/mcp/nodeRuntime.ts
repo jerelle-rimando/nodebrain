@@ -18,14 +18,9 @@ import type { MCPServer } from './mcpClient';
 const bundledNpxCli = process.env.NODEBRAIN_NPX_CLI;
 const nodeShimDir = process.env.NODEBRAIN_NODE_SHIM_DIR;
 
-// The env key Windows uses for PATH isn't always upper case ("Path" is common).
-// Writing a second, differently cased key would leave which one wins up to chance.
-function pathKey(env: NodeJS.ProcessEnv): string {
-  return Object.keys(env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH';
-}
-
+// process.env lookups are case-insensitive on Windows, so PATH finds "Path" too.
 function findSystemNode(env: NodeJS.ProcessEnv): string | undefined {
-  const dirs = (env[pathKey(env)] ?? '').split(path.delimiter).filter(Boolean);
+  const dirs = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
   const names = process.platform === 'win32'
     ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map(ext => 'node' + ext.toLowerCase())
     : ['node'];
@@ -88,9 +83,10 @@ export function withBundledRuntime(server: MCPServer): MCPServer {
     // The bundled npm is pinned on purpose; don't nag about newer releases.
     npm_config_update_notifier: 'false',
   };
+  // Always upper-case: connectToServer collapses every PATH casing into PATH,
+  // with the server's value winning over ours and the MCP SDK's.
   if (!systemNode && nodeShimDir) {
-    const key = pathKey(process.env);
-    env[key] = [nodeShimDir, process.env[key]].filter(Boolean).join(path.delimiter);
+    env.PATH = [nodeShimDir, process.env.PATH].filter(Boolean).join(path.delimiter);
   }
 
   return { ...server, command, args, env };
