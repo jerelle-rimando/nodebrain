@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { agentEvents } from '../agents/agentEngine';
+import { recorderEvents } from '../recorder/recordingSession';
 import type { TaskLog, Task, Agent } from '../../shared-types';
 
 const router = Router();
@@ -49,6 +50,12 @@ router.get('/', (req: Request, res: Response) => {
   agentEvents.on('chat:token', onChatToken);
   agentEvents.on('chat:phase', onChatPhase);
 
+  // Workflow recorder (backend/src/recorder/recordingSession.ts).
+  const recorderListeners: Array<[string, (payload: unknown) => void]> = [
+    'recording:step', 'recording:finished', 'recording:discarded', 'recording:browser_closed',
+  ].map((name) => [name, (payload: unknown) => sendEvent(name, payload)]);
+  for (const [name, fn] of recorderListeners) recorderEvents.on(name, fn);
+
   req.on('close', () => {
     clearInterval(heartbeat);
     agentEvents.off('log', onLog);
@@ -62,6 +69,7 @@ router.get('/', (req: Request, res: Response) => {
     agentEvents.off('agent:deleted', onAgentDeleted);
     agentEvents.off('chat:token', onChatToken);
     agentEvents.off('chat:phase', onChatPhase);
+    for (const [name, fn] of recorderListeners) recorderEvents.off(name, fn);
   });
 });
 

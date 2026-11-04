@@ -1,0 +1,789 @@
+import { EventEmitter } from 'events';
+import fs from 'fs';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import type { BrowserContext, Page } from 'playwright-core';
+import {
+  SITE_LOGIN_PROVIDER,
+  type RecordingState, type RecordingStatus, type RecordingResult, type RecordedStepSummary,
+  type WorkflowStepAction, type WorkflowStepFingerprint, type WorkflowSignal,
+} from '../../shared-types';
+import { getDataDir, dbTransaction } from '../db/database';
+import {
+  getSiteAgentBySiteKey, createSiteAgent, updateSiteAgent, createWorkflow, createVersion,
+  getStepsByVersion, type StepInput,
+} from '../db/workflowRepository';
+import { createCredential, updateCredential, getCredentialById } from '../vault/credentialVault';
+import { launchBrowser, closeBrowser, type LaunchedBrowser } from './browserLauncher';
+import { PAGE_SCRIPT, RECORDER_BINDING, PILL_HOST_ID, SET_COUNT_FN } from './pageScript';
+import { factsForRef, redactSnapshot, type SnapshotFacts } from './ariaSnapshot';
+import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
+
+// One recording: the user does a task in a real browser window while
+// Playwright's recorder reports each action. No model is involved.
+//
+// Per action NodeBrain keeps:
+//   - Playwright's selector (primary locator; 27/29 re-found on fresh loads
+//     and after a browser restart in the 2026-11 check),
+//   - its own fingerprint, merged from the page's event-time record
+//     (pageScript.ts) and the action's aria snapshot (ariaSnapshot.ts),
+//   - the aria snapshot itself, written to disk on Done (redacted).
+//
+// Typed passwords never become step values: they go to the vault as a site
+// login, and the step points at it (value_source 'credential').
+
+export const recorderEvents = new EventEmitter();
+
+// What Playwright's programmatic recorder ("api" mode) reports per action.
+interface RecorderAction {
+  name: string;
+  selector?: string;
+  ref?: string;
+  ariaSnapshot?: string;
+  url?: string;
+  text?: string;
+  key?: string;
+  modifiers?: number;
+  button?: string;
+  clickCount?: number;
+  position?: { x: number; y: number };
+  options?: string[];
+  files?: string[];
+}
+
+// What pageScript.ts sends at event time.
+interface PageRecord {
+  kind: 'click' | 'input' | 'change' | 'keydown';
+  key?: string;
+  detail?: number;
+  elementId: number;
+  ts: number;
+  fp: {
+    tag?: string; inputType?: string; autocomplete?: string; nameAttr?: string; testId?: string;
+    label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[];
+    names?: string[]; optionLabels?: string[];
+  };
+  page: Page;
+  consumed: boolean;
+  // Effects (navigation, dialog, popup) seen before the action arrived.
+  pendingSignals?: WorkflowSignal[];
+}
+
+interface CapturedStep {
+  action: WorkflowStepAction;
+  recorderName: string;
+  locator?: string;
+  fingerprint: WorkflowStepFingerprint;
+  facts: SnapshotFacts;
+  pageAlias: string;
+  origin?: string;
+  args: Record<string, unknown>;
+  value?: string; // plaintext recorded value; never a password or saved username
+  usesSavedLogin?: 'username' | 'password';
+  record?: PageRecord;
+  signals: WorkflowSignal[];
+  snapshot?: string;
+  ref?: string;
+  at: number;
+  opening?: boolean; // the page load NodeBrain did to start; not counted in the pill
+}
+
+type RecorderSink = {
+  actionAdded: (page: Page, action: RecorderAction) => void;
+  actionUpdated: (page: Page, action: RecorderAction) => void;
+  signalAdded: (page: Page, signal: unknown) => void;
+};
+type RecordingContext = BrowserContext & {
+  _startRecording?: (params: { language: string }, sink: RecorderSink) => Promise<void>;
+  _stopRecording?: () => Promise<void>;
+};
+
+const PASSWORD_NAME = /\b(password|passcode|passphrase|pwd|pin)\b/i;
+const USERNAME_HINT = /\b(user(name)?|e-?mail|login|account|user ?id|member ?id)\b/i;
+const OPTION_ROLES = new Set(['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'radio', 'treeitem', 'gridcell', 'tab']);
+const SAVED_RESULT_TTL_MS = 60 * 60 * 1000;
+
+const sessions = new Map<string, RecordingSession>();
+
+export class RecordingError extends Error {}
+
+export async function startRecording(url: string): Promise<RecordingStatus> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new RecordingError("That doesn't look like a web address. Try something like https://example.com.");
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new RecordingError('Recording works on web pages only (addresses starting with http:// or https://).');
+  }
+  const siteKey = siteKeyFromUrl(parsed.href);
+  pruneSessions();
+  for (const s of sessions.values()) {
+    if (s.siteKey === siteKey && (s.state === 'recording' || s.state === 'saving')) {
+      throw new RecordingError(`A recording for ${siteKey} is already open. Finish or throw away that one first.`);
+    }
+  }
+  const session = new RecordingSession(parsed.href, siteKey);
+  sessions.set(session.id, session);
+  try {
+    await session.start();
+  } catch (err) {
+    sessions.delete(session.id);
+    throw err;
+  }
+  return session.status();
+}
+
+export function getRecording(id: string): RecordingStatus | null {
+  return sessions.get(id)?.status() ?? null;
+}
+
+export function listRecordings(): RecordingStatus[] {
+  pruneSessions();
+  return [...sessions.values()].map((s) => s.status());
+}
+
+export async function finishRecording(id: string): Promise<RecordingStatus> {
+  const s = sessions.get(id);
+  if (!s) throw new RecordingError('That recording is no longer open.');
+  await s.finish();
+  return s.status();
+}
+
+export async function discardRecording(id: string): Promise<RecordingStatus> {
+  const s = sessions.get(id);
+  if (!s) throw new RecordingError('That recording is no longer open.');
+  await s.discard();
+  return s.status();
+}
+
+function pruneSessions(): void {
+  const now = Date.now();
+  for (const [id, s] of sessions) {
+    if (s.endedAt && now - s.endedAt > SAVED_RESULT_TTL_MS) sessions.delete(id);
+  }
+}
+
+class RecordingSession {
+  readonly id = uuidv4();
+  readonly siteName: string;
+  readonly profileDir: string;
+  state: RecordingState = 'recording';
+  endedAt?: number;
+  private error?: string;
+  private result?: RecordingResult;
+  private launched?: LaunchedBrowser;
+  private steps: CapturedStep[] = [];
+  private records: PageRecord[] = [];
+  private aliases = new Map<Page, string>();
+  private queue: Promise<void> = Promise.resolve();
+  private finishing?: Promise<void>;
+  // Set the moment Done or discard is pressed: new pill commands are ignored.
+  private stopping = false;
+  private discarding = false;
+
+  // Actions and page records already in flight when Done is pressed are
+  // still processed while saving; discarding drops them.
+  private accepting(): boolean {
+    return !this.discarding && (this.state === 'recording' || this.state === 'saving');
+  }
+  // Sign-in typed during the recording. Held in memory only until Done
+  // (then encrypted into the vault) or discard (then dropped).
+  private password?: string;
+  private username?: string;
+  private secretRefs = new Set<string>();
+
+  constructor(readonly startUrl: string, readonly siteKey: string) {
+    this.siteName = siteNameFromKey(siteKey);
+    this.profileDir = path.join(getDataDir(), 'browser-profiles', siteKeyToFolderName(siteKey));
+  }
+
+  status(): RecordingStatus {
+    return {
+      id: this.id, siteKey: this.siteKey, siteName: this.siteName, startUrl: this.startUrl,
+      state: this.state, stepCount: this.stepCount(), error: this.error, result: this.result,
+    };
+  }
+
+  private stepCount(): number {
+    return this.steps.filter((s) => !s.opening).length;
+  }
+
+  async start(): Promise<void> {
+    this.launched = await launchBrowser(this.profileDir, this.startUrl);
+    const context = this.launched.context as RecordingContext;
+    if (typeof context._startRecording !== 'function') {
+      await closeBrowser(this.launched);
+      throw new RecordingError("This copy of NodeBrain can't record yet: its browser library is too old.");
+    }
+    await context.exposeBinding(RECORDER_BINDING, (source, msg) => this.onPageMessage(source.page, msg));
+    await context.addInitScript(PAGE_SCRIPT);
+
+    for (const p of context.pages()) this.watchPage(p);
+    context.on('page', (p) => {
+      this.watchPage(p);
+      const opener = this.records.length ? this.records[this.records.length - 1].page : undefined;
+      if (opener) this.signalFromInteraction(opener, { name: 'popup', popupAlias: this.aliasOf(p) });
+    });
+    this.launched.browser.on('disconnected', () => {
+      if (this.state === 'recording' && !this.stopping) {
+        this.state = 'browser_closed';
+        recorderEvents.emit('recording:browser_closed', this.status());
+      }
+    });
+
+    await context._startRecording({ language: 'playwright-test' }, {
+      actionAdded: (page, action) => this.enqueue(() => this.onAction('added', page, action)),
+      actionUpdated: (page, action) => this.enqueue(() => this.onAction('updated', page, action)),
+      // Not seen over CDP in testing; navigation/popup/dialog signals are
+      // collected from page events instead (watchPage).
+      signalAdded: () => {},
+    });
+
+    const page = context.pages()[0] ?? (await context.newPage());
+    this.markNextNavigateAsOpening = true;
+    await page.goto(this.startUrl, { timeout: 60_000 }).catch(() => {
+      // A slow site still opens; the user can wait or reload. The recorder
+      // keeps listening either way.
+    });
+    await page.bringToFront().catch(() => {});
+  }
+
+  private markNextNavigateAsOpening = false;
+
+  private aliasOf(page: Page): string {
+    let alias = this.aliases.get(page);
+    if (!alias) {
+      alias = this.aliases.size === 0 ? 'page' : `popup${this.aliases.size}`;
+      this.aliases.set(page, alias);
+    }
+    return alias;
+  }
+
+  private watchPage(page: Page): void {
+    this.aliasOf(page);
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame() || !this.accepting()) return;
+      this.signalFromInteraction(page, { name: 'navigation', url: frame.url() });
+    });
+    // A listener stops Playwright from auto-dismissing dialogs; the person
+    // answers them in the window as usual.
+    page.on('dialog', () => {
+      if (this.accepting()) this.signalFromInteraction(page, { name: 'dialog' });
+    });
+  }
+
+  // Navigations, dialogs and popups belong to the interaction that caused
+  // them. The page's event-time record reaches NodeBrain before the effect
+  // does (it's sent from the click listener, before the site's own handler
+  // runs), while the recorder's action can arrive after it: a confirm()
+  // blocks the page until it's answered. So the signal goes on the most
+  // recent record from the last few seconds, and through it on the step
+  // that record is (or will be) paired with. No recent record means the
+  // person caused it some other way (typing an address, an alert on page
+  // load), and the recorder logs that itself.
+  private signalFromInteraction(page: Page, signal: WorkflowSignal): void {
+    const cutoff = Date.now() - 3_000;
+    let rec: PageRecord | undefined;
+    for (let i = this.records.length - 1; i >= 0; i--) {
+      const r = this.records[i];
+      if (r.ts < cutoff) break;
+      if (r.page === page && r.kind !== 'input') { rec = r; break; }
+    }
+    if (!rec) return;
+    const step = this.steps.find((s) => s.record === rec);
+    const target = step ? step.signals : (rec.pendingSignals ??= []);
+    if (!target.some((s) => s.name === signal.name)) target.push(signal);
+  }
+
+  private enqueue(fn: () => Promise<void>): void {
+    this.queue = this.queue.then(fn).catch((err) => {
+      console.error('[recorder] could not process an action:', err);
+    });
+  }
+
+  private onPageMessage(page: Page, msg: unknown): unknown {
+    if (!msg || typeof msg !== 'object') return undefined;
+    const m = msg as Record<string, unknown>;
+    switch (m.type) {
+      case 'hello':
+        return { count: this.stepCount() };
+      case 'done':
+        void this.finish();
+        return undefined;
+      case 'discard':
+        void this.discard();
+        return undefined;
+      case 'event': {
+        if (!this.accepting()) return undefined;
+        const kind = m.kind;
+        if (kind !== 'click' && kind !== 'input' && kind !== 'change' && kind !== 'keydown') return undefined;
+        this.records.push({
+          kind, key: typeof m.key === 'string' ? m.key : undefined,
+          detail: typeof m.detail === 'number' ? m.detail : undefined,
+          elementId: typeof m.elementId === 'number' ? m.elementId : -1,
+          ts: Date.now(), fp: (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'],
+          page, consumed: false,
+        });
+        const cutoff = Date.now() - 15_000;
+        this.records = this.records.filter((r) => r.ts >= cutoff || !r.consumed).slice(-300);
+        return undefined;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  // Pairs a recorder action with the page's event-time record for the same
+  // element: same page, compatible event, preferring a record whose element
+  // text matches the accessible name in the snapshot. Waits briefly, since
+  // the two arrive over separate channels.
+  private async matchRecord(page: Page, action: RecorderAction, facts: SnapshotFacts): Promise<PageRecord | undefined> {
+    const kinds: Record<string, PageRecord['kind'][]> = {
+      click: ['click'], check: ['click', 'change'], uncheck: ['click', 'change'],
+      fill: ['input'], select: ['change'], setInputFiles: ['change'], press: ['keydown'],
+    };
+    const wanted = kinds[action.name];
+    if (!wanted) return undefined;
+    const name = facts.name?.toLowerCase();
+    const pick = (): PageRecord | undefined => {
+      const candidates = this.records.filter((r) => !r.consumed && r.page === page && wanted.includes(r.kind)
+        && (action.name !== 'press' || r.key === action.key));
+      if (!candidates.length) return undefined;
+      if (name) {
+        const byName = candidates.find((r) => (r.fp.names ?? []).some((n) => {
+          const t = n.toLowerCase();
+          return t === name || t.includes(name) || name.includes(t);
+        }));
+        if (byName) return byName;
+      }
+      return candidates[candidates.length - 1];
+    };
+    let found = pick();
+    for (let i = 0; i < 6 && !found; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      found = pick();
+    }
+    if (found) this.consume(found);
+    return found;
+  }
+
+  private consume(rec: PageRecord): void {
+    for (const r of this.records) {
+      if (r.page === rec.page && r.elementId === rec.elementId && r.kind === rec.kind && r.ts <= rec.ts) r.consumed = true;
+    }
+    rec.consumed = true;
+  }
+
+  private async onAction(kind: 'added' | 'updated', page: Page, action: RecorderAction): Promise<void> {
+    if (!this.accepting()) return;
+    if (action.selector?.includes(PILL_HOST_ID)) return; // a click on our own pill
+    if (['openPage', 'closePage'].includes(action.name) || action.name.startsWith('assert')) return;
+
+    const last = this.steps[this.steps.length - 1];
+
+    // Typing arrives as one fill updated per keystroke.
+    if (kind === 'updated' && last && last.recorderName === action.name) {
+      await this.updateStep(last, page, action);
+      return;
+    }
+
+    // Pressing Enter (or Space) on a form makes the browser fire a click on
+    // the submit button with detail 0. Replaying both would submit twice.
+    if (action.name === 'click' && action.clickCount === 0 && last?.action === 'press'
+        && (last.args.key === 'Enter' || last.args.key === ' ') && Date.now() - last.at < 2000) {
+      return;
+    }
+
+    const step = await this.buildStep(page, action);
+    if (!step) return;
+    this.steps.push(step);
+    this.pushCount();
+    recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
+  }
+
+  private async buildStep(page: Page, action: RecorderAction): Promise<CapturedStep | undefined> {
+    const facts = factsForRef(action.ariaSnapshot, action.ref);
+    const record = await this.matchRecord(page, action, facts);
+    const base = {
+      recorderName: action.name,
+      locator: action.selector,
+      facts,
+      record,
+      fingerprint: this.fingerprintOf(facts, record),
+      pageAlias: this.aliasOf(page),
+      origin: record?.fp.origin ?? safeOrigin(page.url()),
+      signals: [...(record?.pendingSignals ?? [])] as WorkflowSignal[],
+      snapshot: action.ariaSnapshot,
+      ref: action.ref,
+      at: Date.now(),
+    };
+
+    switch (action.name) {
+      case 'navigate': {
+        const opening = this.markNextNavigateAsOpening;
+        this.markNextNavigateAsOpening = false;
+        // The recorder logs typed addresses as their own step. If that page
+        // load was also pinned on a recent interaction, it wasn't caused by it.
+        for (const s of this.steps.slice(-3)) {
+          s.signals = s.signals.filter((sig) => !(sig.name === 'navigation' && sig.url === action.url));
+        }
+        return { ...base, action: 'navigate', locator: undefined, origin: safeOrigin(action.url ?? ''), args: { url: action.url }, opening };
+      }
+      case 'click':
+        return {
+          ...base, action: 'click',
+          args: { button: action.button ?? 'left', modifiers: action.modifiers ?? 0, clickCount: action.clickCount ?? 1,
+                  ...(action.position ? { position: action.position } : {}) },
+        };
+      case 'press':
+        return { ...base, action: 'press', args: { key: action.key, modifiers: action.modifiers ?? 0 } };
+      case 'check':
+      case 'uncheck':
+        return { ...base, action: action.name, args: {} };
+      case 'select': {
+        const values = action.options ?? [];
+        const labels = record?.fp.optionLabels ?? [];
+        return {
+          ...base, action: 'select',
+          args: { optionValues: values, optionLabels: labels, matchBy: labels.length === values.length && labels.length ? 'label' : 'value' },
+          value: labels.length === values.length && labels.length ? labels.join(', ') : values.join(', '),
+        };
+      }
+      case 'setInputFiles':
+        return { ...base, action: 'upload', args: { fileNames: action.files ?? [] } };
+      case 'fill': {
+        const step: CapturedStep = { ...base, action: 'fill', args: {} };
+        await this.applyFillValue(step, page, action);
+        return step;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private async updateStep(step: CapturedStep, page: Page, action: RecorderAction): Promise<void> {
+    step.snapshot = action.ariaSnapshot ?? step.snapshot;
+    step.ref = action.ref ?? step.ref;
+    if (action.selector) step.locator = action.selector;
+    if (action.name === 'navigate' && action.url) {
+      step.args = { ...step.args, url: action.url };
+      step.origin = safeOrigin(action.url);
+    }
+    if (action.name === 'fill') {
+      // Drain the extra keystroke records for this element.
+      if (step.record) {
+        for (const r of this.records) {
+          if (r.page === page && r.elementId === step.record.elementId && r.kind === 'input') r.consumed = true;
+        }
+      }
+      await this.applyFillValue(step, page, action);
+    }
+  }
+
+  private async applyFillValue(step: CapturedStep, page: Page, action: RecorderAction): Promise<void> {
+    const text = action.text ?? '';
+    if (step.usesSavedLogin === 'password' || (await this.isPasswordField(step, page, action))) {
+      step.usesSavedLogin = 'password';
+      step.value = undefined;
+      this.password = text;
+      if (action.ref) this.secretRefs.add(action.ref);
+      if (step.ref) this.secretRefs.add(step.ref);
+      this.markUsername(step);
+      return;
+    }
+    if (step.usesSavedLogin === 'username') {
+      this.username = text;
+      return;
+    }
+    step.value = text;
+  }
+
+  // Any one signal is enough: the field's own type attribute (read by
+  // Playwright, outside the page's scripts), the page record's type or
+  // autocomplete, or a password-like name. Errs toward treating it as one.
+  private async isPasswordField(step: CapturedStep, page: Page, action: RecorderAction): Promise<boolean> {
+    const fp = step.record?.fp;
+    if (fp?.inputType === 'password') return true;
+    if (fp?.autocomplete && /password/i.test(fp.autocomplete)) return true;
+    const names = [step.facts.name, fp?.label, fp?.placeholder, fp?.nameAttr].filter(Boolean) as string[];
+    if (names.some((n) => PASSWORD_NAME.test(n))) return true;
+    if (action.selector) {
+      const type = await page.locator(action.selector).first()
+        .getAttribute('type', { timeout: 500 }).catch(() => null);
+      if (type?.toLowerCase() === 'password') return true;
+    }
+    return false;
+  }
+
+  // When a password is typed, the closest earlier fill on the same page that
+  // looks like a username or email becomes the saved login's username.
+  private markUsername(passwordStep: CapturedStep): void {
+    if (this.steps.some((s) => s.usesSavedLogin === 'username')) return;
+    for (let i = this.steps.length - 1; i >= 0; i--) {
+      const s = this.steps[i];
+      if (s === passwordStep) continue;
+      if (s.pageAlias !== passwordStep.pageAlias || s.action === 'navigate') break;
+      if (s.action !== 'fill' || s.usesSavedLogin) continue;
+      const fp = s.record?.fp;
+      const looksLikeUser = fp?.inputType === 'email'
+        || (fp?.autocomplete && /username|email/i.test(fp.autocomplete))
+        || [s.facts.name, fp?.label, fp?.placeholder, fp?.nameAttr].some((n) => n && USERNAME_HINT.test(n));
+      if (looksLikeUser) {
+        s.usesSavedLogin = 'username';
+        this.username = s.value;
+        s.value = undefined;
+      }
+      return;
+    }
+  }
+
+  private fingerprintOf(facts: SnapshotFacts, record?: PageRecord): WorkflowStepFingerprint {
+    const fp = record?.fp;
+    const out: WorkflowStepFingerprint = {
+      role: facts.role,
+      name: facts.name,
+      label: fp?.label,
+      placeholder: fp?.placeholder,
+      nameAttr: fp?.nameAttr,
+      testId: fp?.testId,
+      tag: fp?.tag,
+      inputType: fp?.inputType,
+      autocomplete: fp?.autocomplete,
+      heading: facts.heading,
+      landmark: facts.landmark,
+      urlPath: fp?.urlPath,
+      ordinal: facts.ordinal,
+      framePath: fp?.framePath,
+    };
+    for (const k of Object.keys(out) as (keyof WorkflowStepFingerprint)[]) if (out[k] === undefined) delete out[k];
+    return out;
+  }
+
+  private pushCount(): void {
+    const n = this.stepCount();
+    const context = this.launched?.context;
+    if (!context) return;
+    for (const p of context.pages()) {
+      // A string expression: the backend's tsconfig has no DOM types.
+      p.evaluate(`window[${JSON.stringify(SET_COUNT_FN)}] && window[${JSON.stringify(SET_COUNT_FN)}](${n})`).catch(() => {});
+    }
+  }
+
+  private async stopWatching(browserOpen = this.state !== 'browser_closed'): Promise<void> {
+    const context = this.launched?.context as RecordingContext | undefined;
+    if (context && browserOpen) {
+      await context._stopRecording?.().catch(() => {});
+    }
+    await this.queue;
+  }
+
+  async finish(): Promise<void> {
+    if (this.finishing) return this.finishing;
+    if (this.state !== 'recording' && this.state !== 'browser_closed') return;
+    this.stopping = true;
+    this.finishing = (async () => {
+      const browserOpen = this.state !== 'browser_closed';
+      this.state = 'saving';
+      await this.stopWatching(browserOpen);
+      if (this.launched && browserOpen) await closeBrowser(this.launched);
+      try {
+        if (this.stepCount() === 0) {
+          this.state = 'empty';
+        } else {
+          this.result = this.save();
+          this.state = 'saved';
+        }
+      } catch (err) {
+        this.state = 'failed';
+        this.error = "The recording couldn't be saved. Nothing was changed.";
+        console.error('[recorder] save failed:', err);
+      } finally {
+        this.endedAt = Date.now();
+        this.forgetSecrets();
+        recorderEvents.emit('recording:finished', this.status());
+      }
+    })();
+    return this.finishing;
+  }
+
+  // The state becomes 'discarded' only once the window is closed, so a
+  // caller that sees it can rely on the browser being gone.
+  async discard(): Promise<void> {
+    if (this.finishing) return this.finishing;
+    if (this.state !== 'recording' && this.state !== 'browser_closed') return;
+    this.stopping = true;
+    this.discarding = true;
+    this.finishing = (async () => {
+      const browserOpen = this.state !== 'browser_closed';
+      await this.stopWatching(browserOpen);
+      if (this.launched && browserOpen) await closeBrowser(this.launched);
+      this.steps = [];
+      this.records = [];
+      this.forgetSecrets();
+      this.endedAt = Date.now();
+      this.state = 'discarded';
+      recorderEvents.emit('recording:discarded', this.status());
+    })();
+    return this.finishing;
+  }
+
+  private forgetSecrets(): void {
+    this.password = undefined;
+    this.username = undefined;
+    this.secretRefs.clear();
+    for (const s of this.steps) s.snapshot = undefined;
+    this.records = [];
+  }
+
+  // Writes everything in one transaction; snapshot files are written first
+  // and removed again if the transaction fails.
+  private save(): RecordingResult {
+    const stepKeys = this.steps.map((_, i) => `s${i + 1}`);
+    const snapshotDirName = uuidv4();
+    const snapshotDir = path.join(getDataDir(), 'workflow-snapshots', snapshotDirName);
+    // Only the password is redacted. A username isn't secret, and replacing
+    // it everywhere would also wipe matching page text ("Admin" menus).
+    const secrets = this.password ? [this.password] : [];
+    const secretRefs = [...this.secretRefs];
+
+    fs.mkdirSync(snapshotDir, { recursive: true });
+    const snapshotPaths: (string | undefined)[] = this.steps.map((s, i) => {
+      if (!s.snapshot) return undefined;
+      const file = path.join(snapshotDir, `${stepKeys[i]}.yaml`);
+      fs.writeFileSync(file, redactSnapshot(s.snapshot, secrets, secretRefs), 'utf8');
+      return file;
+    });
+
+    try {
+      return dbTransaction(() => {
+        let siteAgent = getSiteAgentBySiteKey(this.siteKey)
+          ?? createSiteAgent({ siteKey: this.siteKey, name: this.siteName, startUrl: this.startUrl, profileDir: this.profileDir });
+        if (!siteAgent.profileDir) siteAgent = updateSiteAgent(siteAgent.id, { profileDir: this.profileDir }) ?? siteAgent;
+
+        let savedLogin = false;
+        if (this.password !== undefined) {
+          const payload = JSON.stringify({ ...(this.username !== undefined ? { username: this.username } : {}), password: this.password });
+          const existing = siteAgent.credentialId ? getCredentialById(siteAgent.credentialId) : null;
+          if (existing && existing.provider === SITE_LOGIN_PROVIDER) {
+            updateCredential(existing.id, payload);
+          } else {
+            const cred = createCredential(
+              `${this.siteName} sign-in`, SITE_LOGIN_PROVIDER, payload,
+              `Saved while recording on ${this.siteKey}`, safeOrigin(this.startUrl),
+            );
+            siteAgent = updateSiteAgent(siteAgent.id, { credentialId: cred.id }) ?? siteAgent;
+          }
+          savedLogin = true;
+        }
+
+        const workflow = createWorkflow({
+          siteAgentId: siteAgent.id,
+          name: `Recorded ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`,
+        });
+
+        const inputs: StepInput[] = this.steps.map((s, i) => {
+          const input: StepInput = {
+            stepKey: stepKeys[i],
+            position: i,
+            action: s.action,
+            locator: s.locator,
+            fingerprint: s.fingerprint,
+            pageAlias: s.pageAlias,
+            origin: s.origin,
+            args: s.args,
+            signals: s.signals,
+            snapshotPath: snapshotPaths[i],
+          };
+          if (s.usesSavedLogin) {
+            input.valueSource = 'credential';
+            input.valueTarget = 'text';
+            input.credentialPart = s.usesSavedLogin;
+          } else if (s.action === 'fill' || (s.action === 'select' && s.value)) {
+            // Recorded as "Always this"; the review screen can mark it "Changes".
+            // An empty fill is kept: it means the user cleared the field.
+            input.valueSource = 'literal';
+            input.valueTarget = s.action === 'select' ? 'option' : 'text';
+            input.literalValue = s.value ?? '';
+          }
+          return input;
+        });
+        const version = createVersion(workflow.id, { reason: 'recorded' }, inputs);
+        const saved = getStepsByVersion(version.id);
+        const steps: RecordedStepSummary[] = this.steps.map((s, i) => ({
+          stepKey: saved[i].stepKey,
+          position: i,
+          action: s.action,
+          description: describe(s),
+          value: s.usesSavedLogin ? undefined : s.value,
+          usesSavedLogin: s.usesSavedLogin,
+          changeable: s.usesSavedLogin ? undefined
+            : s.action === 'fill' ? 'text'
+            : s.action === 'select' ? 'option'
+            : s.action === 'click' && s.facts.role && OPTION_ROLES.has(s.facts.role) ? 'option-click'
+            : undefined,
+        }));
+        return { siteAgent, workflow: { ...workflow, currentVersionId: version.id }, version, steps, savedLogin };
+      });
+    } catch (err) {
+      fs.rmSync(snapshotDir, { recursive: true, force: true });
+      throw err;
+    }
+  }
+}
+
+function safeOrigin(url: string): string | undefined {
+  try {
+    const o = new URL(url).origin;
+    return o === 'null' ? undefined : o;
+  } catch {
+    return undefined;
+  }
+}
+
+function describe(s: CapturedStep): string {
+  const unnamed: Record<string, string> = {
+    combobox: 'a dropdown', listbox: 'a list', checkbox: 'a checkbox', radio: 'an option', switch: 'a switch',
+    spinbutton: 'a number field', searchbox: 'a search box', textbox: 'a text field',
+  };
+  const what = s.fingerprint.name || s.fingerprint.label || s.fingerprint.placeholder
+    || (s.facts.role && unnamed[s.facts.role]) || 'a field';
+  const roleWord: Record<string, string> = { button: 'button', link: 'link', checkbox: 'checkbox', radio: 'option', tab: 'tab', option: 'option', menuitem: 'menu item' };
+  const kind = s.facts.role ? roleWord[s.facts.role] : undefined;
+  switch (s.action) {
+    case 'navigate': {
+      const url = String(s.args.url ?? '');
+      return s.opening ? `Opened ${shortUrl(url)}` : `Went to ${shortUrl(url)}`;
+    }
+    case 'click':
+      return s.fingerprint.name ? `Clicked "${s.fingerprint.name}"${kind ? ` ${kind}` : ''}` : 'Clicked on the page';
+    case 'fill':
+      if (s.usesSavedLogin === 'password') return `Typed your password into ${what}`;
+      if (s.usesSavedLogin === 'username') return `Typed your saved sign-in name into ${what}`;
+      return s.value ? `Typed "${s.value}" into ${what}` : `Cleared ${what}`;
+    case 'select':
+      return `Chose "${s.value ?? ''}" in ${what}`;
+    case 'press':
+      return `Pressed ${s.args.key === ' ' ? 'Space' : String(s.args.key)}`;
+    case 'check':
+      return `Ticked ${what}`;
+    case 'uncheck':
+      return `Unticked ${what}`;
+    case 'upload': {
+      const files = (s.args.fileNames as string[] | undefined) ?? [];
+      return `Attached ${files.join(', ') || 'a file'}`;
+    }
+    default:
+      return s.action;
+  }
+}
+
+function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.host.replace(/^www\./, '') + (u.pathname === '/' ? '' : u.pathname);
+  } catch {
+    return url;
+  }
+}

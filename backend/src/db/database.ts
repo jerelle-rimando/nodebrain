@@ -6,6 +6,12 @@ import { migrateWorkflowTables } from './workflowSchema';
 const DB_DIR = process.env.NODEBRAIN_DATA_DIR ?? path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DB_DIR, 'nodebrain.db');
 
+// The folder holding nodebrain.db. Other per-install data (browser profiles,
+// recorded page snapshots) lives beside it.
+export function getDataDir(): string {
+  return DB_DIR;
+}
+
 let _db: SqlJsDatabase | null = null;
 // >0 while dbTransaction is running: writes are held in memory and persisted
 // once at COMMIT, so a multi-row write lands on disk whole or not at all.

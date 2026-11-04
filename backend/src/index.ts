@@ -26,6 +26,7 @@ import mcpServersRouter from './routes/mcpServers';
 import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
 import telemetryRouter from './routes/telemetry';
+import recordingsRouter from './routes/recordings';
 import { registerTelemetrySubscribers } from './telemetry/subscribers';
 import { emitUsageSnapshot } from './telemetry/usageSnapshot';
 
@@ -138,6 +139,7 @@ app.use('/api/mcp-servers', mcpServersRouter);
 app.use('/api/agent-connections', agentConnectionsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/telemetry', telemetryRouter);
+app.use('/api/recordings', recordingsRouter);
 
 async function main() {
   try {

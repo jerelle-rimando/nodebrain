@@ -207,6 +207,8 @@ export interface WorkflowStepFingerprint {
   urlPath?: string;
   ordinal?: number; // index among elements matching role+name
   framePath?: string[];
+  landmark?: string; // nearest enclosing landmark or dialog, e.g. 'form "Login"'
+  autocomplete?: string;
 }
 
 export type WorkflowSignal =
@@ -285,4 +287,44 @@ export interface WorkflowRunStep {
   error?: string;
   screenshotPath?: string;
   createdAt: string;
+}
+
+// ── Workflow recorder ─────────────────────────────────────────────────────
+
+// Credentials of this provider hold a site sign-in captured while recording:
+// encrypted JSON { username?: string, password: string }.
+export const SITE_LOGIN_PROVIDER = 'site_login';
+
+export type RecordingState = 'recording' | 'browser_closed' | 'saving' | 'saved' | 'empty' | 'discarded' | 'failed';
+
+export interface RecordingStatus {
+  id: string;
+  siteKey: string;
+  siteName: string;
+  startUrl: string;
+  state: RecordingState;
+  stepCount: number; // steps the user took; the opening page load isn't counted
+  error?: string;
+  result?: RecordingResult;
+}
+
+// One captured step, as the review screen shows it.
+export interface RecordedStepSummary {
+  stepKey: string;
+  position: number;
+  action: WorkflowStepAction;
+  description: string; // plain words, e.g. 'Typed "ABC Roofing" into Insured name'
+  value?: string; // the recorded value; never set for passwords or saved usernames
+  usesSavedLogin?: 'username' | 'password';
+  // Set when the step carries a value the user could mark "Changes":
+  // typed text, a dropdown choice, or a click on an option in a list.
+  changeable?: 'text' | 'option' | 'option-click';
+}
+
+export interface RecordingResult {
+  siteAgent: SiteAgent;
+  workflow: Workflow;
+  version: WorkflowVersion;
+  steps: RecordedStepSummary[];
+  savedLogin: boolean; // a password was typed and stored in the vault
 }

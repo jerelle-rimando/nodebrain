@@ -6,6 +6,7 @@ import { getAllCustomMCPServers } from '../db/mcpServerRepository';
 import { FREE_PROVIDERS, LLM_PROVIDERS } from '../agents/agentEngine';
 import { SERVER_CONFIGS } from '../mcp/toolRegistry';
 import { telemetry } from '../utils/telemetry';
+import { SITE_LOGIN_PROVIDER } from '../../shared-types';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -38,6 +39,8 @@ function connectedIntegrations(): string[] {
   const integrations = new Set<string>();
   for (const { provider } of getAllCredentials()) {
     if (LLM_PROVIDERS.has(provider)) continue;
+    // A sign-in saved by the workflow recorder isn't an integration.
+    if (provider === SITE_LOGIN_PROVIDER) continue;
     integrations.add(BUILTIN_INTEGRATIONS.has(provider) ? provider : 'custom');
   }
   if (getAllCustomMCPServers().length > 0) integrations.add('custom');
