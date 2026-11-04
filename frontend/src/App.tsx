@@ -13,6 +13,7 @@ import { SettingsPage } from './components/settings/SettingsPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
+import { RecordingReview } from './components/recorder/RecordingReview';
 import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
 import { ConnectionBanner } from './components/shared/ConnectionBanner';
@@ -71,6 +72,15 @@ export default function App() {
       })
       .catch(console.error)
       .finally(() => setAgentsLoaded(true));
+
+    // A recording finished while this window wasn't listening (reload,
+    // reconnect) is still waiting for review on the backend.
+    api.getRecordings()
+      .then((recs) => {
+        const waiting = recs.find((r) => r.state === 'review');
+        if (waiting) useStore.getState().setRecordingReview(waiting);
+      })
+      .catch(() => {});
 
   }, [setAgents, setCredentials, setTasks, setLogs, setActiveTab]);
 
@@ -164,6 +174,7 @@ export default function App() {
       </div>
       </div>
       <ApprovalModal />
+      <RecordingReview />
       <ToastContainer />
     </div>
   );

@@ -1,4 +1,5 @@
 import { useStore } from '../stores/appStore';
+import type { RecordingStatus, SaveRecordingRequest } from '@shared/types';
 
 const BASE_URL = '/api';
 
@@ -70,6 +71,13 @@ export const api = {
   getTasks: () => request<import('@shared/types').Task[]>('/tasks'),
   getAgentTasks: (agentId: string) => request<import('@shared/types').Task[]>(`/tasks/agent/${agentId}`),
   stopTask: (id: string) => request<import('@shared/types').Task>(`/tasks/${id}/stop`, { method: 'POST' }),
+  // Workflow recorder
+  getRecordings: () => request<RecordingStatus[]>('/recordings'),
+  finishRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/done`, { method: 'POST' }),
+  saveRecording: (id: string, body: SaveRecordingRequest) =>
+    request<RecordingStatus>(`/recordings/${id}/save`, { method: 'POST', body: JSON.stringify(body) }),
+  discardRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/discard`, { method: 'POST' }),
+
   respondToApproval: (taskId: string, approvalId: string, approved: boolean) =>
     request<{ approvalId: string; approved: boolean }>(`/tasks/${taskId}/approve/${approvalId}`, {
       method: 'POST',

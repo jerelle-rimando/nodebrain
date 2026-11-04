@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Agent, Task, TaskLog, Credential, ChatMessage } from '@shared/types';
+import type { Agent, Task, TaskLog, Credential, ChatMessage, RecordingStatus } from '@shared/types';
 
 export interface ToolApprovalRequest {
   taskId: string;
@@ -29,6 +29,9 @@ interface AppState {
   // Whether the Electron-proxied backend is currently reachable. Driven by
   // useLiveSync's SSE connection (primary) and api.ts's request() (secondary).
   backendConnected: boolean;
+  // A finished recording waiting on the review screen. Nothing is saved
+  // until the person presses Save workflow there.
+  recordingReview: RecordingStatus | null;
 
   setAvailableModels: (models: Record<string, string[]>) => void;
 
@@ -58,6 +61,7 @@ interface AppState {
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
   setBackendConnected: (connected: boolean) => void;
+  setRecordingReview: (status: RecordingStatus | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -73,6 +77,7 @@ export const useStore = create<AppState>((set) => ({
   logsFilterAgentId: null,
   pendingApprovals: [],
   backendConnected: true,
+  recordingReview: null,
 
   setAvailableModels: (availableModels) => set({ availableModels }),
   setAgents: (agents) => set({ agents }),
@@ -102,4 +107,5 @@ export const useStore = create<AppState>((set) => ({
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
   removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
   setBackendConnected: (backendConnected) => set({ backendConnected }),
+  setRecordingReview: (recordingReview) => set({ recordingReview }),
 }));

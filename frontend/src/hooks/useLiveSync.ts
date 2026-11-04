@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useStore } from '../stores/appStore';
 import type { ToolApprovalRequest } from '../stores/appStore';
-import type { TaskLog, Task, Agent } from '@shared/types';
+import type { TaskLog, Task, Agent, RecordingStatus } from '@shared/types';
+import { api } from '../utils/api';
 import { pushToken } from '../utils/tokenStreamBuffer';
 
 // A brief drop shouldn't flash the "reconnecting" banner — only surface it
@@ -83,6 +84,29 @@ export function useLiveSync() {
         const { requestId, phase } = JSON.parse((e as MessageEvent).data) as { requestId: string; phase: string };
         useStore.getState().setChatPhase({ requestId, phase });
       });
+
+      // Workflow recorder: Done on the pill (or closing the recording
+      // window) brings up the review screen; save or discard clears it.
+      es.addEventListener('recording:finished', (e) => {
+        const status: RecordingStatus = JSON.parse((e as MessageEvent).data);
+        if (status.state === 'review') useStore.getState().setRecordingReview(status);
+      });
+
+      es.addEventListener('recording:browser_closed', (e) => {
+        const status: RecordingStatus = JSON.parse((e as MessageEvent).data);
+        // Closing the window counts as Done; the review screen still lets
+        // the person discard.
+        api.finishRecording(status.id)
+          .then((s) => { if (s.state === 'review') useStore.getState().setRecordingReview(s); })
+          .catch(() => {});
+      });
+
+      const clearReview = (e: Event) => {
+        const { id } = JSON.parse((e as MessageEvent).data) as RecordingStatus;
+        if (useStore.getState().recordingReview?.id === id) useStore.getState().setRecordingReview(null);
+      };
+      es.addEventListener('recording:saved', clearReview);
+      es.addEventListener('recording:discarded', clearReview);
 
       es.onerror = () => {
         es.close();

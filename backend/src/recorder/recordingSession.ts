@@ -5,19 +5,21 @@ import { v4 as uuidv4 } from 'uuid';
 import type { BrowserContext, Page } from 'playwright-core';
 import {
   SITE_LOGIN_PROVIDER,
-  type RecordingState, type RecordingStatus, type RecordingResult, type RecordedStepSummary,
+  type RecordingState, type RecordingStatus, type RecordingResult, type RecordingDraft,
+  type RecordedValueChoice, type SaveRecordingRequest,
   type WorkflowStepAction, type WorkflowStepFingerprint, type WorkflowSignal,
 } from '../../shared-types';
 import { getDataDir, dbTransaction } from '../db/database';
 import {
-  getSiteAgentBySiteKey, createSiteAgent, updateSiteAgent, createWorkflow, createVersion,
-  getStepsByVersion, type StepInput,
+  getSiteAgentBySiteKey, createSiteAgent, updateSiteAgent, createWorkflow, createVersion, createField,
+  type StepInput,
 } from '../db/workflowRepository';
 import { createCredential, updateCredential, getCredentialById } from '../vault/credentialVault';
 import { launchBrowser, closeBrowser, type LaunchedBrowser } from './browserLauncher';
 import { PAGE_SCRIPT, RECORDER_BINDING, PILL_HOST_ID, SET_COUNT_FN } from './pageScript';
 import { factsForRef, redactSnapshot, type SnapshotFacts } from './ariaSnapshot';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
+import { guessName, valueRows, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
 
 // One recording: the user does a task in a real browser window while
 // Playwright's recorder reports each action. No model is involved.
@@ -56,11 +58,12 @@ interface PageRecord {
   kind: 'click' | 'input' | 'change' | 'keydown';
   key?: string;
   detail?: number;
+  docId: string;
   elementId: number;
   ts: number;
   fp: {
     tag?: string; inputType?: string; autocomplete?: string; nameAttr?: string; testId?: string;
-    label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[];
+    label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[]; title?: string;
     names?: string[]; optionLabels?: string[];
   };
   page: Page;
@@ -100,7 +103,6 @@ type RecordingContext = BrowserContext & {
 
 const PASSWORD_NAME = /\b(password|passcode|passphrase|pwd|pin)\b/i;
 const USERNAME_HINT = /\b(user(name)?|e-?mail|login|account|user ?id|member ?id)\b/i;
-const OPTION_ROLES = new Set(['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'radio', 'treeitem', 'gridcell', 'tab']);
 const SAVED_RESULT_TTL_MS = 60 * 60 * 1000;
 
 const sessions = new Map<string, RecordingSession>();
@@ -151,6 +153,14 @@ export async function finishRecording(id: string): Promise<RecordingStatus> {
   return s.status();
 }
 
+// Saves a recording that's waiting on the review screen.
+export async function saveRecording(id: string, req: SaveRecordingRequest): Promise<RecordingStatus> {
+  const s = sessions.get(id);
+  if (!s) throw new RecordingError('That recording is no longer open.');
+  await s.saveReview(req);
+  return s.status();
+}
+
 export async function discardRecording(id: string): Promise<RecordingStatus> {
   const s = sessions.get(id);
   if (!s) throw new RecordingError('That recording is no longer open.');
@@ -173,6 +183,7 @@ class RecordingSession {
   endedAt?: number;
   private error?: string;
   private result?: RecordingResult;
+  private draft?: RecordingDraft;
   private launched?: LaunchedBrowser;
   private steps: CapturedStep[] = [];
   private records: PageRecord[] = [];
@@ -202,7 +213,7 @@ class RecordingSession {
   status(): RecordingStatus {
     return {
       id: this.id, siteKey: this.siteKey, siteName: this.siteName, startUrl: this.startUrl,
-      state: this.state, stepCount: this.stepCount(), error: this.error, result: this.result,
+      state: this.state, stepCount: this.stepCount(), error: this.error, draft: this.draft, result: this.result,
     };
   }
 
@@ -322,6 +333,7 @@ class RecordingSession {
         this.records.push({
           kind, key: typeof m.key === 'string' ? m.key : undefined,
           detail: typeof m.detail === 'number' ? m.detail : undefined,
+          docId: typeof m.docId === 'string' ? m.docId : '',
           elementId: typeof m.elementId === 'number' ? m.elementId : -1,
           ts: Date.now(), fp: (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'],
           page, consumed: false,
@@ -347,9 +359,21 @@ class RecordingSession {
     const wanted = kinds[action.name];
     if (!wanted) return undefined;
     const name = facts.name?.toLowerCase();
+    const fits = (r: PageRecord): boolean => {
+      const t = r.fp.inputType;
+      switch (action.name) {
+        case 'select': return r.fp.tag === 'select';
+        case 'fill': return r.fp.tag !== 'select' && !['checkbox', 'radio', 'file', 'submit', 'button'].includes(t ?? '');
+        case 'setInputFiles': return t === 'file';
+        case 'check': case 'uncheck': return r.fp.tag !== 'input' || t === 'checkbox' || t === 'radio';
+        case 'press': return r.key === action.key;
+        default: return true;
+      }
+    };
     const pick = (): PageRecord | undefined => {
-      const candidates = this.records.filter((r) => !r.consumed && r.page === page && wanted.includes(r.kind)
-        && (action.name !== 'press' || r.key === action.key));
+      const recent = Date.now() - 10_000;
+      const candidates = this.records.filter((r) => !r.consumed && r.page === page && r.ts >= recent
+        && wanted.includes(r.kind) && fits(r));
       if (!candidates.length) return undefined;
       if (name) {
         const byName = candidates.find((r) => (r.fp.names ?? []).some((n) => {
@@ -369,9 +393,11 @@ class RecordingSession {
     return found;
   }
 
+  // Uses up every earlier event from the same element, so a field's leftover
+  // events (its change on leaving it) can't be paired with a later step.
   private consume(rec: PageRecord): void {
     for (const r of this.records) {
-      if (r.page === rec.page && r.elementId === rec.elementId && r.kind === rec.kind && r.ts <= rec.ts) r.consumed = true;
+      if (sameElement(r, rec) && r.ts <= rec.ts) r.consumed = true;
     }
     rec.consumed = true;
   }
@@ -475,7 +501,7 @@ class RecordingSession {
       // Drain the extra keystroke records for this element.
       if (step.record) {
         for (const r of this.records) {
-          if (r.page === page && r.elementId === step.record.elementId && r.kind === 'input') r.consumed = true;
+          if (sameElement(r, step.record)) r.consumed = true;
         }
       }
       await this.applyFillValue(step, page, action);
@@ -553,6 +579,7 @@ class RecordingSession {
       autocomplete: fp?.autocomplete,
       heading: facts.heading,
       landmark: facts.landmark,
+      container: facts.container,
       urlPath: fp?.urlPath,
       ordinal: facts.ordinal,
       framePath: fp?.framePath,
@@ -579,38 +606,41 @@ class RecordingSession {
     await this.queue;
   }
 
+  // Done: stop watching, close the window, and hold everything for the
+  // review screen. Nothing is written until saveReview().
   async finish(): Promise<void> {
     if (this.finishing) return this.finishing;
     if (this.state !== 'recording' && this.state !== 'browser_closed') return;
     this.stopping = true;
     this.finishing = (async () => {
       const browserOpen = this.state !== 'browser_closed';
-      this.state = 'saving';
+      this.state = 'finishing';
       await this.stopWatching(browserOpen);
       if (this.launched && browserOpen) await closeBrowser(this.launched);
-      try {
-        if (this.stepCount() === 0) {
-          this.state = 'empty';
-        } else {
-          this.result = this.save();
-          this.state = 'saved';
-        }
-      } catch (err) {
-        this.state = 'failed';
-        this.error = "The recording couldn't be saved. Nothing was changed.";
-        console.error('[recorder] save failed:', err);
-      } finally {
+      if (this.stepCount() === 0) {
+        this.state = 'empty';
         this.endedAt = Date.now();
         this.forgetSecrets();
-        recorderEvents.emit('recording:finished', this.status());
+      } else {
+        this.draft = this.buildDraft();
+        this.state = 'review';
       }
+      recorderEvents.emit('recording:finished', this.status());
     })();
     return this.finishing;
   }
 
   // The state becomes 'discarded' only once the window is closed, so a
-  // caller that sees it can rely on the browser being gone.
+  // caller that sees it can rely on the browser being gone. From review,
+  // the window is already closed and nothing has been written.
   async discard(): Promise<void> {
+    if (this.state === 'review') {
+      this.discarding = true;
+      this.clearAll();
+      this.state = 'discarded';
+      recorderEvents.emit('recording:discarded', this.status());
+      return;
+    }
     if (this.finishing) return this.finishing;
     if (this.state !== 'recording' && this.state !== 'browser_closed') return;
     this.stopping = true;
@@ -619,14 +649,19 @@ class RecordingSession {
       const browserOpen = this.state !== 'browser_closed';
       await this.stopWatching(browserOpen);
       if (this.launched && browserOpen) await closeBrowser(this.launched);
-      this.steps = [];
-      this.records = [];
-      this.forgetSecrets();
-      this.endedAt = Date.now();
+      this.clearAll();
       this.state = 'discarded';
       recorderEvents.emit('recording:discarded', this.status());
     })();
     return this.finishing;
+  }
+
+  private clearAll(): void {
+    this.steps = [];
+    this.records = [];
+    this.draft = undefined;
+    this.forgetSecrets();
+    this.endedAt = Date.now();
   }
 
   private forgetSecrets(): void {
@@ -637,21 +672,102 @@ class RecordingSession {
     this.records = [];
   }
 
+  private draftSteps(): DraftStep[] {
+    return this.steps.map((s, i) => ({
+      stepKey: `s${i + 1}`,
+      action: s.action,
+      locator: s.locator,
+      fingerprint: s.fingerprint,
+      value: s.value,
+      usesSavedLogin: s.usesSavedLogin,
+      opening: s.opening,
+      pageAlias: s.pageAlias,
+      pageTitle: s.record?.fp.title,
+      snapshot: s.snapshot,
+    }));
+  }
+
+  private buildDraft(): RecordingDraft {
+    const steps = this.draftSteps();
+    return {
+      siteKey: this.siteKey,
+      stepCount: this.stepCount(),
+      suggestedName: guessName(steps, this.siteName, this.siteKey, fallbackName()),
+      values: valueRows(steps),
+      steps: this.steps.map((s, i) => ({
+        stepKey: steps[i].stepKey,
+        position: i,
+        action: s.action,
+        description: describe(s),
+        value: s.usesSavedLogin ? undefined : s.value,
+        usesSavedLogin: s.usesSavedLogin,
+      })),
+      usesSavedLogin: this.password !== undefined,
+    };
+  }
+
+  // Save from the review screen. On failure the recording stays in review
+  // so the person can try again; nothing partial is left behind.
+  async saveReview(req: SaveRecordingRequest): Promise<void> {
+    if (this.state !== 'review' || !this.draft) {
+      throw new RecordingError(this.state === 'saved' ? 'This workflow is already saved.' : 'This recording is no longer waiting to be saved.');
+    }
+    const rows = new Map(this.draft.values.map((v) => [v.stepKey, v]));
+    const choices = new Map<string, RecordedValueChoice>();
+    for (const c of req.values) {
+      const row = rows.get(c.stepKey);
+      if (!row) throw new RecordingError(`Step ${c.stepKey} has no value to choose for.`);
+      if (c.mode === 'changes' && !row.canChange) {
+        throw new RecordingError(`"${row.value}" can't change between runs yet.`);
+      }
+      // A clicked option that can't become a value slot keeps its text in
+      // the click itself, so it can't be stored encrypted either.
+      if (c.secret && row.kind === 'option-click' && !row.canChange) {
+        throw new RecordingError(`"${row.value}" can't be kept secret.`);
+      }
+      choices.set(c.stepKey, c);
+    }
+    const name = req.name.replace(/\s+/g, ' ').trim() || this.draft.suggestedName;
+    this.state = 'saving';
+    try {
+      this.result = this.save(name, choices);
+      this.state = 'saved';
+      this.error = undefined;
+      this.endedAt = Date.now();
+      this.draft = undefined;
+      this.forgetSecrets();
+      recorderEvents.emit('recording:saved', this.status());
+    } catch (err) {
+      this.state = 'review';
+      this.error = "The workflow couldn't be saved. Nothing was changed. Try again.";
+      console.error('[recorder] save failed:', err);
+      throw new RecordingError(this.error);
+    }
+  }
+
   // Writes everything in one transaction; snapshot files are written first
   // and removed again if the transaction fails.
-  private save(): RecordingResult {
-    const stepKeys = this.steps.map((_, i) => `s${i + 1}`);
-    const snapshotDirName = uuidv4();
-    const snapshotDir = path.join(getDataDir(), 'workflow-snapshots', snapshotDirName);
-    // Only the password is redacted. A username isn't secret, and replacing
-    // it everywhere would also wipe matching page text ("Admin" menus).
+  private save(name: string, choices: Map<string, RecordedValueChoice>): RecordingResult {
+    const draft = this.draft!;
+    const dsteps = this.draftSteps();
+    const rows = new Map(draft.values.map((v) => [v.stepKey, v]));
+    const choiceFor = (key: string): RecordedValueChoice => {
+      const row = rows.get(key)!;
+      return choices.get(key) ?? { stepKey: key, mode: row.defaultMode, secret: false };
+    };
+
+    // Values marked secret are redacted from every snapshot, like the
+    // password. A username isn't secret, and replacing it everywhere would
+    // also wipe matching page text ("Admin" menus).
     const secrets = this.password ? [this.password] : [];
+    for (const row of draft.values) if (choiceFor(row.stepKey).secret && row.value) secrets.push(row.value);
     const secretRefs = [...this.secretRefs];
 
+    const snapshotDir = path.join(getDataDir(), 'workflow-snapshots', uuidv4());
     fs.mkdirSync(snapshotDir, { recursive: true });
     const snapshotPaths: (string | undefined)[] = this.steps.map((s, i) => {
       if (!s.snapshot) return undefined;
-      const file = path.join(snapshotDir, `${stepKeys[i]}.yaml`);
+      const file = path.join(snapshotDir, `${dsteps[i].stepKey}.yaml`);
       fs.writeFileSync(file, redactSnapshot(s.snapshot, secrets, secretRefs), 'utf8');
       return file;
     });
@@ -678,14 +794,30 @@ class RecordingSession {
           savedLogin = true;
         }
 
-        const workflow = createWorkflow({
-          siteAgentId: siteAgent.id,
-          name: `Recorded ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`,
-        });
+        const workflow = createWorkflow({ siteAgentId: siteAgent.id, name });
+
+        // Every value marked "Changes" becomes an input field, in step order.
+        const usedKeys = new Set<string>();
+        const fieldIds = new Map<string, string>();
+        for (const row of draft.values) {
+          const choice = choiceFor(row.stepKey);
+          if (choice.mode !== 'changes') continue;
+          const field = createField(workflow.id, {
+            key: fieldKeyFor(row.label, usedKeys),
+            label: row.label,
+            kind: row.kind === 'text' ? 'text' : 'option',
+            secret: choice.secret,
+            recordedValue: row.value,
+            required: true,
+            position: fieldIds.size,
+          });
+          fieldIds.set(row.stepKey, field.id);
+        }
 
         const inputs: StepInput[] = this.steps.map((s, i) => {
+          const key = dsteps[i].stepKey;
           const input: StepInput = {
-            stepKey: stepKeys[i],
+            stepKey: key,
             position: i,
             action: s.action,
             locator: s.locator,
@@ -700,37 +832,58 @@ class RecordingSession {
             input.valueSource = 'credential';
             input.valueTarget = 'text';
             input.credentialPart = s.usesSavedLogin;
-          } else if (s.action === 'fill' || (s.action === 'select' && s.value)) {
-            // Recorded as "Always this"; the review screen can mark it "Changes".
-            // An empty fill is kept: it means the user cleared the field.
-            input.valueSource = 'literal';
-            input.valueTarget = s.action === 'select' ? 'option' : 'text';
-            input.literalValue = s.value ?? '';
+            return input;
           }
-          return input;
+          const row = rows.get(key);
+          if (!row) return input; // a click or navigation: nothing to vary
+          const choice = choiceFor(key);
+          const fieldId = fieldIds.get(key);
+          const source: Partial<StepInput> = fieldId
+            ? { valueSource: 'field', fieldId }
+            : { valueSource: 'literal', literalValue: row.value, literalSecret: choice.secret };
+
+          if (row.kind === 'option-click') {
+            // A clicked option carries its value in the locator. Plain
+            // "Always this" keeps the click exactly as recorded; otherwise
+            // the option's name becomes the value slot, so the value (secret
+            // or not) isn't baked into the locator.
+            if (!fieldId && !choice.secret) return input;
+            const template = templateLocator(s.locator, s.fingerprint.name ?? '');
+            if (!template) {
+              throw new Error(`step ${key}: option can't be turned into a value slot`);
+            }
+            return {
+              ...input, ...source, valueTarget: 'locator', locator: template,
+              fingerprint: templateFingerprint(s.fingerprint, row.value),
+            };
+          }
+          if (row.kind === 'option') {
+            // A secret choice keeps none of the recorded option text in args.
+            const args = choice.secret ? { matchBy: s.args.matchBy === 'label' ? 'label' : 'value' } : s.args;
+            return { ...input, ...source, valueTarget: 'option', args };
+          }
+          return { ...input, ...source, valueTarget: 'text' };
         });
+
         const version = createVersion(workflow.id, { reason: 'recorded' }, inputs);
-        const saved = getStepsByVersion(version.id);
-        const steps: RecordedStepSummary[] = this.steps.map((s, i) => ({
-          stepKey: saved[i].stepKey,
-          position: i,
-          action: s.action,
-          description: describe(s),
-          value: s.usesSavedLogin ? undefined : s.value,
-          usesSavedLogin: s.usesSavedLogin,
-          changeable: s.usesSavedLogin ? undefined
-            : s.action === 'fill' ? 'text'
-            : s.action === 'select' ? 'option'
-            : s.action === 'click' && s.facts.role && OPTION_ROLES.has(s.facts.role) ? 'option-click'
-            : undefined,
-        }));
-        return { siteAgent, workflow: { ...workflow, currentVersionId: version.id }, version, steps, savedLogin };
+        return {
+          siteAgent,
+          workflow: { ...workflow, currentVersionId: version.id },
+          version,
+          steps: draft.steps,
+          savedLogin,
+          fieldCount: fieldIds.size,
+        };
       });
     } catch (err) {
       fs.rmSync(snapshotDir, { recursive: true, force: true });
       throw err;
     }
   }
+}
+
+function fallbackName(): string {
+  return `Recorded ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
 }
 
 function safeOrigin(url: string): string | undefined {
@@ -786,4 +939,8 @@ function shortUrl(url: string): string {
   } catch {
     return url;
   }
+}
+
+function sameElement(a: PageRecord, b: PageRecord): boolean {
+  return a.page === b.page && a.docId === b.docId && a.elementId === b.elementId;
 }

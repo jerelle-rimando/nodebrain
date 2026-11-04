@@ -17,6 +17,7 @@ export interface SnapshotFacts {
   name?: string;
   heading?: string;
   landmark?: string; // nearest enclosing landmark/dialog, e.g. 'form "Login"'
+  container?: string; // name of the enclosing list or group (listbox, radiogroup, fieldset)
   ordinal?: number; // index among earlier elements with the same role and name
   frameRef?: string; // 'f1' when the element is inside an iframe
 }
@@ -30,6 +31,8 @@ interface Line {
 
 const LINE_RE = /^(\s*)-\s+'?([a-zA-Z]+)(?:\s+"((?:[^"\\]|\\.)*)")?/;
 const REF_RE = /\[ref=([a-z0-9]+)\]/;
+
+const CONTAINERS = new Set(['listbox', 'radiogroup', 'group', 'menu', 'tree', 'grid', 'tablist']);
 
 const LANDMARKS = new Set([
   'banner', 'navigation', 'main', 'contentinfo', 'complementary', 'form', 'search', 'region', 'dialog', 'alertdialog',
@@ -71,6 +74,9 @@ export function factsForRef(snapshot: string | undefined, ref: string | undefine
     const l = lines[i];
     if (!l || l.indent >= indent) continue;
     indent = l.indent;
+    // The named group an option or radio sits in: a list's label, a
+    // fieldset's legend.
+    if (!facts.container && l.name && CONTAINERS.has(l.role)) facts.container = l.name;
     if (LANDMARKS.has(l.role)) {
       facts.landmark = l.name ? `${l.role} "${l.name}"` : l.role;
       break;
@@ -89,7 +95,15 @@ export function factsForRef(snapshot: string | undefined, ref: string | undefine
 export function redactSnapshot(snapshot: string, secrets: string[], secretRefs: string[]): string {
   let out = snapshot;
   for (const s of secrets) {
-    if (s) out = out.split(s).join('[hidden]');
+    if (!s) continue;
+    if (s.length >= 4) {
+      out = out.split(s).join('[hidden]');
+    } else {
+      // Too short to replace everywhere without mangling unrelated text
+      // ("TX", "12"): only where it stands as a name or a field's value.
+      const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.split(`"${s}"`).join('"[hidden]"').replace(new RegExp(`(: )${esc}$`, 'gm'), '$1[hidden]');
+    }
   }
   if (secretRefs.length) {
     out = out.split('\n').map((line) => {
@@ -99,4 +113,19 @@ export function redactSnapshot(snapshot: string, secrets: string[], secretRefs: 
     }).join('\n');
   }
   return out;
+}
+
+// The page's main heading: the first heading of the highest level present
+// (an <h1> if there is one). Used to suggest a workflow name.
+export function topHeading(snapshot: string | undefined): string | undefined {
+  if (!snapshot) return undefined;
+  let best: { level: number; name: string } | undefined;
+  for (const raw of snapshot.split('\n')) {
+    const l = parseLine(raw);
+    if (l?.role !== 'heading' || !l.name) continue;
+    const level = Number(/\[level=(\d)\]/.exec(raw)?.[1] ?? 9);
+    if (!best || level < best.level) best = { level, name: l.name };
+    if (level === 1) break;
+  }
+  return best?.name;
 }

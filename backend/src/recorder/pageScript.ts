@@ -31,6 +31,8 @@ export const PAGE_SCRIPT = `(() => {
 
   // ── Fingerprint capture ──────────────────────────────────────────────
   const ids = new WeakMap();
+  // Element ids restart on every page load; docId tells documents apart.
+  const docId = Math.random().toString(36).slice(2) + Date.now().toString(36);
   let nextId = 1;
   const idOf = (el) => { if (!ids.has(el)) ids.set(el, nextId++); return ids.get(el); };
   const clean = (s, max = 120) => (s || '').replace(/\\s+/g, ' ').trim().slice(0, max) || undefined;
@@ -70,6 +72,7 @@ export const PAGE_SCRIPT = `(() => {
       label: labelOf(el),
       placeholder: attr('placeholder'),
       urlPath: location.pathname,
+      title: clean(document.title, 200),
       origin: location.origin,
       framePath: window === top ? undefined : [location.origin + location.pathname],
       // Strings the accessible name might have been computed from; used only
@@ -94,7 +97,7 @@ export const PAGE_SCRIPT = `(() => {
     if (!raw) return;
     const el = kind === 'click' ? interactive(raw) : raw;
     try {
-      send({ type: 'event', kind, key: e.key, detail: e.detail, elementId: idOf(el), ts: Date.now(), fp: fingerprint(el) });
+      send({ type: 'event', kind, key: e.key, detail: e.detail, docId, elementId: idOf(el), ts: Date.now(), fp: fingerprint(el) });
     } catch {}
   }
 
@@ -177,7 +180,7 @@ export const PAGE_SCRIPT = `(() => {
         '<div class="row confirm hidden"><span>Throw away this recording?</span>' +
           '<button class="danger" type="button">Throw away</button>' +
           '<button class="plain" type="button">Keep recording</button></div>' +
-        '<div class="row saving hidden"><span class="dot"></span><span class="saving-text">Saving\\u2026</span></div>' +
+        '<div class="row saving hidden"><span class="dot"></span><span class="saving-text">Finishing\\u2026</span></div>' +
       '</div>';
     mainRow = root.querySelector('.main');
     confirmRow = root.querySelector('.confirm');

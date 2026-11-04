@@ -208,6 +208,7 @@ export interface WorkflowStepFingerprint {
   ordinal?: number; // index among elements matching role+name
   framePath?: string[];
   landmark?: string; // nearest enclosing landmark or dialog, e.g. 'form "Login"'
+  container?: string; // name of the list or group an option sits in, e.g. 'State'
   autocomplete?: string;
 }
 
@@ -295,7 +296,10 @@ export interface WorkflowRunStep {
 // encrypted JSON { username?: string, password: string }.
 export const SITE_LOGIN_PROVIDER = 'site_login';
 
-export type RecordingState = 'recording' | 'browser_closed' | 'saving' | 'saved' | 'empty' | 'discarded' | 'failed';
+// recording → (Done) → review → (Save) → saved, or → discarded at any point
+// before saving. 'empty' is a Done with no steps; nothing is shown or saved.
+export type RecordingState =
+  | 'recording' | 'browser_closed' | 'finishing' | 'review' | 'saving' | 'saved' | 'empty' | 'discarded' | 'failed';
 
 export interface RecordingStatus {
   id: string;
@@ -305,7 +309,41 @@ export interface RecordingStatus {
   state: RecordingState;
   stepCount: number; // steps the user took; the opening page load isn't counted
   error?: string;
-  result?: RecordingResult;
+  draft?: RecordingDraft; // set while state is 'review'
+  result?: RecordingResult; // set once saved
+}
+
+// What the review screen shows before anything is saved.
+export interface RecordingDraft {
+  siteKey: string;
+  stepCount: number;
+  suggestedName: string; // from the page's heading or title; a dated fallback otherwise
+  values: RecordedValue[]; // steps carrying a value the person chose; never sign-in steps
+  steps: RecordedStepSummary[]; // every step, including the opening page load
+  usesSavedLogin: boolean; // a sign-in was typed; it's saved to the Vault, not listed
+}
+
+export type RecordedValueKind = 'text' | 'option' | 'option-click';
+export type RecordedValueMode = 'changes' | 'fixed';
+
+export interface RecordedValue {
+  stepKey: string;
+  kind: RecordedValueKind; // typed text, a dropdown choice, or a clicked option in a list
+  value: string;
+  label: string; // the field's label from the page
+  defaultMode: RecordedValueMode; // typed text: changes; choices: fixed
+  canChange: boolean; // false when the step can't take a different value at run time
+}
+
+export interface RecordedValueChoice {
+  stepKey: string;
+  mode: RecordedValueMode;
+  secret: boolean;
+}
+
+export interface SaveRecordingRequest {
+  name: string;
+  values: RecordedValueChoice[]; // rows left out keep their default, not secret
 }
 
 // One captured step, as the review screen shows it.
@@ -316,9 +354,6 @@ export interface RecordedStepSummary {
   description: string; // plain words, e.g. 'Typed "ABC Roofing" into Insured name'
   value?: string; // the recorded value; never set for passwords or saved usernames
   usesSavedLogin?: 'username' | 'password';
-  // Set when the step carries a value the user could mark "Changes":
-  // typed text, a dropdown choice, or a click on an option in a list.
-  changeable?: 'text' | 'option' | 'option-click';
 }
 
 export interface RecordingResult {
@@ -327,4 +362,5 @@ export interface RecordingResult {
   version: WorkflowVersion;
   steps: RecordedStepSummary[];
   savedLogin: boolean; // a password was typed and stored in the vault
+  fieldCount: number; // inputs created from the values marked "Changes"
 }

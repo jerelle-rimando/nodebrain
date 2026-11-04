@@ -1,15 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import {
-  startRecording, getRecording, listRecordings, finishRecording, discardRecording, RecordingError,
+  startRecording, getRecording, listRecordings, finishRecording, saveRecording, discardRecording, RecordingError,
 } from '../recorder/recordingSession';
 import { BrowserNotFoundError } from '../recorder/browserLauncher';
 
 // Workflow recorder. Starting a recording opens a browser window at the
 // given address; the person does the task there and presses Done on the
-// pill (or the app calls /done). Progress arrives on /api/events as
-// recording:step, recording:finished, recording:discarded and
-// recording:browser_closed.
+// pill (or the app calls /done). Done opens the review screen; nothing is
+// saved until /save. Progress arrives on /api/events as recording:step,
+// recording:finished (now in review), recording:saved,
+// recording:discarded and recording:browser_closed.
 const router = Router();
 
 const startSchema = z.object({ url: z.string().min(1).max(2048) });
@@ -52,13 +53,39 @@ router.get('/:id', (req: Request, res: Response) => {
   res.json({ success: true, data: status });
 });
 
-// POST /api/recordings/:id/done → saves the site agent, workflow and
-// version 1; the status's `result` holds what was captured.
+// POST /api/recordings/:id/done → stops recording and closes the window.
+// Nothing is saved yet: the status comes back in state 'review' with a
+// `draft` for the review screen.
 router.post('/:id/done', async (req: Request, res: Response) => {
   try {
     res.json({ success: true, data: await finishRecording(req.params.id) });
   } catch (err) {
-    sendError(res, err, "The recording couldn't be saved.");
+    sendError(res, err, "The recording couldn't be finished.");
+  }
+});
+
+const saveSchema = z.object({
+  name: z.string().max(200),
+  values: z.array(z.object({
+    stepKey: z.string().min(1).max(20),
+    mode: z.enum(['changes', 'fixed']),
+    secret: z.boolean(),
+  })).max(500),
+});
+
+// POST /api/recordings/:id/save { name, values } → creates the site agent,
+// the workflow, its input fields (from values marked "Changes") and
+// version 1. The status's `result` holds what was saved.
+router.post('/:id/save', async (req: Request, res: Response) => {
+  const parsed = saveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: 'Something was missing from the save request.' });
+    return;
+  }
+  try {
+    res.json({ success: true, data: await saveRecording(req.params.id, parsed.data) });
+  } catch (err) {
+    sendError(res, err, "The workflow couldn't be saved.");
   }
 });
 

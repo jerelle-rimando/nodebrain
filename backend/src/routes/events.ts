@@ -52,7 +52,7 @@ router.get('/', (req: Request, res: Response) => {
 
   // Workflow recorder (backend/src/recorder/recordingSession.ts).
   const recorderListeners: Array<[string, (payload: unknown) => void]> = [
-    'recording:step', 'recording:finished', 'recording:discarded', 'recording:browser_closed',
+    'recording:step', 'recording:finished', 'recording:saved', 'recording:discarded', 'recording:browser_closed',
   ].map((name) => [name, (payload: unknown) => sendEvent(name, payload)]);
   for (const [name, fn] of recorderListeners) recorderEvents.on(name, fn);
 
