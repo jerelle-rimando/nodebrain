@@ -132,3 +132,157 @@ export interface McpAccessWarning {
   tier: McpAccessTier;
   findings: McpAccessFinding[];
 }
+
+// ── Recorded browser workflows ────────────────────────────────────────────
+// A site agent owns workflows for one site; a workflow is a chain of
+// immutable versions; a run executes one version with one set of inputs.
+// Secret values are never part of these objects: secret literals and secret
+// recorded field values expose only a flag, and are read through
+// getStepLiteralValue / getFieldRecordedValue in workflowRepository.ts.
+
+export interface SiteAgent {
+  id: string;
+  siteKey: string; // registrable domain, e.g. "jimcor.com"; the identity
+  name: string; // derived display name, e.g. "Jimcor"; not unique
+  emoji?: string;
+  startUrl: string;
+  credentialId?: string; // credentials.id holding the site login
+  profileDir?: string; // per-site persistent browser profile
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Workflow {
+  id: string;
+  siteAgentId: string;
+  name: string;
+  description: string;
+  currentVersionId?: string; // unset only between createWorkflow and the first version
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkflowVersionReason = 'recorded' | 'repair' | 'edit' | 'rollback';
+
+export interface WorkflowVersion {
+  id: string;
+  workflowId: string;
+  number: number;
+  parentVersionId?: string;
+  reason: WorkflowVersionReason;
+  repairedStepKey?: string;
+  fromRunId?: string;
+  createdAt: string;
+}
+
+export type WorkflowStepAction =
+  | 'navigate' | 'click' | 'fill' | 'press' | 'select'
+  | 'check' | 'uncheck' | 'upload' | 'hover' | 'handoff';
+
+// Where a step's value comes from.
+export type WorkflowValueSource = 'none' | 'literal' | 'field' | 'credential';
+
+// Where the value goes when the step runs:
+//   text    → the typed text (fill)
+//   option  → the option(s) chosen in a native <select>
+//   locator → substituted for WORKFLOW_VALUE_PLACEHOLDER in `locator` (and in
+//             fingerprint strings), e.g. a click on role=option[name="{{value}}"]
+//   file    → a file path for upload
+export type WorkflowValueTarget = 'text' | 'option' | 'locator' | 'file';
+
+export const WORKFLOW_VALUE_PLACEHOLDER = '{{value}}';
+
+// What NodeBrain captured about the element at record time; the fallback when
+// `locator` stops matching. All optional: capture what the element has.
+export interface WorkflowStepFingerprint {
+  role?: string;
+  name?: string; // accessible name
+  label?: string;
+  placeholder?: string;
+  nameAttr?: string;
+  testId?: string;
+  tag?: string;
+  inputType?: string;
+  heading?: string; // nearest heading or landmark text
+  urlPath?: string;
+  ordinal?: number; // index among elements matching role+name
+  framePath?: string[];
+}
+
+export type WorkflowSignal =
+  | { name: 'navigation'; url?: string }
+  | { name: 'popup'; popupAlias?: string }
+  | { name: 'download'; downloadAlias?: string }
+  | { name: 'dialog'; dialogAlias?: string };
+
+export interface WorkflowStep {
+  id: string;
+  versionId: string;
+  stepKey: string; // stable across versions
+  position: number;
+  action: WorkflowStepAction;
+  locator?: string;
+  fingerprint: WorkflowStepFingerprint;
+  pageAlias: string;
+  origin?: string;
+  args: Record<string, unknown>; // key, modifiers, button, clickCount, option labels+values
+  valueSource: WorkflowValueSource;
+  valueTarget?: WorkflowValueTarget;
+  literalValue?: string; // only for non-secret literals
+  literalSecret: boolean;
+  fieldId?: string;
+  credentialPart?: 'username' | 'password';
+  signals: WorkflowSignal[];
+  requiresConfirmation: boolean;
+  snapshotPath?: string;
+}
+
+export type WorkflowFieldKind = 'text' | 'option' | 'file';
+
+export interface WorkflowField {
+  id: string;
+  workflowId: string;
+  key: string;
+  label: string;
+  kind: WorkflowFieldKind;
+  secret: boolean;
+  recordedValue?: string; // only for non-secret fields
+  required: boolean;
+  position: number;
+  createdAt: string;
+}
+
+export type WorkflowRunTrigger = 'manual' | 'schedule' | 'chat';
+export type WorkflowRunStatus =
+  | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'needs_attention';
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  versionId: string;
+  siteAgentId: string;
+  trigger: WorkflowRunTrigger;
+  status: WorkflowRunStatus;
+  inputs: Record<string, string>; // non-secret field values only, by field key
+  failedStepKey?: string;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+export type WorkflowRunStepStatus = 'ok' | 'failed' | 'skipped' | 'repaired';
+export type WorkflowStepResolvedBy = 'primary' | 'fallback' | 'human';
+
+export interface WorkflowRunStep {
+  id: string;
+  runId: string;
+  stepKey: string;
+  position: number;
+  status: WorkflowRunStepStatus;
+  resolvedBy?: WorkflowStepResolvedBy;
+  durationMs?: number;
+  url?: string;
+  error?: string;
+  screenshotPath?: string;
+  createdAt: string;
+}

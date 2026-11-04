@@ -1,14 +1,18 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
+import { migrateWorkflowTables } from './workflowSchema';
 
 const DB_DIR = process.env.NODEBRAIN_DATA_DIR ?? path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DB_DIR, 'nodebrain.db');
 
 let _db: SqlJsDatabase | null = null;
+// >0 while dbTransaction is running: writes are held in memory and persisted
+// once at COMMIT, so a multi-row write lands on disk whole or not at all.
+let _txDepth = 0;
 
 function persist(): void {
-  if (!_db) return;
+  if (!_db || _txDepth > 0) return;
   const data = _db.export();
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
@@ -42,6 +46,30 @@ export function dbAll<T>(sql: string, params: (string | number | null)[] = []): 
   }
   stmt.free();
   return results;
+}
+
+// Runs fn inside BEGIN/COMMIT and writes the file once at the end. On a throw
+// the transaction is rolled back and nothing is persisted. Nested calls join
+// the outer transaction. fn must be synchronous (sql.js is).
+export function dbTransaction<T>(fn: () => T): T {
+  const db = getDb();
+  if (_txDepth > 0) return fn();
+  db.run('BEGIN');
+  _txDepth++;
+  let result: T;
+  try {
+    result = fn();
+    db.run('COMMIT');
+  } catch (err) {
+    // A failed COMMIT can leave SQLite already rolled back; ROLLBACK then
+    // throws "no transaction is active", which would hide the real error.
+    try { db.run('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  } finally {
+    _txDepth--;
+  }
+  persist();
+  return result;
 }
 
 export function getDb(): SqlJsDatabase {
@@ -207,6 +235,10 @@ export async function initDb(): Promise<void> {
   _db.run(
     "UPDATE agents SET model = 'openai/gpt-oss-120b' WHERE model = 'llama-3.3-70b-versatile' AND provider = 'groq'",
   );
+
+  // Recorded browser workflows: new tables and indexes only (IF NOT EXISTS);
+  // nothing existing is altered. See workflowSchema.ts.
+  migrateWorkflowTables(_db);
 
   persist();
 }
