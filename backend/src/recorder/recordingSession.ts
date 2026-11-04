@@ -60,7 +60,8 @@ interface PageRecord {
   detail?: number;
   docId: string;
   elementId: number;
-  ts: number;
+  ts: number; // when NodeBrain received it
+  pageTs: number; // when it happened, by the page's clock (same machine)
   fp: {
     tag?: string; inputType?: string; autocomplete?: string; nameAttr?: string; testId?: string;
     label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[]; title?: string;
@@ -88,6 +89,11 @@ interface CapturedStep {
   snapshot?: string;
   ref?: string;
   at: number;
+  // When the person acted (page clock, same machine): orders mouse-down
+  // picks, which are reported 500 ms late, among the other steps.
+  eventTs: number;
+  // Built from a mouse-down pick (pageScript.ts), not reported by Playwright.
+  picked?: boolean;
   opening?: boolean; // the page load NodeBrain did to start; not counted in the pill
 }
 
@@ -326,6 +332,9 @@ class RecordingSession {
       case 'discard':
         void this.discard();
         return undefined;
+      case 'pick':
+        if (this.accepting()) this.enqueue(() => this.onPick(page, m));
+        return undefined;
       case 'event': {
         if (!this.accepting()) return undefined;
         const kind = m.kind;
@@ -335,7 +344,8 @@ class RecordingSession {
           detail: typeof m.detail === 'number' ? m.detail : undefined,
           docId: typeof m.docId === 'string' ? m.docId : '',
           elementId: typeof m.elementId === 'number' ? m.elementId : -1,
-          ts: Date.now(), fp: (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'],
+          ts: Date.now(), pageTs: typeof m.ts === 'number' ? m.ts : Date.now(),
+          fp: (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'],
           page, consumed: false,
         });
         const cutoff = Date.now() - 15_000;
@@ -382,7 +392,10 @@ class RecordingSession {
         }));
         if (byName) return byName;
       }
-      return candidates[candidates.length - 1];
+      // Playwright reports actions in the order they happened, sometimes
+      // well after the fact on large pages; the oldest unclaimed event is
+      // this action's.
+      return candidates[0];
     };
     let found = pick();
     for (let i = 0; i < 6 && !found; i++) {
@@ -409,7 +422,13 @@ class RecordingSession {
 
     const last = this.steps[this.steps.length - 1];
 
-    // Typing arrives as one fill updated per keystroke.
+    // Typing arrives as one fill updated per keystroke. A mouse-down pick may
+    // have been slotted in after the field being typed into; skip past it.
+    const lastRecorded = [...this.steps].reverse().find((s) => !s.picked);
+    if (kind === 'updated' && lastRecorded && lastRecorded.recorderName === action.name) {
+      await this.updateStep(lastRecorded, page, action);
+      return;
+    }
     if (kind === 'updated' && last && last.recorderName === action.name) {
       await this.updateStep(last, page, action);
       return;
@@ -424,7 +443,62 @@ class RecordingSession {
 
     const step = await this.buildStep(page, action);
     if (!step) return;
-    this.steps.push(step);
+    // No page event to time it by: it follows the previous recorded step.
+    const prevRecorded = [...this.steps].reverse().find((s) => !s.picked);
+    if (!step.record && prevRecorded) step.eventTs = Math.min(step.eventTs, prevRecorded.eventTs + 1);
+    // Goes ahead of any mouse-down pick that happened after it (picks are
+    // reported 500 ms late, so one may already be in the list).
+    let at = this.steps.length;
+    while (at > 0 && this.steps[at - 1].picked && this.steps[at - 1].eventTs > step.eventTs) at--;
+    this.steps.splice(at, 0, step);
+    this.pushCount();
+    recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
+  }
+
+  // An option chosen on mouse-down (see pageScript.ts). Playwright reported
+  // nothing for it, so NodeBrain builds the step: a role locator with the
+  // option's exact name, which is how Playwright itself would name a
+  // role=option element, plus nth when several options share that name.
+  private async onPick(page: Page, m: Record<string, unknown>): Promise<void> {
+    if (!this.accepting()) return;
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    const role = str(m.role);
+    const name = str(m.name);
+    if (!role || !name || !/^[a-z]+$/.test(role)) return;
+    const ordinal = typeof m.ordinal === 'number' ? m.ordinal : 0;
+    const sameCount = typeof m.sameCount === 'number' ? m.sameCount : 1;
+    const fp = (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'];
+    const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const scope = m.inListbox === true ? 'internal:role=listbox >> ' : '';
+    const locator = `${scope}internal:role=${role}[name="${escaped}"s]` + (sameCount > 1 ? ` >> nth=${ordinal}` : '');
+    // Lists are often appended at the end of the page (Select2), where the
+    // nearest heading is unrelated; the opener's section heading is the right one.
+    const opener = [...this.steps].reverse().find((s) => s.pageAlias === this.aliasOf(page) && !s.picked);
+    const heading = (opener && opener.action !== 'navigate' ? opener.fingerprint.heading : undefined) ?? str(m.heading);
+    const facts: SnapshotFacts = { role, name, heading, container: str(m.container), ordinal };
+    const record: PageRecord = {
+      kind: 'click', docId: str(m.docId) ?? '', elementId: typeof m.elementId === 'number' ? m.elementId : -1,
+      ts: Date.now(), pageTs: typeof m.ts === 'number' ? m.ts : Date.now(), fp, page, consumed: true,
+    };
+    const step: CapturedStep = {
+      action: 'click',
+      recorderName: 'click',
+      locator,
+      fingerprint: this.fingerprintOf(facts, record),
+      facts,
+      record,
+      pageAlias: this.aliasOf(page),
+      origin: fp.origin ?? safeOrigin(page.url()),
+      args: { button: 'left', modifiers: 0, clickCount: 1, selectsOn: 'mousedown' },
+      signals: [],
+      at: Date.now(),
+      eventTs: record.pageTs,
+      picked: true,
+    };
+    // Reported 500 ms after the fact: put it back where it happened.
+    let i = this.steps.length;
+    while (i > 0 && this.steps[i - 1].eventTs > step.eventTs) i--;
+    this.steps.splice(i, 0, step);
     this.pushCount();
     recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
   }
@@ -444,6 +518,7 @@ class RecordingSession {
       snapshot: action.ariaSnapshot,
       ref: action.ref,
       at: Date.now(),
+      eventTs: record?.pageTs ?? Date.now(),
     };
 
     switch (action.name) {

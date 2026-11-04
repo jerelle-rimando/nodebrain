@@ -43,7 +43,9 @@ export const PAGE_SCRIPT = `(() => {
       if (el.labels && el.labels.length) return textOf(el.labels[0]);
       const by = el.getAttribute('aria-labelledby');
       if (by) {
-        const t = by.split(/\\s+/).map((id) => document.getElementById(id)).filter(Boolean).map(textOf).join(' ');
+        // An element inside the control is its content (Select2 points at
+        // the shown value), not its label.
+        const t = by.split(/\\s+/).map((id) => document.getElementById(id)).filter((n) => n && !el.contains(n)).map(textOf).join(' ');
         if (t) return clean(t);
       }
       const wrap = el.closest('label');
@@ -106,6 +108,88 @@ export const PAGE_SCRIPT = `(() => {
   window.addEventListener('change', (e) => capture('change', e), true);
   window.addEventListener('keydown', (e) => {
     if (e.key && (e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) capture('keydown', e);
+  }, true);
+
+  // ── Options picked on mouse-down ─────────────────────────────────────
+  // Many custom dropdowns (OrangeHRM, vue-select) choose the option on
+  // mousedown and remove the list at once, so no click ever reaches it and
+  // Playwright's recorder logs nothing. Measured on OrangeHRM: mousedown on
+  // the option, the list removed ~2 ms later, mouseup on whatever was
+  // underneath, no click. A dismissal (clicking elsewhere) has the same
+  // shape except the mousedown is outside any option.
+  //
+  // So: on a mousedown inside an element with an explicit option-like role,
+  // read it now, while it still exists. If a click reaches it within 500 ms
+  // the list selects on click and the recorder logs that as usual; report
+  // nothing. If it's gone or hidden by then, it was picked; report it. If
+  // it's still showing (the person dragged off it), nothing was picked.
+  // Native <option>s have no role attribute and never match.
+  const PICKABLE = '[role=option],[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox],[role=treeitem]';
+  let pending = null;
+
+  const shown = (el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const accName = (el) => clean(el.getAttribute('aria-label'), 200) || textOf(el);
+  const textOfId = (ids) => clean((ids || '').split(/\\s+/).map((id) => document.getElementById(id)).filter(Boolean).map(textOf).join(' '));
+
+  // The list's own label, else the form label next to it ("Employment
+  // Status" above OrangeHRM's select), else the control that owns the list.
+  function listLabel(opt) {
+    const list = opt.closest('[role=listbox],[role=menu],[role=tree],[role=grid],[role=dialog]') || opt.parentElement;
+    if (!list) return undefined;
+    const own = clean(list.getAttribute('aria-label')) || textOfId(list.getAttribute('aria-labelledby'));
+    if (own) return own;
+    if (list.id) {
+      const owner = document.querySelector('[aria-controls="' + CSS.escape(list.id) + '"],[aria-owns="' + CSS.escape(list.id) + '"]');
+      // Only a real <label>: the owner's aria name is often its current
+      // value (Select2's shows "Alaska"), which would read as the field's name.
+      const real = owner && ((owner.labels && owner.labels[0]) || owner.closest('label'));
+      if (real) { const l = textOf(real); if (l) return l; }
+    }
+    let a = list.parentElement;
+    for (let i = 0; a && i < 6; i++, a = a.parentElement) {
+      const lab = a.querySelector(':scope > label, :scope > * > label, :scope > legend');
+      if (lab && !list.contains(lab)) return textOf(lab);
+    }
+    return undefined;
+  }
+
+  function nearestHeading(el) {
+    const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]'));
+    let found;
+    for (const h of hs) { if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) found = h; else break; }
+    // Drop permalink marks docs sites append to headings (¶ # §).
+    return found ? clean((textOf(found) || '').replace(/\\s*[¶#§]\\s*$/, '')) : undefined;
+  }
+
+  window.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const raw = targetOf(e);
+    const opt = raw && raw.closest(PICKABLE);
+    if (!opt) return;
+    const role = opt.getAttribute('role');
+    const name = accName(opt);
+    if (!name) return;
+    // Options in an explicit listbox are located through it, which leaves
+    // out the native <select> some widgets keep hidden but readable
+    // (Select2: its <option>s also have the role "option"). The ordinal
+    // counts the same set the locator will match.
+    const inListbox = !!opt.closest('[role=listbox]');
+    const pool = inListbox ? '[role=listbox] [role="' + role + '"]' : '[role="' + role + '"]';
+    const same = Array.from(document.querySelectorAll(pool)).filter((o) => accName(o) === name);
+    pending = {
+      el: opt, clicked: false,
+      msg: { type: 'pick', ts: Date.now(), docId, elementId: idOf(opt), role, name, inListbox, ordinal: Math.max(0, same.indexOf(opt)),
+             sameCount: same.length, container: listLabel(opt), heading: nearestHeading(opt), fp: fingerprint(opt) },
+    };
+    const p = pending;
+    setTimeout(() => {
+      if (pending === p) pending = null;
+      if (!p.clicked && !shown(p.el)) { try { send(p.msg); } catch {} }
+    }, 500);
+  }, true);
+  window.addEventListener('click', (e) => {
+    const t = targetOf(e);
+    if (pending && t && pending.el.contains(t)) pending.clicked = true;
   }, true);
 
   if (window !== top) return;

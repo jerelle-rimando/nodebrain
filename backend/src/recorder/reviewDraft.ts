@@ -62,8 +62,11 @@ export function labelFor(steps: DraftStep[], index: number): string {
     const prev = steps[i];
     if (prev.pageAlias !== step.pageAlias || prev.action === 'navigate') break;
     const role = prev.fingerprint.role;
-    if ((role === 'combobox' || role === 'button' || role === 'textbox' || role === 'searchbox') && fieldName(prev.fingerprint)) {
-      return fieldName(prev.fingerprint)!;
+    // Only the opener's label or placeholder: its accessible name is often
+    // the value it currently shows ("Alaska"), not what the field is.
+    const openerLabel = prev.fingerprint.label || prev.fingerprint.placeholder;
+    if ((role === 'combobox' || role === 'button' || role === 'textbox' || role === 'searchbox') && openerLabel) {
+      return openerLabel;
     }
   }
   // Radio buttons in a group share a name attribute ("color" → "Color").
