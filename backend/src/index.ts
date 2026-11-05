@@ -28,6 +28,7 @@ import analyticsRouter from './routes/analytics';
 import telemetryRouter from './routes/telemetry';
 import recordingsRouter from './routes/recordings';
 import { workflowRunsRouter } from './routes/workflowRuns';
+import { workflowsRouter } from './routes/workflows';
 import { reconcileOrphanedRuns } from './db/workflowRepository';
 import { registerTelemetrySubscribers } from './telemetry/subscribers';
 import { emitUsageSnapshot } from './telemetry/usageSnapshot';
@@ -143,6 +144,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/telemetry', telemetryRouter);
 app.use('/api/recordings', recordingsRouter);
 app.use('/api', workflowRunsRouter);
+app.use('/api', workflowsRouter);
 
 async function main() {
   try {

@@ -364,3 +364,51 @@ export interface RecordingResult {
   savedLogin: boolean; // a password was typed and stored in the vault
   fieldCount: number; // inputs created from the values marked "Changes"
 }
+
+// ── Run form ──────────────────────────────────────────────────────────────
+// What the run form shows: the inputs to fill and the steps in plain words,
+// grouped into phases. Built from the saved steps (no model). Field keys and
+// step keys are here only to connect things; the screen never shows them.
+
+export interface WorkflowListItem {
+  id: string;
+  name: string;
+  siteName: string;
+  siteKey: string;
+  fieldCount: number;
+  lastRun?: { startedAt: string; status: WorkflowRunStatus };
+}
+
+export interface RunFormField {
+  key: string;
+  label: string;
+  kind: WorkflowFieldKind;
+  secret: boolean;
+  required: boolean;
+  // The previous run's value, else the value used while recording. Never
+  // set for secret fields: those are never stored or sent back.
+  previousValue?: string;
+}
+
+// A step sentence: plain text, with the run's value dropped in where a
+// field's value lands.
+export type PlanSegment = { text: string } | { field: string };
+
+export interface PlanStep {
+  stepKey: string;
+  segments: PlanSegment[];
+  pause?: 'handoff' | 'confirm'; // stops and waits for the person
+}
+
+export interface PlanPhase {
+  title: string;
+  note?: string; // e.g. "Skipped when you're already signed in"
+  steps: PlanStep[];
+}
+
+export interface RunForm {
+  workflow: { id: string; name: string; siteName: string; siteKey: string };
+  lastRun?: { startedAt: string; finishedAt?: string; status: WorkflowRunStatus };
+  fields: RunFormField[];
+  phases: PlanPhase[];
+}

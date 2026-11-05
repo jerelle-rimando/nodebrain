@@ -78,6 +78,18 @@ export const api = {
     request<RecordingStatus>(`/recordings/${id}/save`, { method: 'POST', body: JSON.stringify(body) }),
   discardRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/discard`, { method: 'POST' }),
 
+  // Saved workflows and their runs
+  getWorkflows: () => request<import('@shared/types').WorkflowListItem[]>('/workflows'),
+  getRunForm: (workflowId: string) => request<import('@shared/types').RunForm>(`/workflows/${workflowId}/run-form`),
+  startWorkflowRun: (workflowId: string, inputs: Record<string, string>) =>
+    request<import('@shared/types').WorkflowRun>(`/workflows/${workflowId}/runs`, {
+      method: 'POST',
+      body: JSON.stringify({ inputs }),
+    }),
+  getWorkflowRun: (runId: string) =>
+    request<{ run: import('@shared/types').WorkflowRun; steps: import('@shared/types').WorkflowRunStep[]; active: boolean }>(`/workflow-runs/${runId}`),
+  cancelWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' }),
+
   // Take Control (workflow runs; agent tasks once they use the shared pause)
   getTakeControls: () => request<import('../stores/appStore').TakeControlRequest[]>('/take-control'),
   respondToTakeControl: (requestId: string, done: boolean) =>

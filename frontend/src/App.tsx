@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud, Settings } from 'lucide-react';
+import { MessageSquare, GitFork, Workflow, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud, Settings } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -11,6 +11,7 @@ import { AnalyticsPage } from './components/analytics/AnalyticsPage';
 import { ServersPage } from './components/servers/ServersPage';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
+import { WorkflowsPage } from './components/workflows/WorkflowsPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
 import { RecordingReview } from './components/recorder/RecordingReview';
@@ -32,6 +33,7 @@ import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
   { id: 'graph' as const, label: 'NodeGraph', icon: GitFork },
+  { id: 'workflows' as const, label: 'Workflows', icon: Workflow },
   { id: 'templates' as const, label: 'Templates', icon: LayoutTemplate },
   { id: 'integrations' as const, label: 'Integrations', icon: Plug },
   { id: 'vault' as const, label: 'Vault', icon: Shield },
@@ -170,6 +172,7 @@ export default function App() {
             {showServers && <ServersPage />}
             {!showServers && activeTab === 'dashboard' && <Dashboard />}
             {!showServers && activeTab === 'graph' && <NodeGraph />}
+            {!showServers && activeTab === 'workflows' && <WorkflowsPage />}
             {!showServers && activeTab === 'templates' && <TemplatesPage />}
             {!showServers && activeTab === 'vault' && <CredentialVault />}
             {!showServers && activeTab === 'integrations' && <IntegrationsPage />}

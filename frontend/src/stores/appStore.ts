@@ -20,7 +20,7 @@ export interface TakeControlRequest {
   agentId?: string;
 }
 
-type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
+type ActiveTab = 'dashboard' | 'graph' | 'workflows' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
 
 interface AppState {
   agents: Agent[];
