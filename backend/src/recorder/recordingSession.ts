@@ -16,6 +16,7 @@ import {
 } from '../db/workflowRepository';
 import { createCredential, updateCredential, getCredentialById } from '../vault/credentialVault';
 import { launchBrowser, closeBrowser, type LaunchedBrowser } from './browserLauncher';
+import { siteBrowserHolder } from '../browser/siteBrowserLock';
 import { PAGE_SCRIPT, RECORDER_BINDING, PILL_HOST_ID, SET_COUNT_FN } from './pageScript';
 import { factsForRef, redactSnapshot, type SnapshotFacts } from './ariaSnapshot';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
@@ -127,6 +128,9 @@ export async function startRecording(url: string): Promise<RecordingStatus> {
   }
   const siteKey = siteKeyFromUrl(parsed.href);
   pruneSessions();
+  if (siteBrowserHolder(siteKey)) {
+    throw new RecordingError(`A workflow is running on ${siteKey} right now. Wait for it to finish, then start recording.`);
+  }
   for (const s of sessions.values()) {
     if (s.siteKey === siteKey && (s.state === 'recording' || s.state === 'saving')) {
       throw new RecordingError(`A recording for ${siteKey} is already open. Finish or throw away that one first.`);

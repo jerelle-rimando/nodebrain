@@ -9,6 +9,17 @@ export interface ToolApprovalRequest {
   args: Record<string, unknown>;
 }
 
+// NodeBrain handed the browser window to the person (Take Control) and is
+// waiting: a workflow run at a step that needs them, or an agent task.
+export interface TakeControlRequest {
+  requestId: string;
+  reason: string;
+  title: string;
+  runId?: string;
+  taskId?: string;
+  agentId?: string;
+}
+
 type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
 
 interface AppState {
@@ -26,6 +37,7 @@ interface AppState {
   selectedAgentId: string | null;
   logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
+  pendingTakeControls: TakeControlRequest[];
   // Whether the Electron-proxied backend is currently reachable. Driven by
   // useLiveSync's SSE connection (primary) and api.ts's request() (secondary).
   backendConnected: boolean;
@@ -60,6 +72,8 @@ interface AppState {
   setLogsFilterAgentId: (id: string | null) => void;
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
+  addPendingTakeControl: (req: TakeControlRequest) => void;
+  removePendingTakeControl: (requestId: string) => void;
   setBackendConnected: (connected: boolean) => void;
   setRecordingReview: (status: RecordingStatus | null) => void;
 }
@@ -76,6 +90,7 @@ export const useStore = create<AppState>((set) => ({
   selectedAgentId: null,
   logsFilterAgentId: null,
   pendingApprovals: [],
+  pendingTakeControls: [],
   backendConnected: true,
   recordingReview: null,
 
@@ -107,5 +122,8 @@ export const useStore = create<AppState>((set) => ({
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
   removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
   setBackendConnected: (backendConnected) => set({ backendConnected }),
+  addPendingTakeControl: (req) => set((s) => (s.pendingTakeControls.some((r) => r.requestId === req.requestId)
+    ? s : { pendingTakeControls: [...s.pendingTakeControls, req] })),
+  removePendingTakeControl: (requestId) => set((s) => ({ pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId) })),
   setRecordingReview: (recordingReview) => set({ recordingReview }),
 }));

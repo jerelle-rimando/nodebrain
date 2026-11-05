@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { agentEvents } from '../agents/agentEngine';
 import { recorderEvents } from '../recorder/recordingSession';
+import { replayEvents } from '../replay/replayEngine';
+import { takeControlEvents } from '../browser/takeControl';
 import type { TaskLog, Task, Agent } from '../../shared-types';
 
 const router = Router();
@@ -56,6 +58,16 @@ router.get('/', (req: Request, res: Response) => {
   ].map((name) => [name, (payload: unknown) => sendEvent(name, payload)]);
   for (const [name, fn] of recorderListeners) recorderEvents.on(name, fn);
 
+  // Workflow runs (backend/src/replay/replayEngine.ts) and Take Control pauses.
+  const replayListeners: Array<[string, (payload: unknown) => void]> = [
+    'run:started', 'run:step', 'run:finished',
+  ].map((name) => [name, (payload: unknown) => sendEvent(name, payload)]);
+  for (const [name, fn] of replayListeners) replayEvents.on(name, fn);
+  const takeControlListeners: Array<[string, (payload: unknown) => void]> = [
+    'browser:take_control_needed', 'browser:take_control_resolved',
+  ].map((name) => [name, (payload: unknown) => sendEvent(name, payload)]);
+  for (const [name, fn] of takeControlListeners) takeControlEvents.on(name, fn);
+
   req.on('close', () => {
     clearInterval(heartbeat);
     agentEvents.off('log', onLog);
@@ -70,6 +82,8 @@ router.get('/', (req: Request, res: Response) => {
     agentEvents.off('chat:token', onChatToken);
     agentEvents.off('chat:phase', onChatPhase);
     for (const [name, fn] of recorderListeners) recorderEvents.off(name, fn);
+    for (const [name, fn] of replayListeners) replayEvents.off(name, fn);
+    for (const [name, fn] of takeControlListeners) takeControlEvents.off(name, fn);
   });
 });
 

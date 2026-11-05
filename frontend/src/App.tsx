@@ -14,6 +14,7 @@ import { TemplatesPage } from './components/templates/TemplatesPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
 import { RecordingReview } from './components/recorder/RecordingReview';
+import { TakeControlModal } from './components/shared/TakeControlModal';
 import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
 import { ConnectionBanner } from './components/shared/ConnectionBanner';
@@ -80,6 +81,11 @@ export default function App() {
         const waiting = recs.find((r) => r.state === 'review');
         if (waiting) useStore.getState().setRecordingReview(waiting);
       })
+      .catch(() => {});
+
+    // A pause that began while this window wasn't listening still needs an answer.
+    api.getTakeControls()
+      .then((reqs) => { for (const r of reqs) useStore.getState().addPendingTakeControl(r); })
       .catch(() => {});
 
   }, [setAgents, setCredentials, setTasks, setLogs, setActiveTab]);
@@ -175,6 +181,7 @@ export default function App() {
       </div>
       <ApprovalModal />
       <RecordingReview />
+      <TakeControlModal />
       <ToastContainer />
     </div>
   );

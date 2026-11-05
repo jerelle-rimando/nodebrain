@@ -78,6 +78,14 @@ export const api = {
     request<RecordingStatus>(`/recordings/${id}/save`, { method: 'POST', body: JSON.stringify(body) }),
   discardRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/discard`, { method: 'POST' }),
 
+  // Take Control (workflow runs; agent tasks once they use the shared pause)
+  getTakeControls: () => request<import('../stores/appStore').TakeControlRequest[]>('/take-control'),
+  respondToTakeControl: (requestId: string, done: boolean) =>
+    request<{ requestId: string; done: boolean }>(`/take-control/${requestId}`, {
+      method: 'POST',
+      body: JSON.stringify({ done }),
+    }),
+
   respondToApproval: (taskId: string, approvalId: string, approved: boolean) =>
     request<{ approvalId: string; approved: boolean }>(`/tasks/${taskId}/approve/${approvalId}`, {
       method: 'POST',

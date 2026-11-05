@@ -27,6 +27,8 @@ import agentConnectionsRouter from './routes/agentConnections';
 import analyticsRouter from './routes/analytics';
 import telemetryRouter from './routes/telemetry';
 import recordingsRouter from './routes/recordings';
+import { workflowRunsRouter } from './routes/workflowRuns';
+import { reconcileOrphanedRuns } from './db/workflowRepository';
 import { registerTelemetrySubscribers } from './telemetry/subscribers';
 import { emitUsageSnapshot } from './telemetry/usageSnapshot';
 
@@ -140,6 +142,7 @@ app.use('/api/agent-connections', agentConnectionsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/telemetry', telemetryRouter);
 app.use('/api/recordings', recordingsRouter);
+app.use('/api', workflowRunsRouter);
 
 async function main() {
   try {
@@ -197,6 +200,8 @@ async function main() {
     // tasks/agents, so any row still 'running' here is necessarily orphaned.
     const orphanedTasks = reconcileOrphanedTasks();
     const orphanedAgents = reconcileOrphanedAgents();
+    const orphanedRuns = reconcileOrphanedRuns();
+    if (orphanedRuns > 0) console.log(`♻️  Marked ${orphanedRuns} workflow run(s) interrupted by the last shutdown`);
     if (orphanedTasks > 0 || orphanedAgents > 0) {
       console.log(`♻️  Reconciled ${orphanedTasks} orphaned task(s) and ${orphanedAgents} orphaned agent(s) left running from a previous shutdown`);
     } else {
