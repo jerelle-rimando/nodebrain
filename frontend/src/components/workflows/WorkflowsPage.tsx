@@ -1,76 +1,38 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Loader2, Plus, Workflow as WorkflowIcon } from 'lucide-react';
-import type { RecordingStatus, SiteSummary, WorkflowRow, WorkflowsOverview } from '@shared/types';
+import { useCallback, useEffect, useState } from 'react';
+import { Loader2, Workflow as WorkflowIcon } from 'lucide-react';
+import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
 import { api } from '../../utils/api';
-import { useStore } from '../../stores/appStore';
 import { EmojiPicker } from '../dashboard/EmojiPicker';
 import { RunFormScreen } from './RunFormScreen';
 import { RunView } from './RunView';
 import { OPEN_STATES, RecordButton, StartRecordingDialog } from './RecordControls';
+import { SiteChatPanel, type PickerSite } from './SiteChatPanel';
 
-// Saved workflows: the list (scoped to one site), the run form, and the run
-// view, in one tab.
+// The Workflows tab: on the left the list (scoped to one site), or a
+// workflow's run form or run view; on the right a chat about that site,
+// whose header holds the site picker.
 type Screen =
   | { name: 'list' }
   | { name: 'form'; workflowId: string }
   | { name: 'run'; workflowId: string; runId: string };
 
-export function WorkflowsPage() {
-  const [screen, setScreen] = useState<Screen>({ name: 'list' });
-
-  if (screen.name === 'form') {
-    return (
-      <RunFormScreen
-        key={screen.workflowId}
-        workflowId={screen.workflowId}
-        onBack={() => setScreen({ name: 'list' })}
-        onStarted={(runId) => setScreen({ name: 'run', workflowId: screen.workflowId, runId })}
-      />
-    );
-  }
-  if (screen.name === 'run') {
-    return (
-      <RunView
-        key={screen.runId}
-        workflowId={screen.workflowId}
-        runId={screen.runId}
-        onBack={() => setScreen({ name: 'list' })}
-        onRunAgain={() => setScreen({ name: 'form', workflowId: screen.workflowId })}
-      />
-    );
-  }
-  return (
-    <WorkflowList
-      onRun={(workflowId) => setScreen({ name: 'form', workflowId })}
-      onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
-    />
-  );
-}
-
 const SITE_KEY = 'nb_workflows_site';
 
-// A site in the picker, including one that only has a recording going so far.
-interface PickerSite extends SiteSummary { recordingOnly?: boolean }
-
-function WorkflowList({ onRun, onOpenRun }: {
-  onRun: (workflowId: string) => void;
-  onOpenRun: (workflowId: string, runId: string) => void;
-}) {
+export function WorkflowsPage() {
+  const [screen, setScreen] = useState<Screen>({ name: 'list' });
   const [overview, setOverview] = useState<WorkflowsOverview | null>(null);
   const [recordings, setRecordings] = useState<RecordingStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SITE_KEY));
-  const [dialog, setDialog] = useState<{ address: string } | null>(null);
-  const pauses = useStore((s) => s.pendingTakeControls);
-  const openPause = useStore((s) => s.setTakeControlOpenFor);
 
   const choose = useCallback((siteKey: string) => {
     setChosen(siteKey);
     localStorage.setItem(SITE_KEY, siteKey);
   }, []);
 
-  // Rows carry live state (running, paused, stopped), so the list follows it.
+  // Rows and the picker carry live state (running, paused, stopped), so the
+  // page follows it.
   const load = useCallback(async () => {
     const [o, r] = await Promise.all([
       api.getWorkflows().catch(() => null),
@@ -86,17 +48,9 @@ function WorkflowList({ onRun, onOpenRun }: {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (!overview) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        {error ? <p role="alert" className="text-sm text-brain-error">{error}</p> : <Loader2 size={16} className="animate-spin text-brain-text-dim" />}
-      </div>
-    );
-  }
-
-  // Sites in the picker: those with saved workflows, plus a new site that
-  // only has a recording open so far.
-  const sites: PickerSite[] = [...overview.sites];
+  // Sites: those with saved workflows, plus a new site that only has a
+  // recording open so far.
+  const sites: PickerSite[] = [...(overview?.sites ?? [])];
   for (const rec of recordings) {
     if (!sites.some((s) => s.siteKey === rec.siteKey)) {
       sites.push({
@@ -105,22 +59,90 @@ function WorkflowList({ onRun, onOpenRun }: {
       });
     }
   }
+  // The chosen site; else the one that needs attention, else the most recent.
+  const current = sites.find((s) => s.siteKey === chosen)
+    ?? sites.find((s) => s.attention)
+    ?? [...sites].sort((a, b) => (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''))[0]
+    ?? null;
 
+  let main;
+  if (screen.name === 'form') {
+    main = (
+      <RunFormScreen
+        key={screen.workflowId}
+        workflowId={screen.workflowId}
+        onBack={() => setScreen({ name: 'list' })}
+        onStarted={(runId) => setScreen({ name: 'run', workflowId: screen.workflowId, runId })}
+      />
+    );
+  } else if (screen.name === 'run') {
+    main = (
+      <RunView
+        key={screen.runId}
+        workflowId={screen.workflowId}
+        runId={screen.runId}
+        onBack={() => setScreen({ name: 'list' })}
+        onRunAgain={() => setScreen({ name: 'form', workflowId: screen.workflowId })}
+      />
+    );
+  } else if (!overview) {
+    main = (
+      <div className="h-full flex items-center justify-center">
+        {error ? <p role="alert" className="text-sm text-brain-error">{error}</p> : <Loader2 size={16} className="animate-spin text-brain-text-dim" />}
+      </div>
+    );
+  } else {
+    main = (
+      <WorkflowList
+        overview={overview} recordings={recordings} sites={sites} current={current} error={error}
+        onChoose={choose} onReload={load}
+        onRecordingStarted={(status) => {
+          choose(status.siteKey);
+          setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
+        }}
+        onRun={(workflowId) => setScreen({ name: 'form', workflowId })}
+        onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
+      />
+    );
+  }
+
+  return (
+    <div className="h-full flex">
+      <div className="flex-1 min-w-0">{main}</div>
+      <div className="w-[360px] flex-shrink-0">
+        <SiteChatPanel sites={sites} current={current} onChoose={choose} />
+      </div>
+    </div>
+  );
+}
+
+function WorkflowList({ overview, recordings, sites, current, error, onChoose, onReload, onRecordingStarted, onRun, onOpenRun }: {
+  overview: WorkflowsOverview;
+  recordings: RecordingStatus[];
+  sites: PickerSite[];
+  current: PickerSite | null;
+  error: string | null;
+  onChoose: (siteKey: string) => void;
+  onReload: () => void;
+  onRecordingStarted: (status: RecordingStatus) => void;
+  onRun: (workflowId: string) => void;
+  onOpenRun: (workflowId: string, runId: string) => void;
+}) {
+  const [dialog, setDialog] = useState<{ address: string } | null>(null);
+
+  // Record is the one way to start a recording. It opens on the current
+  // site's address; changing the address records on another site.
   const dialogEl = (
     <StartRecordingDialog
       open={dialog !== null}
       initialAddress={dialog?.address}
       onClose={() => setDialog(null)}
-      onStarted={(status) => {
-        setDialog(null);
-        choose(status.siteKey);
-        setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
-      }}
+      onStarted={(status) => { setDialog(null); onRecordingStarted(status); }}
     />
   );
 
   // Nothing recorded anywhere yet: recording is the only thing to do.
-  if (sites.length === 0) {
+  if (!current) {
     return (
       <div className="h-full overflow-y-auto">
         <div className="max-w-xl mx-auto px-6 py-10">
@@ -143,10 +165,6 @@ function WorkflowList({ onRun, onOpenRun }: {
     );
   }
 
-  // The chosen site; else the one that needs attention, else the most recent.
-  const current = sites.find((s) => s.siteKey === chosen)
-    ?? sites.find((s) => s.attention)
-    ?? [...sites].sort((a, b) => (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''))[0];
   const rows = overview.workflows.filter((w) => w.siteAgentId === current.id);
   const recording = recordings.find((r) => r.siteKey === current.siteKey);
   const others = sites.filter((s) => s.siteKey !== current.siteKey);
@@ -156,12 +174,10 @@ function WorkflowList({ onRun, onOpenRun }: {
     <div className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-6">
         <div className="flex items-center gap-3 mb-5">
-          <SitePicker
-            sites={sites}
-            current={current}
-            onChoose={choose}
-            onRecordNew={() => setDialog({ address: '' })}
-          />
+          <div className="min-w-0">
+            <h1 className="text-base font-semibold text-brain-text">Workflows</h1>
+            <p className="text-xs text-brain-text-dim truncate">Recorded on {current.name}</p>
+          </div>
           <div className="ml-auto">
             <RecordButton onClick={() => setDialog({ address: current.startUrl })} />
           </div>
@@ -172,12 +188,9 @@ function WorkflowList({ onRun, onOpenRun }: {
           {recording && <RecordingRow status={recording} />}
           {rows.map((w) => (
             <Row key={w.id} row={w} onAction={() => {
-              // Continue answers the pause in place: the dialog, then the browser.
-              const pause = w.state === 'paused' ? pauses.find((p) => p.runId === w.runId) : undefined;
-              if (pause) openPause(pause.requestId);
-              else if (w.state === 'idle' || !w.runId) onRun(w.id);
-              else onOpenRun(w.id, w.runId);
-            }} onIconChanged={load} />
+              if (w.state === 'idle' || !w.runId) onRun(w.id);
+              else onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
+            }} onIconChanged={onReload} />
           ))}
         </ul>
         {rows.length === 0 && !recording && (
@@ -193,7 +206,7 @@ function WorkflowList({ onRun, onOpenRun }: {
                 {othersNeedingYou.map((s, i) => (
                   <span key={s.siteKey}>
                     {i > 0 && ', '}
-                    <button type="button" onClick={() => choose(s.siteKey)}
+                    <button type="button" onClick={() => onChoose(s.siteKey)}
                       className="text-brain-warning hover:underline underline-offset-2">
                       {s.name}
                     </button>
@@ -207,81 +220,6 @@ function WorkflowList({ onRun, onOpenRun }: {
       </div>
       {dialogEl}
     </div>
-  );
-}
-
-// ── The site picker ─────────────────────────────────────────────────────────
-
-function SitePicker({ sites, current, onChoose, onRecordNew }: {
-  sites: PickerSite[];
-  current: PickerSite;
-  onChoose: (siteKey: string) => void;
-  onRecordNew: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative min-w-0">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}
-        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 -ml-2 hover:bg-brain-surface transition-colors min-w-0">
-        <SiteIcon icon={current.icon} />
-        <span className="min-w-0 text-left">
-          <span className="block text-base font-semibold text-brain-text truncate">{current.name}</span>
-          <span className="block text-xs text-brain-text-dim truncate">{current.siteKey}</span>
-        </span>
-        <ChevronDown size={15} className="text-brain-text-dim flex-shrink-0" />
-      </button>
-
-      {open && (
-        <div role="listbox" aria-label="Sites"
-          className="absolute z-40 left-0 mt-1 w-80 rounded-xl border border-brain-border bg-brain-surface shadow-2xl py-1.5">
-          {sites.map((s) => {
-            const isCurrent = s.siteKey === current.siteKey;
-            return (
-              <button key={s.siteKey} type="button" role="option" aria-selected={isCurrent}
-                onClick={() => { onChoose(s.siteKey); setOpen(false); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-brain-border/60 transition-colors">
-                <SiteIcon icon={s.icon} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm text-brain-text truncate">{s.name}</span>
-                  <span className={`block text-xs truncate ${s.attention ? 'text-brain-warning' : 'text-brain-text-dim'}`}>
-                    {s.attention ?? s.siteKey}
-                  </span>
-                </span>
-                {isCurrent && <Check size={15} className="text-brain-accent flex-shrink-0" />}
-              </button>
-            );
-          })}
-          <div className="border-t border-brain-border mt-1.5 pt-1.5">
-            <button type="button" onClick={() => { setOpen(false); onRecordNew(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-brain-text-dim hover:text-brain-text hover:bg-brain-border/60 transition-colors">
-              <span className="w-8 h-8 rounded-lg border border-dashed border-brain-border flex items-center justify-center flex-shrink-0">
-                <Plus size={14} />
-              </span>
-              Record on a new site
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SiteIcon({ icon }: { icon: string }) {
-  return (
-    <span className="w-8 h-8 rounded-lg bg-brain-bg border border-brain-border flex items-center justify-center text-base flex-shrink-0" aria-hidden="true">
-      {icon}
-    </span>
   );
 }
 

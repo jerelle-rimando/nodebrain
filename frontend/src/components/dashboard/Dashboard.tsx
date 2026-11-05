@@ -9,6 +9,8 @@ import type { Agent, ChatMessage } from '@shared/types';
 import { ModelSelect } from '../ModelSelect';
 import { ModelPickerButton } from './ModelPickerButton';
 import { EmojiPicker } from './EmojiPicker';
+import { AiDisclaimer } from '../shared/AiDisclaimer';
+import { CLOUD_DEFAULT_PROVIDER, CLOUD_DEFAULT_MODEL } from '../../utils/chatModel';
 import { LogsPanel } from '../shared/LogsPanel';
 import { useSmoothedStream } from '../../hooks/useSmoothedStream';
 import { useRightPanel, type DotState } from '../../hooks/useRightPanel';
@@ -52,8 +54,6 @@ function getNodeText(node: React.ReactNode): string {
 // Execution Logs moved to an on-demand overlay opened from Live Logs.
 // Cloud fallback used when no local engine is available. Also what every
 // existing install has persisted, since the seed used to be unconditional.
-const CLOUD_DEFAULT_PROVIDER = 'groq';
-const CLOUD_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 const RIGHT_PANEL_WIDTH = 288;
 
@@ -690,6 +690,7 @@ export function Dashboard() {
               </div>
             </div>
           )}
+          <AiDisclaimer className="mt-2" />
         </div>
 
         {/*

@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow } from '../db/workflowRepository';
+import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow, getRunById, getSiteAgentById } from '../db/workflowRepository';
 import { startRun, cancelRun, getRunDetail, isRunActive, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
+import { raiseSiteWindow } from '../browser/raiseWindow';
 import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, RepairError } from '../replay/repair';
 
 // Replaying saved workflows. A run starts here and goes on in the
@@ -111,6 +112,21 @@ workflowRunsRouter.post('/workflow-runs/:id/cancel', (req: Request, res: Respons
     return;
   }
   res.json({ success: true, data: { runId: req.params.id } });
+});
+
+// "Show the browser": brings the run's window to the front.
+workflowRunsRouter.post('/workflow-runs/:id/raise', async (req: Request, res: Response) => {
+  const run = getRunById(req.params.id);
+  const site = run ? getSiteAgentById(run.siteAgentId) : null;
+  if (!run || !site || !isRunActive(run.id)) {
+    res.status(404).json({ success: false, error: "This run's browser window isn't open." });
+    return;
+  }
+  if (!(await raiseSiteWindow(site))) {
+    res.status(409).json({ success: false, error: "Couldn't bring the browser window forward. Look for it on your taskbar." });
+    return;
+  }
+  res.json({ success: true, data: { runId: run.id } });
 });
 
 // Take Control, for runs and (once the agent engine uses this module) tasks.

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { buildRunForm } from '../workflows/runPlan';
 import { buildOverview } from '../workflows/workflowList';
 import { setWorkflowIcon } from '../db/workflowRepository';
+import { askAboutSite, SiteChatError } from '../workflows/siteChat';
 
 // Saved workflows for the app: the list with its sites, the run form (inputs
 // plus the steps in plain words), and the icon a person picks. Starting a run
@@ -36,4 +37,36 @@ workflowsRouter.put('/workflows/:id/icon', (req: Request, res: Response) => {
     return;
   }
   res.json({ success: true, data: { id: req.params.id, emoji: parsed.data.emoji } });
+});
+
+// POST /api/sites/:id/chat { messages: [{ role, content }], provider?, model? } → { reply }
+// The Workflows tab's chat panel: questions about this site's workflows.
+const chatSchema = z.object({
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(8_000) })).min(1).max(60),
+  provider: z.string().max(40).optional(),
+  model: z.string().max(120).optional(),
+});
+workflowsRouter.post('/sites/:id/chat', async (req: Request, res: Response) => {
+  const parsed = chatSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: 'That message was not in the expected shape.' });
+    return;
+  }
+  try {
+    const reply = await askAboutSite(req.params.id, parsed.data.messages, parsed.data);
+    res.json({ success: true, data: { reply } });
+  } catch (err) {
+    if (err instanceof SiteChatError) {
+      res.status(400).json({ success: false, error: err.message });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[site-chat] failed:', msg);
+    res.status(500).json({
+      success: false,
+      error: /ECONNREFUSED|connection error|fetch failed/i.test(msg)
+        ? "Couldn't reach the AI model. Check it's set up in Settings, then try again."
+        : `The AI model didn't answer: ${msg}`,
+    });
+  }
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowLeft, CheckCircle2, Circle, Hand, Loader2, MessageSquare, MinusCircle, MousePointerClick, PauseCircle,
+  AppWindow, ArrowLeft, CheckCircle2, Circle, Hand, Loader2, MessageSquare, MinusCircle, MousePointerClick, PauseCircle,
   RotateCcw, Square, Wrench, XCircle,
 } from 'lucide-react';
 import type { RunForm, WorkflowRun, WorkflowRunRepair, WorkflowRunStep } from '@shared/types';
@@ -9,7 +9,9 @@ import { useStore } from '../../stores/appStore';
 import { STATUS_TONE, STATUS_WORDS } from './runFormUtils';
 
 // One run, as it happens: the same phases as the run form, each step ticked
-// off as the browser does it. Pauses are answered in the Take Control dialog.
+// off as the browser does it, the current one marked, the rest dimmed ahead.
+// While it's going: a banner when it's waiting for the person (with Done),
+// and controls at the bottom to bring the browser forward or stop the run.
 //
 // A run that stopped because a step's element couldn't be found shows the
 // Fix panel at the top: what it got as far as, what it couldn't find, and
@@ -29,8 +31,10 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
   // Bumped to start polling again after an action on a finished run.
   const [pollKey, setPollKey] = useState(0);
   const pause = useStore((s) => s.pendingTakeControls.find((r) => r.runId === runId));
-  const openPause = useStore((s) => s.setTakeControlOpenFor);
+  const removePause = useStore((s) => s.removePendingTakeControl);
   const waiting = !!pause;
+  const [answering, setAnswering] = useState(false);
+  const [raiseProblem, setRaiseProblem] = useState<string | null>(null);
 
   useEffect(() => {
     api.getRunForm(workflowId).then(setForm).catch(() => {});
@@ -63,6 +67,24 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
     await api.cancelWorkflowRun(runId).catch(() => {});
   }
 
+  // Done on the banner: the person finished the step in the browser.
+  async function donePause() {
+    if (!pause) return;
+    setAnswering(true);
+    await api.respondToTakeControl(pause.requestId, true).catch(() => {});
+    removePause(pause.requestId);
+    setAnswering(false);
+  }
+
+  async function showBrowser() {
+    setRaiseProblem(null);
+    try {
+      await api.raiseRunBrowser(runId);
+    } catch (e) {
+      setRaiseProblem(e instanceof Error ? e.message : "Couldn't bring the browser forward.");
+    }
+  }
+
   const status = run?.status ?? 'pending';
   // Stopped at a step, window still open, waiting for a fix.
   const held = status === 'needs_attention' && !!repair?.live;
@@ -84,16 +106,11 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-semibold text-brain-text truncate">{form?.workflow.name ?? 'Workflow run'}</h1>
             <p className={`text-xs mt-0.5 flex items-center gap-1.5 ${STATUS_TONE[status]}`}>
-              {running && <Loader2 size={12} className="animate-spin" />}
-              {waiting ? 'Waiting for you in the browser' : held ? 'Stopped — the browser is waiting for you' : STATUS_WORDS[status]}
+              {running && !waiting && <Loader2 size={12} className="animate-spin" />}
+              {waiting ? 'Waiting for you' : held ? 'Stopped — the browser is waiting for you' : STATUS_WORDS[status]}
             </p>
           </div>
-          {running ? (
-            <button type="button" onClick={stopRun} disabled={stopping}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-error/40 text-brain-error hover:bg-brain-error/10 disabled:opacity-40 rounded-lg transition-colors">
-              <Square size={12} /> {stopping ? 'Stopping…' : 'Stop'}
-            </button>
-          ) : finished && (
+          {finished && (
             <button type="button" onClick={onRunAgain}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors ${
                 repair && !repair.fixed
@@ -109,12 +126,15 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="max-w-2xl">
           {waiting && (
-            <div className="flex items-center gap-2 rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-xs text-brain-text">
-              <Hand size={13} className="text-brain-warning flex-shrink-0" />
-              <span className="flex-1">The run is paused for you: {pause.reason}</span>
-              <button type="button" onClick={() => openPause(pause.requestId)}
-                className="px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors flex-shrink-0">
-                Continue
+            <div role="status" className="flex items-center gap-3 rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-4 py-3 mb-4">
+              <Hand size={16} className="text-brain-warning flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-brain-text">Your turn: {pause.reason}</p>
+                <p className="text-xs text-brain-text-dim mt-0.5">Do it in the browser window, then press Done and NodeBrain carries on.</p>
+              </div>
+              <button type="button" onClick={donePause} disabled={answering}
+                className="px-4 py-1.5 text-sm bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-50 text-white rounded-lg transition-colors flex-shrink-0">
+                {answering ? 'Carrying on…' : 'Done'}
               </button>
             </div>
           )}
@@ -147,7 +167,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
                       : g.text)).join('');
                     return (
                       <li key={s.stepKey} className="flex gap-2 text-xs leading-relaxed">
-                        <span className="mt-0.5 flex-shrink-0"><StepIcon row={r} current={s.stepKey === currentKey} pause={!!s.pause} /></span>
+                        <span className="mt-0.5 flex-shrink-0"><StepIcon row={r} current={s.stepKey === currentKey} waiting={waiting && s.stepKey === currentKey} pause={!!s.pause} /></span>
                         <span className="min-w-0">
                           <span className={r || s.stepKey === currentKey ? 'text-brain-text' : 'text-brain-text-muted'}>{text}</span>
                           {r?.error && <span className={`block ${r.status === 'failed' ? 'text-brain-warning' : 'text-brain-text-muted'}`}>{r.error}</span>}
@@ -161,6 +181,20 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
           </ol>
         </div>
       </div>
+
+      {running && (
+        <div className="px-6 py-3 border-t border-brain-border bg-brain-surface flex-shrink-0 flex items-center gap-2">
+          <button type="button" onClick={showBrowser}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-border text-brain-text hover:border-brain-border-bright rounded-lg transition-colors">
+            <AppWindow size={13} /> Show the browser
+          </button>
+          {raiseProblem && <p role="alert" className="text-xs text-brain-text-dim">{raiseProblem}</p>}
+          <button type="button" onClick={stopRun} disabled={stopping}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-error/40 text-brain-error hover:bg-brain-error/10 disabled:opacity-40 rounded-lg transition-colors">
+            <Square size={12} /> {stopping ? 'Stopping…' : 'Stop the run'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -291,8 +325,9 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   );
 }
 
-function StepIcon({ row, current, pause }: { row?: WorkflowRunStep; current: boolean; pause: boolean }) {
+function StepIcon({ row, current, waiting, pause }: { row?: WorkflowRunStep; current: boolean; waiting: boolean; pause: boolean }) {
   if (row?.status === 'ok' || row?.status === 'repaired') return <CheckCircle2 size={13} className="text-brain-success" />;
+  if (waiting) return <Hand size={13} className="text-brain-warning" />;
   if (current) return <Loader2 size={13} className="text-brain-accent animate-spin" />;
   if (row?.status === 'skipped') return <MinusCircle size={13} className="text-brain-text-muted" />;
   if (row?.status === 'failed') return <XCircle size={13} className="text-brain-error" />;
