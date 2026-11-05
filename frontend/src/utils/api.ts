@@ -73,6 +73,8 @@ export const api = {
   stopTask: (id: string) => request<import('@shared/types').Task>(`/tasks/${id}/stop`, { method: 'POST' }),
   // Workflow recorder
   getRecordings: () => request<RecordingStatus[]>('/recordings'),
+  startRecording: (url: string) =>
+    request<RecordingStatus>('/recordings', { method: 'POST', body: JSON.stringify({ url }) }),
   finishRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/done`, { method: 'POST' }),
   saveRecording: (id: string, body: SaveRecordingRequest) =>
     request<RecordingStatus>(`/recordings/${id}/save`, { method: 'POST', body: JSON.stringify(body) }),
