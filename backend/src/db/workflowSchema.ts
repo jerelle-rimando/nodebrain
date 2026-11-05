@@ -100,6 +100,12 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
       started_at TEXT NOT NULL,
       finished_at TEXT
     );
+    -- A workflow's icon when the person picked one; otherwise it's derived
+    -- from the name (deriveAgentEmoji), like an agent's.
+    CREATE TABLE IF NOT EXISTS workflow_icons (
+      workflow_id TEXT PRIMARY KEY,
+      emoji TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS workflow_run_steps (
       id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,

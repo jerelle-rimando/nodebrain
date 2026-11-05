@@ -9,11 +9,16 @@ import { api } from '../../utils/api';
 // Ported from the spike/playwright-biberk agent handover; answers go to the
 // shared /api/take-control endpoint.
 export function TakeControlModal() {
-  const { pendingTakeControls, removePendingTakeControl, agents } = useStore();
+  const { pendingTakeControls, removePendingTakeControl, agents, takeControlOpenFor, setTakeControlOpenFor } = useStore();
   const [loading, setLoading] = useState(false);
 
-  const current = pendingTakeControls[0];
-  if (!current) return null;
+  // An agent task's pause opens at once. A workflow run's pause opens when
+  // the person presses Continue on it (its row or its run view), and can be
+  // put aside again with Not now.
+  const shown = pendingTakeControls.find((r) => !r.runId || r.requestId === takeControlOpenFor);
+  if (!shown) return null;
+  const current = shown;
+  const putAside = current.runId ? () => setTakeControlOpenFor(null) : undefined;
 
   const who = current.title
     || agents.find((a) => a.id === current.agentId)?.name
@@ -33,7 +38,7 @@ export function TakeControlModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={putAside} />
 
       <div className="relative w-full max-w-md mx-4 bg-brain-surface border border-brain-border rounded-xl shadow-2xl animate-slide-up">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-brain-border">
@@ -55,6 +60,15 @@ export function TakeControlModal() {
         </div>
 
         <div className="flex gap-2 px-5 py-4 border-t border-brain-border">
+          {putAside && (
+            <button
+              onClick={putAside}
+              disabled={loading}
+              className="px-3 py-2 text-sm text-brain-text-dim hover:text-brain-text disabled:opacity-40 rounded-lg transition-colors"
+            >
+              Not now
+            </button>
+          )}
           <button
             onClick={() => respond(false)}
             disabled={loading}

@@ -1,10 +1,10 @@
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type PlanPhase, type PlanSegment, type PlanStep, type RunForm, type RunFormField,
-  type WorkflowField, type WorkflowListItem, type WorkflowStep,
+  type WorkflowField, type WorkflowStep,
 } from '../../shared-types';
 import {
-  getAllWorkflows, getWorkflowById, getSiteAgentById, getFieldsByWorkflow, getCurrentSteps, getRunsByWorkflow,
+  getWorkflowById, getSiteAgentById, getFieldsByWorkflow, getCurrentSteps, getRunsByWorkflow,
 } from '../db/workflowRepository';
 import { signInBlocks } from '../replay/replayEngine';
 
@@ -18,18 +18,6 @@ import { signInBlocks } from '../replay/replayEngine';
 // (the steps the replayer skips together when the profile is still signed
 // in) is always a phase of its own. Each phase is named after the heading
 // most of its steps sat under, else the page's address.
-
-export function listWorkflows(): WorkflowListItem[] {
-  return getAllWorkflows().filter((w) => w.currentVersionId).map((w) => {
-    const site = getSiteAgentById(w.siteAgentId);
-    const last = getRunsByWorkflow(w.id, 1)[0];
-    return {
-      id: w.id, name: w.name, siteName: site?.name ?? '', siteKey: site?.siteKey ?? '',
-      fieldCount: getFieldsByWorkflow(w.id).length,
-      lastRun: last ? { id: last.id, startedAt: last.startedAt, status: last.status } : undefined,
-    };
-  });
-}
 
 export function buildRunForm(workflowId: string): RunForm | null {
   const wf = getWorkflowById(workflowId);

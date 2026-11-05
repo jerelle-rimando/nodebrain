@@ -81,7 +81,12 @@ export const api = {
   discardRecording: (id: string) => request<RecordingStatus>(`/recordings/${id}/discard`, { method: 'POST' }),
 
   // Saved workflows and their runs
-  getWorkflows: () => request<import('@shared/types').WorkflowListItem[]>('/workflows'),
+  getWorkflows: () => request<import('@shared/types').WorkflowsOverview>('/workflows'),
+  setWorkflowIcon: (workflowId: string, emoji: string | null) =>
+    request<{ id: string; emoji: string | null }>(`/workflows/${workflowId}/icon`, {
+      method: 'PUT',
+      body: JSON.stringify({ emoji }),
+    }),
   getRunForm: (workflowId: string) => request<import('@shared/types').RunForm>(`/workflows/${workflowId}/run-form`),
   startWorkflowRun: (workflowId: string, inputs: Record<string, string>) =>
     request<import('@shared/types').WorkflowRun>(`/workflows/${workflowId}/runs`, {

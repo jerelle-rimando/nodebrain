@@ -302,7 +302,25 @@ function deleteWorkflowRows(workflowId: string): void {
   dbRun('DELETE FROM workflow_steps WHERE version_id IN (SELECT id FROM workflow_versions WHERE workflow_id = ?)', [workflowId]);
   dbRun('DELETE FROM workflow_versions WHERE workflow_id = ?', [workflowId]);
   dbRun('DELETE FROM workflow_fields WHERE workflow_id = ?', [workflowId]);
+  dbRun('DELETE FROM workflow_icons WHERE workflow_id = ?', [workflowId]);
   dbRun('DELETE FROM workflows WHERE id = ?', [workflowId]);
+}
+
+// ── Icons ───────────────────────────────────────────────────────────────────
+
+// Icons the person picked, by workflow id. A workflow without one shows an
+// icon derived from its name.
+export function getWorkflowIcons(): Map<string, string> {
+  const rows = dbAll<{ workflow_id: string; emoji: string }>('SELECT workflow_id, emoji FROM workflow_icons');
+  return new Map(rows.map((r) => [r.workflow_id, r.emoji]));
+}
+
+// null goes back to the derived icon.
+export function setWorkflowIcon(workflowId: string, emoji: string | null): boolean {
+  if (!getWorkflowById(workflowId)) return false;
+  dbRun('DELETE FROM workflow_icons WHERE workflow_id = ?', [workflowId]);
+  if (emoji) dbRun('INSERT INTO workflow_icons (workflow_id, emoji) VALUES (?, ?)', [workflowId, emoji]);
+  return true;
 }
 
 // ── Fields ──────────────────────────────────────────────────────────────────

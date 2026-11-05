@@ -38,6 +38,10 @@ interface AppState {
   logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
   pendingTakeControls: TakeControlRequest[];
+  // A workflow run's pause doesn't pop up on its own: its row in the
+  // Workflows list (or the run view) shows it, and Continue opens the dialog
+  // for that request. Agent-task pauses still open the dialog at once.
+  takeControlOpenFor: string | null;
   // Whether the Electron-proxied backend is currently reachable. Driven by
   // useLiveSync's SSE connection (primary) and api.ts's request() (secondary).
   backendConnected: boolean;
@@ -78,6 +82,7 @@ interface AppState {
   removePendingApproval: (approvalId: string) => void;
   addPendingTakeControl: (req: TakeControlRequest) => void;
   removePendingTakeControl: (requestId: string) => void;
+  setTakeControlOpenFor: (requestId: string | null) => void;
   setBackendConnected: (connected: boolean) => void;
   setRecordingReview: (status: RecordingStatus | null) => void;
   setChatDraft: (draft: string | null) => void;
@@ -96,6 +101,7 @@ export const useStore = create<AppState>((set) => ({
   logsFilterAgentId: null,
   pendingApprovals: [],
   pendingTakeControls: [],
+  takeControlOpenFor: null,
   backendConnected: true,
   recordingReview: null,
   chatDraft: null,
@@ -130,7 +136,11 @@ export const useStore = create<AppState>((set) => ({
   setBackendConnected: (backendConnected) => set({ backendConnected }),
   addPendingTakeControl: (req) => set((s) => (s.pendingTakeControls.some((r) => r.requestId === req.requestId)
     ? s : { pendingTakeControls: [...s.pendingTakeControls, req] })),
-  removePendingTakeControl: (requestId) => set((s) => ({ pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId) })),
+  removePendingTakeControl: (requestId) => set((s) => ({
+    pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId),
+    takeControlOpenFor: s.takeControlOpenFor === requestId ? null : s.takeControlOpenFor,
+  })),
+  setTakeControlOpenFor: (takeControlOpenFor) => set({ takeControlOpenFor }),
   setRecordingReview: (recordingReview) => set({ recordingReview }),
   setChatDraft: (chatDraft) => set({ chatDraft }),
 }));

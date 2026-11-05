@@ -28,7 +28,9 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
   const [stopping, setStopping] = useState(false);
   // Bumped to start polling again after an action on a finished run.
   const [pollKey, setPollKey] = useState(0);
-  const waiting = useStore((s) => s.pendingTakeControls.some((r) => r.runId === runId));
+  const pause = useStore((s) => s.pendingTakeControls.find((r) => r.runId === runId));
+  const openPause = useStore((s) => s.setTakeControlOpenFor);
+  const waiting = !!pause;
 
   useEffect(() => {
     api.getRunForm(workflowId).then(setForm).catch(() => {});
@@ -107,9 +109,13 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="max-w-2xl">
           {waiting && (
-            <div className="flex items-start gap-2 rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-xs text-brain-text">
-              <Hand size={13} className="text-brain-warning mt-0.5 flex-shrink-0" />
-              The run is paused for you. Do the step in the browser window, then click Done in the dialog.
+            <div className="flex items-center gap-2 rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-xs text-brain-text">
+              <Hand size={13} className="text-brain-warning flex-shrink-0" />
+              <span className="flex-1">The run is paused for you: {pause.reason}</span>
+              <button type="button" onClick={() => openPause(pause.requestId)}
+                className="px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors flex-shrink-0">
+                Continue
+              </button>
             </div>
           )}
           {repair && status === 'needs_attention' ? (

@@ -385,15 +385,41 @@ export interface RecordingResult {
 // grouped into phases. Built from the saved steps (no model). Field keys and
 // step keys are here only to connect things; the screen never shows them.
 
-export interface WorkflowListItem {
+// The Workflows list: one row per workflow, each with one line of state and
+// the one thing to do next.
+//   paused  → a run is waiting for the person (a code, a check)  → Continue
+//   running → a run is going                                      → Open
+//   stopped → the last run couldn't find something on the page   → Fix
+//   idle    → nothing going on                                    → Run
+export type WorkflowRowState = 'paused' | 'running' | 'stopped' | 'idle';
+
+export interface WorkflowRow {
   id: string;
+  siteAgentId: string;
+  name: string; // without the site's name in front: the list's header carries it
+  icon: string;
+  iconPicked: boolean; // the person chose it (else derived from the name)
+  state: WorkflowRowState;
+  stateText: string; // "Running now, step 4 of 9"
+  runId?: string; // the run Continue / Open / Fix goes to
+}
+
+// A site in the picker. attention replaces the domain when something there
+// needs the person ("Needs you: type the code from your email").
+export interface SiteSummary {
+  id: string;
+  siteKey: string; // the domain shown under the name
   name: string;
-  siteName: string;
-  siteKey: string;
-  fieldCount: number;
-  // needsFix: it stopped because the site changed, and pointing at the new
-  // element can fix it (the run view's Fix).
-  lastRun?: { id: string; startedAt: string; status: WorkflowRunStatus; needsFix?: boolean };
+  icon: string;
+  startUrl: string;
+  workflowCount: number;
+  attention?: string;
+  lastActivity?: string; // newest run or workflow change, ISO
+}
+
+export interface WorkflowsOverview {
+  sites: SiteSummary[];
+  workflows: WorkflowRow[];
 }
 
 export interface RunFormField {

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Circle, Plus, Square, X } from 'lucide-react';
+import { Circle, Plus, X } from 'lucide-react';
 import type { RecordingStatus } from '@shared/types';
 import { api } from '../../utils/api';
 import { checkStartAddress, hostIsOnSite } from './startAddress';
 
-// Starting a recording from the app: the Record button, the one-question
-// dialog, and a banner while a recording is open in the browser. The
+// Starting a recording from the app: the Record button and the one-question
+// dialog. An open recording shows as a row in the Workflows list. The
 // recording itself (the pill, Done, the review screen) is the recorder's.
 
 // States in which a recording is still open in the browser.
@@ -37,11 +37,12 @@ function startProblem(err: unknown): string {
   return msg;
 }
 
-export function StartRecordingDialog({ open, onClose, onStarted }: {
+export function StartRecordingDialog({ open, initialAddress = '', onClose, onStarted }: {
   open: boolean;
+  initialAddress?: string; // the current site's address, or empty for a new site
   onClose: () => void;
-  // reattached: a recording for that site was already open, and that one is used.
-  onStarted: (status: RecordingStatus, reattached: boolean) => void;
+  // A recording already open for that site is carried on with, not a new one.
+  onStarted: (status: RecordingStatus) => void;
 }) {
   const [address, setAddress] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -50,11 +51,12 @@ export function StartRecordingDialog({ open, onClose, onStarted }: {
 
   useEffect(() => {
     if (open) {
+      setAddress(initialAddress);
       setError(null);
       setStarting(false);
       setTimeout(() => input.current?.focus(), 0);
     }
-  }, [open]);
+  }, [open, initialAddress]);
 
   if (!open) return null;
 
@@ -76,19 +78,19 @@ export function StartRecordingDialog({ open, onClose, onStarted }: {
     // Already recording on this site: carry on with that one.
     const existing = await openFor(checked.host);
     if (existing) {
-      onStarted(existing, true);
+      onStarted(existing);
       setAddress('');
       return;
     }
     try {
       const status = await api.startRecording(checked.url);
-      onStarted(status, false);
+      onStarted(status);
       setAddress('');
     } catch (err) {
       // Opened from somewhere else a moment ago.
       const raced = await openFor(checked.host);
       if (raced) {
-        onStarted(raced, true);
+        onStarted(raced);
         setAddress('');
         return;
       }
@@ -146,65 +148,6 @@ export function StartRecordingDialog({ open, onClose, onStarted }: {
           </div>
         </form>
       </div>
-    </div>
-  );
-}
-
-// Shown while a recording is open, so the person can see it's going and
-// finish it from here too.
-export function RecordingBanner({ status, note }: { status: RecordingStatus; note?: string }) {
-  const [busy, setBusy] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const finishing = status.state === 'finishing';
-
-  async function done() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.finishRecording(status.id); // the review screen opens from here
-    } catch {
-      setError("Couldn't finish the recording. Press Done in the browser instead.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function discard() {
-    if (!confirmDiscard) { setConfirmDiscard(true); return; }
-    setBusy(true);
-    await api.discardRecording(status.id).catch(() => setError("Couldn't throw it away. Try again in a moment."));
-    setBusy(false);
-  }
-
-  return (
-    <div role="status" className="flex items-center gap-3 rounded-lg border border-brain-error/30 bg-brain-error/5 px-4 py-3 mb-4">
-      <span className="relative flex w-2.5 h-2.5 flex-shrink-0">
-        <span className="absolute inline-flex w-full h-full rounded-full bg-brain-error opacity-60 animate-ping" />
-        <span className="relative inline-flex w-2.5 h-2.5 rounded-full bg-brain-error" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-brain-text truncate">
-          {finishing ? 'Finishing the recording…' : `Recording on ${status.siteKey}`}
-          {!finishing && <span className="text-brain-text-dim"> · {status.stepCount} {status.stepCount === 1 ? 'step' : 'steps'} so far</span>}
-        </p>
-        <p className="text-xs text-brain-text-dim">
-          {note ?? 'Do the task in the browser window NodeBrain opened, then press Done there or here.'}
-        </p>
-        {error && <p role="alert" className="text-xs text-brain-error mt-1">{error}</p>}
-      </div>
-      {!finishing && (
-        <>
-          <button type="button" onClick={discard} onBlur={() => setConfirmDiscard(false)} disabled={busy}
-            className="px-3 py-1.5 text-xs border border-brain-error/40 text-brain-error hover:bg-brain-error/10 disabled:opacity-40 rounded-lg transition-colors flex-shrink-0">
-            {confirmDiscard ? 'Yes, throw it away' : 'Throw away'}
-          </button>
-          <button type="button" onClick={done} disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 text-white rounded-lg transition-colors flex-shrink-0">
-            <Square size={11} /> Done
-          </button>
-        </>
-      )}
     </div>
   );
 }
