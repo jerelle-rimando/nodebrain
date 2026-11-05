@@ -26,7 +26,7 @@ export function listWorkflows(): WorkflowListItem[] {
     return {
       id: w.id, name: w.name, siteName: site?.name ?? '', siteKey: site?.siteKey ?? '',
       fieldCount: getFieldsByWorkflow(w.id).length,
-      lastRun: last ? { startedAt: last.startedAt, status: last.status } : undefined,
+      lastRun: last ? { id: last.id, startedAt: last.startedAt, status: last.status } : undefined,
     };
   });
 }

@@ -44,6 +44,10 @@ interface AppState {
   // A finished recording waiting on the review screen. Nothing is saved
   // until the person presses Save workflow there.
   recordingReview: RecordingStatus | null;
+  // Text handed to the chat composer from elsewhere in the app (a stopped
+  // workflow's "Ask the agent"). The composer takes it once and clears it;
+  // the person reads it and sends it themselves.
+  chatDraft: string | null;
 
   setAvailableModels: (models: Record<string, string[]>) => void;
 
@@ -76,6 +80,7 @@ interface AppState {
   removePendingTakeControl: (requestId: string) => void;
   setBackendConnected: (connected: boolean) => void;
   setRecordingReview: (status: RecordingStatus | null) => void;
+  setChatDraft: (draft: string | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -93,6 +98,7 @@ export const useStore = create<AppState>((set) => ({
   pendingTakeControls: [],
   backendConnected: true,
   recordingReview: null,
+  chatDraft: null,
 
   setAvailableModels: (availableModels) => set({ availableModels }),
   setAgents: (agents) => set({ agents }),
@@ -126,4 +132,5 @@ export const useStore = create<AppState>((set) => ({
     ? s : { pendingTakeControls: [...s.pendingTakeControls, req] })),
   removePendingTakeControl: (requestId) => set((s) => ({ pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId) })),
   setRecordingReview: (recordingReview) => set({ recordingReview }),
+  setChatDraft: (chatDraft) => set({ chatDraft }),
 }));

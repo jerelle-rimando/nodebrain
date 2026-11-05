@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, Workflow as WorkflowIcon } from 'lucide-react';
+import { ChevronRight, Workflow as WorkflowIcon, Wrench } from 'lucide-react';
 import type { RecordingStatus, WorkflowListItem } from '@shared/types';
 import { api } from '../../utils/api';
 import { RunFormScreen } from './RunFormScreen';
@@ -37,10 +37,18 @@ export function WorkflowsPage() {
       />
     );
   }
-  return <WorkflowList onOpen={(workflowId) => setScreen({ name: 'form', workflowId })} />;
+  return (
+    <WorkflowList
+      onOpen={(workflowId) => setScreen({ name: 'form', workflowId })}
+      onFix={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
+    />
+  );
 }
 
-function WorkflowList({ onOpen }: { onOpen: (id: string) => void }) {
+function WorkflowList({ onOpen, onFix }: {
+  onOpen: (id: string) => void;
+  onFix: (workflowId: string, runId: string) => void;
+}) {
   const [items, setItems] = useState<WorkflowListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
@@ -133,11 +141,11 @@ function WorkflowList({ onOpen }: { onOpen: (id: string) => void }) {
         {error && <p role="alert" className="text-sm text-brain-error">{error}</p>}
         <ul className="space-y-2">
           {items?.map((w) => (
-            <li key={w.id}>
+            <li key={w.id} className="flex items-stretch gap-2">
               <button
                 type="button"
                 onClick={() => onOpen(w.id)}
-                className="w-full flex items-center gap-3 rounded-lg border border-brain-border bg-brain-surface hover:border-brain-border-bright px-4 py-3 text-left transition-colors"
+                className="min-w-0 flex-1 flex items-center gap-3 rounded-lg border border-brain-border bg-brain-surface hover:border-brain-border-bright px-4 py-3 text-left transition-colors"
               >
                 <div className="w-8 h-8 rounded-lg bg-brain-accent/10 border border-brain-accent/30 flex items-center justify-center flex-shrink-0">
                   <WorkflowIcon size={15} className="text-brain-accent" />
@@ -156,6 +164,17 @@ function WorkflowList({ onOpen }: { onOpen: (id: string) => void }) {
                 </div>
                 <ChevronRight size={15} className="text-brain-text-muted flex-shrink-0" />
               </button>
+              {w.lastRun?.needsFix && (
+                // The last run stopped because the site changed: its run view
+                // says what happened and has "Show me where it is".
+                <button
+                  type="button"
+                  onClick={() => onFix(w.id, w.lastRun!.id)}
+                  className="flex items-center gap-1.5 px-3 rounded-lg border border-brain-warning/40 text-xs text-brain-warning hover:bg-brain-warning/10 transition-colors flex-shrink-0"
+                >
+                  <Wrench size={13} /> Fix
+                </button>
+              )}
             </li>
           ))}
         </ul>

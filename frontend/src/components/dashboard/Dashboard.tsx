@@ -213,6 +213,18 @@ export function Dashboard() {
     return () => window.removeEventListener('keydown', onKey);
   }, [showLogsOverlay]);
 
+  // Text handed over from elsewhere (a stopped workflow's "Ask the agent"):
+  // it goes in the composer for the person to read and send.
+  const chatDraft = useStore((s) => s.chatDraft);
+  const setChatDraft = useStore((s) => s.setChatDraft);
+  useEffect(() => {
+    if (!chatDraft) return;
+    setSelectedAgent(null);
+    setInput(chatDraft);
+    setChatDraft(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [chatDraft, setChatDraft]);
+
   useEffect(() => { localStorage.setItem('nb_default_provider', defaultProvider); }, [defaultProvider]);
   useEffect(() => { localStorage.setItem('nb_default_model', defaultModel); }, [defaultModel]);
   useEffect(() => { localStorage.setItem('nb_chat_mode', chatMode); }, [chatMode]);

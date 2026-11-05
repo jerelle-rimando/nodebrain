@@ -46,9 +46,49 @@ interface ActiveRun {
   siteKey: string;
   controller: AbortController;
   launched?: LaunchedBrowser;
+  closing?: Promise<void>;
 }
 
 const active = new Map<string, ActiveRun>();
+
+// Closes the run's window once. Stop and the run's own cleanup can both ask
+// at the same moment (a Stop during a pause or a repair wait ends the wait at
+// once), and two overlapping closeBrowser calls on one connection hang: the
+// second never settles, so the run would never release its site.
+function closeRunBrowser(entry: ActiveRun): Promise<void> {
+  if (!entry.launched) return Promise.resolve();
+  entry.closing ??= closeBrowser(entry.launched).catch(() => {});
+  return entry.closing;
+}
+
+// How long a stopped run keeps its window open for a repair. Its saved
+// sign-in and secret inputs stay in memory for as long as it waits.
+const REPAIR_HOLD_MS = 30 * 60_000;
+
+// A run waiting, window open, for the person to point at a step's element.
+// Read by replay/repair.ts; everything else about the run stays private.
+export interface RepairHold {
+  runId: string;
+  workflowId: string;
+  versionId: string; // the version the stopped step belongs to
+  siteKey: string;
+  step: WorkflowStep;
+  steps: WorkflowStep[];
+  fieldsById: Map<string, WorkflowField>;
+  page: Page;
+  value?: string; // this run's value for the step (may be secret: memory only)
+  recordedValue?: string;
+  signal: AbortSignal;
+  redact: (text: string) => string;
+  resume: (steps: WorkflowStep[]) => void; // carry on with a repaired version's steps
+  release: () => void; // stop waiting: the run ends as needs_attention
+}
+
+const holds = new Map<string, RepairHold>();
+
+export function getRepairHold(runId: string): RepairHold | undefined {
+  return holds.get(runId);
+}
 
 const OPEN_RECORDING_STATES = new Set(['recording', 'browser_closed', 'finishing', 'saving']);
 
@@ -97,7 +137,7 @@ export function startRun(
       replay.finish('failed', { error: 'Something went wrong inside NodeBrain while running this workflow.' });
     })
     .finally(async () => {
-      if (entry.launched) await closeBrowser(entry.launched).catch(() => {});
+      await closeRunBrowser(entry);
       releaseSiteBrowser(site.siteKey, run.id);
       active.delete(run.id);
     });
@@ -110,7 +150,7 @@ export function cancelRun(runId: string): boolean {
   const entry = active.get(runId);
   if (!entry) return false;
   entry.controller.abort();
-  if (entry.launched) void closeBrowser(entry.launched).catch(() => {});
+  void closeRunBrowser(entry);
   return true;
 }
 
@@ -177,7 +217,9 @@ export function signInBlocks(steps: WorkflowStep[]): SignInBlock[] {
 
 type StepOutcome =
   | { ok: true }
-  | { ok: false; status: WorkflowRunStatus; error: string };
+  // repairable: the step's element wasn't found (or wasn't the only match),
+  // so nothing was done to the page and the person can point at it instead.
+  | { ok: false; status: WorkflowRunStatus; error: string; repairable?: boolean };
 
 interface ResolvedValue { value?: string; recordedValue?: string; shownOnPage: boolean }
 
@@ -192,6 +234,7 @@ class Replay {
   private steps: WorkflowStep[];
   private fieldsById: Map<string, WorkflowField>;
   private done = false;
+  private justRepaired?: string; // step key: its next success is recorded as 'repaired'
 
   constructor(
     private run: WorkflowRun, private workflow: Workflow, private site: SiteAgent,
@@ -233,6 +276,13 @@ class Replay {
 
   private record(step: WorkflowStep, status: WorkflowRunStep['status'], started: number,
                  extra: { resolvedBy?: WorkflowStepResolvedBy; error?: string; screenshotPath?: string } = {}): void {
+    if (this.justRepaired === step.stepKey) {
+      this.justRepaired = undefined;
+      if (status === 'ok') {
+        status = 'repaired';
+        extra = { ...extra, resolvedBy: 'human', error: 'You showed NodeBrain where this is now.' };
+      }
+    }
     const page = this.pages.get(step.pageAlias);
     const url = page && !page.isClosed() ? this.redact(page.url()) : undefined;
     const row = addRunStep(this.run.id, {
@@ -277,7 +327,7 @@ class Replay {
     });
     await first.bringToFront().catch(() => {});
 
-    const blocks = signInBlocks(this.steps);
+    let blocks = signInBlocks(this.steps);
     for (let i = 0; i < this.steps.length; i++) {
       if (this.signal.aborted) { this.finish('cancelled', { error: 'You stopped the run.' }); return; }
       const block = blocks.find((b) => b.start === i);
@@ -293,6 +343,17 @@ class Replay {
       const step = this.steps[i];
       const outcome = await this.runStep(step);
       if (!outcome.ok) {
+        // A step whose element wasn't found: keep the window as it is and
+        // wait for the person to point at the element (replay/repair.ts).
+        // A repair brings a new version's steps; the same step runs again.
+        const repaired = outcome.repairable ? await this.holdForRepair(step, outcome.error) : null;
+        if (repaired) {
+          this.steps = repaired;
+          blocks = signInBlocks(this.steps);
+          this.justRepaired = step.stepKey;
+          i--;
+          continue;
+        }
         this.finish(outcome.status, { error: outcome.error, failedStepKey: step.stepKey });
         return;
       }
@@ -453,7 +514,8 @@ class Replay {
     });
     if (this.closedOrStopped()) return this.stopped(step, started);
     if (!found.found) {
-      return this.stop(step, started, 'needs_attention', await this.missMessage(page, step, what, found.ambiguous ?? false), true);
+      const missed = await this.stop(step, started, 'needs_attention', await this.missMessage(page, step, what, found.ambiguous ?? false), true);
+      return { ...missed, repairable: true } as StepOutcome;
     }
     if (found.resolvedBy === 'fallback') {
       console.log(`[replay] ${this.run.id} ${step.stepKey}: saved locator missed, found by ${found.how}`);
@@ -609,25 +671,57 @@ class Replay {
     return ok ? file : undefined;
   }
 
-  // "the "Get my quote" button", ""Business name"", "the option you chose".
   private describeTarget(step: WorkflowStep, value: string | undefined): string {
-    const fp = step.fingerprint;
-    let name = fp.label || fp.name || fp.placeholder;
-    if (name?.includes(WORKFLOW_VALUE_PLACEHOLDER)) {
-      const secret = step.literalSecret || (step.fieldId ? this.fieldsById.get(step.fieldId)?.secret : false);
-      if (secret || value === undefined) return 'the option you chose';
-      name = name.split(WORKFLOW_VALUE_PLACEHOLDER).join(value);
-    }
-    const word = fp.role ? ROLE_WORDS[fp.role] : undefined;
-    if (name) return word ? `the "${name}" ${word}` : `"${name}"`;
-    // No name: say what it showed when recorded (often a dropdown's current
-    // choice, which is exactly what tends to change), and which list it opened.
-    const shown = /internal:text="((?:[^"\\]|\\.)*)"/.exec(step.locator ?? '')?.[1]?.replace(/\\(.)/g, '$1');
-    const next = this.steps.find((s) => s.position === step.position + 1);
-    const opens = next?.fingerprint.container && !next.fingerprint.container.includes(WORKFLOW_VALUE_PLACEHOLDER)
-      ? ` (the one that opens the ${next.fingerprint.container} list)` : '';
-    if (shown && !shown.includes(WORKFLOW_VALUE_PLACEHOLDER)) return `the part of the page showing "${shown}"${opens}`;
-    return word ? `the ${word}${opens}` : `the part of the page this step uses${opens}`;
+    return describeStepTarget(step, value, this.steps, this.fieldsById);
+  }
+
+  // The run stopped on a step whose element it couldn't find. A person
+  // watching can point at the element (replay/repair.ts) and the run carries
+  // on from this step with the repaired version. Until then the window stays
+  // as it is and the run shows as needs_attention. Returns the repaired
+  // version's steps, or null when the hold ends without a repair: the person
+  // closed the window or chose to fix it later, the run was stopped, or
+  // nobody answered within REPAIR_HOLD_MS. A run nobody is watching isn't held.
+  private async holdForRepair(step: WorkflowStep, error: string): Promise<WorkflowStep[] | null> {
+    if (this.run.trigger === 'schedule' || this.closedOrStopped()) return null;
+    const page = this.pages.get(step.pageAlias);
+    const browser = this.entry.launched?.browser;
+    if (!page || page.isClosed() || !browser) return null;
+    let value: ResolvedValue | { error: string };
+    try { value = this.resolveValue(step); } catch { return null; }
+    if ('error' in value) return null;
+
+    updateRunStatus(this.run.id, 'needs_attention', { error: this.redact(error), failedStepKey: step.stepKey });
+    replayEvents.emit('run:needs_repair', getRunById(this.run.id));
+    console.log(`[replay] ${this.run.id} ${step.stepKey}: holding the window for a repair`);
+
+    const repaired = await new Promise<WorkflowStep[] | null>((resolve) => {
+      const end = (steps: WorkflowStep[] | null) => {
+        if (holds.get(this.run.id) !== hold) return;
+        holds.delete(this.run.id);
+        clearTimeout(timer);
+        this.signal.removeEventListener('abort', onGone);
+        browser.off('disconnected', onGone);
+        resolve(steps);
+      };
+      const onGone = () => end(null);
+      const hold: RepairHold = {
+        runId: this.run.id, workflowId: this.workflow.id, versionId: step.versionId, siteKey: this.site.siteKey,
+        step, steps: this.steps, fieldsById: this.fieldsById, page,
+        value: value.value, recordedValue: value.recordedValue, signal: this.signal,
+        redact: (text) => this.redact(text),
+        resume: (steps) => end(steps),
+        release: () => end(null),
+      };
+      const timer = setTimeout(onGone, REPAIR_HOLD_MS);
+      holds.set(this.run.id, hold);
+      this.signal.addEventListener('abort', onGone);
+      browser.on('disconnected', onGone);
+    });
+    if (!repaired) return null;
+    updateRunStatus(this.run.id, 'running');
+    replayEvents.emit('run:resumed', getRunById(this.run.id));
+    return repaired;
   }
 
   private async missMessage(page: Page, step: WorkflowStep, what: string, ambiguous: boolean): Promise<string> {
@@ -656,7 +750,36 @@ const ROLE_WORDS: Record<string, string> = {
   spinbutton: 'number box', listbox: 'list', switch: 'switch',
 };
 
-function verbFor(step: WorkflowStep): string {
+// True for the stop messages missMessage() writes: the element wasn't found,
+// or more than one thing matched. Nothing was done to the page at that step.
+export function isMissError(text: string | undefined): boolean {
+  return !!text && (text.startsWith("Couldn't find ") || text.startsWith('More than one thing on the page matches '));
+}
+
+// "the "Get my quote" button", ""Business name"", "the option you chose".
+export function describeStepTarget(
+  step: WorkflowStep, value: string | undefined, steps: WorkflowStep[], fieldsById: Map<string, WorkflowField>,
+): string {
+  const fp = step.fingerprint;
+  let name = fp.label || fp.name || fp.placeholder;
+  if (name?.includes(WORKFLOW_VALUE_PLACEHOLDER)) {
+    const secret = step.literalSecret || (step.fieldId ? fieldsById.get(step.fieldId)?.secret : false);
+    if (secret || value === undefined) return 'the option you chose';
+    name = name.split(WORKFLOW_VALUE_PLACEHOLDER).join(value);
+  }
+  const word = fp.role ? ROLE_WORDS[fp.role] : undefined;
+  if (name) return word ? `the "${name}" ${word}` : `"${name}"`;
+  // No name: say what it showed when recorded (often a dropdown's current
+  // choice, which is exactly what tends to change), and which list it opened.
+  const shown = /internal:text="((?:[^"\\]|\\.)*)"/.exec(step.locator ?? '')?.[1]?.replace(/\\(.)/g, '$1');
+  const next = steps.find((s) => s.position === step.position + 1);
+  const opens = next?.fingerprint.container && !next.fingerprint.container.includes(WORKFLOW_VALUE_PLACEHOLDER)
+    ? ` (the one that opens the ${next.fingerprint.container} list)` : '';
+  if (shown && !shown.includes(WORKFLOW_VALUE_PLACEHOLDER)) return `the part of the page showing "${shown}"${opens}`;
+  return word ? `the ${word}${opens}` : `the part of the page this step uses${opens}`;
+}
+
+export function verbFor(step: WorkflowStep): string {
   switch (step.action) {
     case 'fill': return 'type into';
     case 'select': return 'choose from';

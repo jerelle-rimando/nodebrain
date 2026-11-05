@@ -89,8 +89,18 @@ export const api = {
       body: JSON.stringify({ inputs }),
     }),
   getWorkflowRun: (runId: string) =>
-    request<{ run: import('@shared/types').WorkflowRun; steps: import('@shared/types').WorkflowRunStep[]; active: boolean }>(`/workflow-runs/${runId}`),
+    request<{
+      run: import('@shared/types').WorkflowRun;
+      steps: import('@shared/types').WorkflowRunStep[];
+      active: boolean;
+      repair?: import('@shared/types').WorkflowRunRepair;
+    }>(`/workflow-runs/${runId}`),
   cancelWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' }),
+  // Fixing a run that stopped because the site changed
+  startRepair: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/repair`, { method: 'POST' }),
+  cancelRepair: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/repair/cancel`, { method: 'POST' }),
+  releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
+  runScreenshotUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/screenshot`,
 
   // Take Control (workflow runs; agent tasks once they use the shared pause)
   getTakeControls: () => request<import('../stores/appStore').TakeControlRequest[]>('/take-control'),

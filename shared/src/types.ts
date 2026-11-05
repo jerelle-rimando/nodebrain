@@ -273,6 +273,21 @@ export interface WorkflowRun {
   finishedAt?: string;
 }
 
+// A run that stopped because a step's element couldn't be found, and what
+// can be done about it. Plain words only: never a locator or step key.
+export interface WorkflowRunRepair {
+  live: boolean; // the run's window is still open, waiting at the stopped step
+  fixed: boolean; // a repair from this run has been saved
+  canFix: boolean;
+  whyNot?: string; // when it can't be fixed from here
+  // Where "Show me where it is" has got to; unset when nothing is happening.
+  phase?: 'opening' | 'browsing' | 'picking' | 'checking' | 'saving' | 'failed';
+  problem?: string; // the last thing that went wrong while pointing
+  explanation: string; // what it got as far as, what it couldn't find, what didn't happen
+  askText: string; // what "Ask the agent" puts in the chat
+  hasScreenshot: boolean;
+}
+
 export type WorkflowRunStepStatus = 'ok' | 'failed' | 'skipped' | 'repaired';
 export type WorkflowStepResolvedBy = 'primary' | 'fallback' | 'human';
 
@@ -376,7 +391,9 @@ export interface WorkflowListItem {
   siteName: string;
   siteKey: string;
   fieldCount: number;
-  lastRun?: { startedAt: string; status: WorkflowRunStatus };
+  // needsFix: it stopped because the site changed, and pointing at the new
+  // element can fix it (the run view's Fix).
+  lastRun?: { id: string; startedAt: string; status: WorkflowRunStatus; needsFix?: boolean };
 }
 
 export interface RunFormField {

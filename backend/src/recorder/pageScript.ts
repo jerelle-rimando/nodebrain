@@ -19,23 +19,13 @@ export const RECORDER_BINDING = '__nodebrainRecorder';
 export const PILL_HOST_ID = 'nodebrain-recorder';
 export const SET_COUNT_FN = '__nodebrainRecorderSetCount';
 
-export const PAGE_SCRIPT = `(() => {
-  const BINDING = ${JSON.stringify(RECORDER_BINDING)};
-  const HOST_ID = ${JSON.stringify(PILL_HOST_ID)};
-  const SET_COUNT = ${JSON.stringify(SET_COUNT_FN)};
-  if (window.__nodebrainRecorderInstalled) return;
-  Object.defineProperty(window, '__nodebrainRecorderInstalled', { value: true });
-  // Keep our own reference: page scripts run after this and could replace it.
-  const send = window[BINDING];
-  if (typeof send !== 'function') return;
-
-  // ── Fingerprint capture ──────────────────────────────────────────────
-  const ids = new WeakMap();
-  // Element ids restart on every page load; docId tells documents apart.
-  const docId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-  let nextId = 1;
-  const idOf = (el) => { if (!ids.has(el)) ids.set(el, nextId++); return ids.get(el); };
-  const clean = (s, max = 120) => (s || '').replace(/\\s+/g, ' ').trim().slice(0, max) || undefined;
+// The element facts the recorder captures at event time (label, name
+// attribute, test id, input type, page path, frame…), as page-side source.
+// Shared with workflow repair (replay/repair.ts), which reads the same facts
+// from the element a person points at, so a repaired step's fingerprint is
+// built exactly like a recorded one. Defines clean, textOf, labelOf,
+// interactive and fingerprint; expects `document`, `location` and `window`.
+export const ELEMENT_FACTS_SOURCE = `  const clean = (s, max = 120) => (s || '').replace(/\\s+/g, ' ').trim().slice(0, max) || undefined;
   const textOf = (el) => clean(el && (el.innerText || el.textContent));
 
   function labelOf(el) {
@@ -86,7 +76,25 @@ export const PAGE_SCRIPT = `(() => {
     return fp;
   }
 
-  function targetOf(e) {
+`;
+
+export const PAGE_SCRIPT = `(() => {
+  const BINDING = ${JSON.stringify(RECORDER_BINDING)};
+  const HOST_ID = ${JSON.stringify(PILL_HOST_ID)};
+  const SET_COUNT = ${JSON.stringify(SET_COUNT_FN)};
+  if (window.__nodebrainRecorderInstalled) return;
+  Object.defineProperty(window, '__nodebrainRecorderInstalled', { value: true });
+  // Keep our own reference: page scripts run after this and could replace it.
+  const send = window[BINDING];
+  if (typeof send !== 'function') return;
+
+  // ── Fingerprint capture ──────────────────────────────────────────────
+  const ids = new WeakMap();
+  // Element ids restart on every page load; docId tells documents apart.
+  const docId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  let nextId = 1;
+  const idOf = (el) => { if (!ids.has(el)) ids.set(el, nextId++); return ids.get(el); };
+${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     const path = e.composedPath ? e.composedPath() : [e.target];
     for (const n of path) if (n && n.id === HOST_ID) return null; // our pill
     let t = path[0];

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow } from '../db/workflowRepository';
 import { startRun, cancelRun, getRunDetail, isRunActive, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
+import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, RepairError } from '../replay/repair';
 
 // Replaying saved workflows. A run starts here and goes on in the
 // background; progress arrives on /api/events as run:started, run:step and
@@ -51,14 +52,57 @@ workflowRunsRouter.get('/workflows/:id/runs', (req: Request, res: Response) => {
   res.json({ success: true, data: getRunsByWorkflow(req.params.id) });
 });
 
-// GET /api/workflow-runs/:id → { run, steps }
+// GET /api/workflow-runs/:id → { run, steps, active, repair? }
 workflowRunsRouter.get('/workflow-runs/:id', (req: Request, res: Response) => {
   const detail = getRunDetail(req.params.id);
   if (!detail) {
     res.status(404).json({ success: false, error: "That run doesn't exist." });
     return;
   }
-  res.json({ success: true, data: { ...detail, active: isRunActive(req.params.id) } });
+  res.json({ success: true, data: { ...detail, active: isRunActive(req.params.id), repair: repairStatus(req.params.id) } });
+});
+
+// The picture taken where the run stopped.
+workflowRunsRouter.get('/workflow-runs/:id/screenshot', (req: Request, res: Response) => {
+  const file = stoppedScreenshot(req.params.id);
+  if (!file) {
+    res.status(404).json({ success: false, error: 'There is no picture for this run.' });
+    return;
+  }
+  res.sendFile(file);
+});
+
+// "Show me where it is": the browser comes forward (or opens, if the run's
+// window has closed) with a pill asking the person to point at the element.
+workflowRunsRouter.post('/workflow-runs/:id/repair', async (req: Request, res: Response) => {
+  try {
+    await startRepair(req.params.id);
+    res.json({ success: true, data: repairStatus(req.params.id) ?? null });
+  } catch (err) {
+    if (err instanceof RepairError) {
+      res.status(400).json({ success: false, error: err.message });
+      return;
+    }
+    console.error('[workflow-runs] repair failed to start:', err instanceof Error ? err.message : err);
+    res.status(500).json({ success: false, error: "Couldn't start fixing this step." });
+  }
+});
+
+workflowRunsRouter.post('/workflow-runs/:id/repair/cancel', (req: Request, res: Response) => {
+  if (!cancelRepair(req.params.id)) {
+    res.status(404).json({ success: false, error: "Nothing is being fixed for this run." });
+    return;
+  }
+  res.json({ success: true, data: { runId: req.params.id } });
+});
+
+// "Fix it later": a run waiting for a repair closes its window and ends.
+workflowRunsRouter.post('/workflow-runs/:id/release', (req: Request, res: Response) => {
+  if (!releaseRun(req.params.id)) {
+    res.status(404).json({ success: false, error: "This run isn't waiting for you." });
+    return;
+  }
+  res.json({ success: true, data: { runId: req.params.id } });
 });
 
 workflowRunsRouter.post('/workflow-runs/:id/cancel', (req: Request, res: Response) => {

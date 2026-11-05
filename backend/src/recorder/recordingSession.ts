@@ -645,26 +645,7 @@ class RecordingSession {
   }
 
   private fingerprintOf(facts: SnapshotFacts, record?: PageRecord): WorkflowStepFingerprint {
-    const fp = record?.fp;
-    const out: WorkflowStepFingerprint = {
-      role: facts.role,
-      name: facts.name,
-      label: fp?.label,
-      placeholder: fp?.placeholder,
-      nameAttr: fp?.nameAttr,
-      testId: fp?.testId,
-      tag: fp?.tag,
-      inputType: fp?.inputType,
-      autocomplete: fp?.autocomplete,
-      heading: facts.heading,
-      landmark: facts.landmark,
-      container: facts.container,
-      urlPath: fp?.urlPath,
-      ordinal: facts.ordinal,
-      framePath: fp?.framePath,
-    };
-    for (const k of Object.keys(out) as (keyof WorkflowStepFingerprint)[]) if (out[k] === undefined) delete out[k];
-    return out;
+    return fingerprintFromFacts(facts, record?.fp);
   }
 
   private pushCount(): void {
@@ -960,6 +941,33 @@ class RecordingSession {
     }
   }
 }
+
+// A step's fingerprint: the aria snapshot's facts merged with the page's own
+// record of the element (pageScript.ts). Also used by workflow repair, so a
+// repaired step is described the same way as a recorded one.
+export function fingerprintFromFacts(facts: SnapshotFacts, fp?: PageRecord['fp']): WorkflowStepFingerprint {
+  const out: WorkflowStepFingerprint = {
+    role: facts.role,
+    name: facts.name,
+    label: fp?.label,
+    placeholder: fp?.placeholder,
+    nameAttr: fp?.nameAttr,
+    testId: fp?.testId,
+    tag: fp?.tag,
+    inputType: fp?.inputType,
+    autocomplete: fp?.autocomplete,
+    heading: facts.heading,
+    landmark: facts.landmark,
+    container: facts.container,
+    urlPath: fp?.urlPath,
+    ordinal: facts.ordinal,
+    framePath: fp?.framePath,
+  };
+  for (const k of Object.keys(out) as (keyof WorkflowStepFingerprint)[]) if (out[k] === undefined) delete out[k];
+  return out;
+}
+
+export type PageElementFacts = PageRecord['fp'];
 
 function fallbackName(): string {
   return `Recorded ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
