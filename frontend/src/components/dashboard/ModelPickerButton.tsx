@@ -10,6 +10,8 @@ interface Props {
   model: string;
   availableModels: Record<string, string[]>;
   onChange: (provider: string, model: string) => void;
+  // Just the model's name as text, no icon, box or chevron. Still opens the menu.
+  plain?: boolean;
 }
 
 const PROVIDER_ICONS: Record<string, IconType> = {
@@ -35,7 +37,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 // the first thing a user sees.
 const PROVIDER_ORDER = ['ollama'];
 
-export function ModelPickerButton({ provider, model, availableModels, onChange }: Props) {
+export function ModelPickerButton({ provider, model, availableModels, onChange, plain = false }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [menuPos, setMenuPos] = useState<{ bottom: number; right: number } | null>(null);
@@ -117,11 +119,18 @@ export function ModelPickerButton({ provider, model, availableModels, onChange }
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-xs font-mono text-brain-text-dim hover:text-brain-text bg-brain-elevated border border-brain-border rounded-md px-2 py-1 transition-colors max-w-[220px]"
+        title={plain ? 'Change model' : undefined}
+        className={plain
+          ? 'block text-xs font-mono text-brain-text-dim hover:text-brain-text transition-colors max-w-[260px] truncate text-left'
+          : 'flex items-center gap-1.5 text-xs font-mono text-brain-text-dim hover:text-brain-text bg-brain-elevated border border-brain-border rounded-md px-2 py-1 transition-colors max-w-[220px]'}
       >
-        <ProviderIcon provider={provider} />
-        <span className="truncate min-w-0 flex-1">{model ? displayModelName(model) : 'Select model'}</span>
-        <ChevronUp size={12} className={'flex-shrink-0 transition-transform ' + (open ? 'rotate-180' : '')} />
+        {plain ? (model ? displayModelName(model) : 'Select model') : (
+          <>
+            <ProviderIcon provider={provider} />
+            <span className="truncate min-w-0 flex-1">{model ? displayModelName(model) : 'Select model'}</span>
+            <ChevronUp size={12} className={'flex-shrink-0 transition-transform ' + (open ? 'rotate-180' : '')} />
+          </>
+        )}
       </button>
 
       {open && menuPos && createPortal(

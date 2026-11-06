@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Agent, Task, TaskLog, Credential, ChatMessage, RecordingStatus } from '@shared/types';
+import type { Agent, Task, TaskLog, Credential, RecordingStatus } from '@shared/types';
 
 export interface ToolApprovalRequest {
   taskId: string;
@@ -27,11 +27,7 @@ interface AppState {
   tasks: Task[];
   logs: TaskLog[];
   credentials: Credential[];
-  chatMessages: ChatMessage[];
   availableModels: Record<string, string[]>;
-  // Backend-signalled routing phase for the in-flight chat request, keyed by
-  // requestId. Drives the streaming placeholder label (e.g. "Creating…").
-  chatPhase: { requestId: string; phase: string } | null;
 
   activeTab: ActiveTab;
   pendingApprovals: ToolApprovalRequest[];
@@ -65,10 +61,6 @@ interface AppState {
   addCredential: (cred: Credential) => void;
   removeCredential: (id: string) => void;
 
-  setChatMessages: (msgs: ChatMessage[]) => void;
-  addChatMessage: (msg: ChatMessage) => void;
-  setChatPhase: (phase: { requestId: string; phase: string } | null) => void;
-
   setActiveTab: (tab: ActiveTab) => void;
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
@@ -84,9 +76,7 @@ export const useStore = create<AppState>((set) => ({
   tasks: [],
   logs: [],
   credentials: [],
-  chatMessages: [],
   availableModels: {},
-  chatPhase: null,
   activeTab: 'dashboard',
   pendingApprovals: [],
   pendingTakeControls: [],
@@ -112,9 +102,6 @@ export const useStore = create<AppState>((set) => ({
   addCredential: (cred) => set((s) => ({ credentials: [cred, ...s.credentials] })),
   removeCredential: (id) => set((s) => ({ credentials: s.credentials.filter((c) => c.id !== id) })),
 
-  setChatMessages: (chatMessages) => set({ chatMessages }),
-  addChatMessage: (msg) => set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
-  setChatPhase: (chatPhase) => set({ chatPhase }),
 
   setActiveTab: (activeTab) => set({ activeTab }),
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),

@@ -9,7 +9,7 @@ import { queryRelevantContext, ingestTaskInstruction } from '../rag/ragEngine';
 import { getToolsForAgent, formatToolsForOpenAI, formatToolsForAnthropic, SERVER_CONFIGS, getServerStatus, getUnavailableServers } from '../mcp/toolRegistry';
 import { callTool } from '../mcp/mcpClient';
 import type { Agent, ModelProvider, Task, TaskLog } from '../../shared-types';
-import { deriveAgentEmoji, resolveMaxToolIterations } from '../../shared-types';
+import { resolveMaxToolIterations } from '../../shared-types';
 import { EventEmitter } from 'events';
 import { getLocalEngineStatus, LOCAL_MODEL, LOCAL_PROVIDER } from './localEngine';
 import { getConnectionsForAgent } from '../db/agentConnectionRepository';
@@ -988,72 +988,5 @@ export async function executeAgentTask(
     const failedTask = { ...task, status: 'failed' as const, error: errorMessage, completedAt: new Date().toISOString() };
     agentEvents.emit('task:failed', failedTask, { toolCallCount: toolCallCountRef.value, errorType: classifyTaskError(err) });
     return failedTask;
-  }
-}
-
-export async function parseAgentFromChat(userMessage: string): Promise<Partial<Agent>[] | null> {
-  const providerPriority = ['openai', 'anthropic', 'groq', 'gemini', 'mistral', 'together', 'fireworks', 'ollama', 'custom'];
-
-  const { provider, apiKey } = await resolveDefaultProvider(providerPriority);
-
-  if (!apiKey && provider !== 'ollama') return null;
-
-  const client = getClient(provider, apiKey);
-  const model = DEFAULT_MODELS[provider] ?? 'gpt-4o-mini';
-
-  const systemPrompt = `You are an AI agent configuration parser. When given a natural language description of one or more AI agents, extract structured configuration for each agent.
-
-ALWAYS return a JSON array, even when only one agent is described. Each element has this shape:
-{
-  "name": "Descriptive Agent Name",
-  "description": "What this agent does",
-  "model": "${model}",
-  "systemPrompt": "You are a helpful assistant that...",
-  "schedule": "0 * * * *" or null,
-  "toolPermissions": [],
-  "connectsTo": ["Other Agent Name"]
-}
-
-"connectsTo" is an array of OTHER agent names (from the same batch) that this agent should delegate tasks to. Only include it when the user explicitly describes delegation, orchestration, or one agent handing off work to another. Omit the field (or use an empty array) otherwise.
-
-name must describe what the agent does for the user, derived from their request: 2 to 4 words, specific and descriptive. Good examples: "Morning PDF Digest", "GitHub PR Watcher", "Invoice Email Sorter". Do NOT use generic role labels ("General Assistant", "Task Creator", "AI Helper", "Automation Agent") and do NOT include any person's name.
-description must be one short sentence, max 80 characters.
-For schedule, use cron expressions if time-based tasks are mentioned (e.g., "every hour" = "0 * * * *", "daily at 9am" = "0 9 * * *"). Otherwise null.
-Model should default to "${model}" unless the user specifies otherwise.
-Return ONLY the JSON array with no additional text or markdown.`;
-
-  try {
-    const completion = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Create agent configuration(s) for: ${userMessage}` },
-      ],
-      temperature: 0.3,
-      max_tokens: 1000,
-    });
-
-    const content = completion.choices[0]?.message?.content;
-    if (!content) return null;
-
-    const clean = content.replace(/```json|```/g, '').trim();
-    const parsed: unknown = JSON.parse(clean);
-    const configs: Partial<Agent>[] = Array.isArray(parsed)
-      ? (parsed as Partial<Agent>[])
-      : [parsed as Partial<Agent>];
-    // Emoji is assigned here, deterministically — never asked of the model.
-    for (const cfg of configs) {
-      cfg.emoji = deriveAgentEmoji(cfg.name, cfg.description);
-      // The model field is LLM output — never trust it. Validate against the
-      // provider the parser ran under; the repository re-checks against the
-      // provider the agent is actually created with.
-      cfg.model = resolveAgentModel(provider, cfg.model, `parseAgentFromChat("${cfg.name ?? ''}")`);
-      // The parser assigns the provider too, so callers can't pair this model
-      // with a different provider than the one it was validated against.
-      cfg.provider = provider as ModelProvider;
-    }
-    return configs;
-  } catch {
-    return null;
   }
 }

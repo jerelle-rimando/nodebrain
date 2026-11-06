@@ -1,9 +1,7 @@
 // Deterministic emoji identity for an agent.
 //
-// The emoji is ALWAYS derived in code from the agent's name + description — it
-// is never requested from the LLM. `parseAgentFromChat` does a single unrepaired
-// JSON.parse of the model's reply and the default model is a small local one, so
-// growing the requested JSON shape risks breaking agent creation outright.
+// The emoji is ALWAYS derived in code from the agent's name + description, never
+// requested from an LLM, so every way of making an agent gets one the same way.
 
 export const DEFAULT_AGENT_EMOJI = '🤖';
 

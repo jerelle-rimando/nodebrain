@@ -155,22 +155,8 @@ export const api = {
     request<{ id: string }>(`/mcp-servers/${id}`, { method: 'DELETE' }),
 
   getChatHistory: () => request<import('@shared/types').ChatMessage[]>('/chat/history'),
-  sendChatMessage: (
-    content: string,
-    requestId?: string,
-    opts?: { mode?: 'chat' | 'agent'; provider?: string; model?: string },
-  ) =>
-    request<{
-      userMessage: import('@shared/types').ChatMessage;
-      assistantMessage: import('@shared/types').ChatMessage;
-      suggestAgentMode?: boolean;
-    }>(
-      '/chat/message',
-      { method: 'POST', body: JSON.stringify({ content, requestId, ...opts }) }
-    ),
-
-    saveMessages: (messages: import('@shared/types').ChatMessage[]) =>
-      request<{ saved: number }>('/chat/save', { method: 'POST', body: JSON.stringify({ messages }) }),
+  saveMessages: (messages: import('@shared/types').ChatMessage[]) =>
+    request<{ saved: number }>('/chat/save', { method: 'POST', body: JSON.stringify({ messages }) }),
 
   testIntegration: (provider: string) =>
     request<{

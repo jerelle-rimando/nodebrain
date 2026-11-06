@@ -37,8 +37,6 @@ router.get('/', (req: Request, res: Response) => {
   const onAgentCreated = (agent: Agent) => sendEvent('agent:created', agent);
   const onAgentUpdated = (agent: Agent) => sendEvent('agent:updated', agent);
   const onAgentDeleted = (payload: { id: string }) => sendEvent('agent:deleted', payload);
-  const onChatToken = (payload: { requestId: string; token: string }) => sendEvent('chat:token', payload);
-  const onChatPhase = (payload: { requestId: string; phase: string }) => sendEvent('chat:phase', payload);
 
   agentEvents.on('log', onLog);
   agentEvents.on('task:start', onTaskStart);
@@ -49,8 +47,6 @@ router.get('/', (req: Request, res: Response) => {
   agentEvents.on('agent:created', onAgentCreated);
   agentEvents.on('agent:updated', onAgentUpdated);
   agentEvents.on('agent:deleted', onAgentDeleted);
-  agentEvents.on('chat:token', onChatToken);
-  agentEvents.on('chat:phase', onChatPhase);
 
   // Workflow recorder (backend/src/recorder/recordingSession.ts).
   const recorderListeners: Array<[string, (payload: unknown) => void]> = [
@@ -79,8 +75,6 @@ router.get('/', (req: Request, res: Response) => {
     agentEvents.off('agent:created', onAgentCreated);
     agentEvents.off('agent:updated', onAgentUpdated);
     agentEvents.off('agent:deleted', onAgentDeleted);
-    agentEvents.off('chat:token', onChatToken);
-    agentEvents.off('chat:phase', onChatPhase);
     for (const [name, fn] of recorderListeners) recorderEvents.off(name, fn);
     for (const [name, fn] of replayListeners) replayEvents.off(name, fn);
     for (const [name, fn] of takeControlListeners) takeControlEvents.off(name, fn);

@@ -11,16 +11,14 @@ import { checkStartAddress, hostIsOnSite } from './startAddress';
 // States in which a recording is still open in the browser.
 export const OPEN_STATES = new Set(['recording', 'browser_closed', 'finishing']);
 
-export function RecordButton({ onClick, big = false }: { onClick: () => void; big?: boolean }) {
+export function RecordButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={big
-        ? 'flex items-center gap-2 px-5 py-2.5 text-sm bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors'
-        : 'flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors'}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim text-white rounded-lg transition-colors"
     >
-      <Plus size={big ? 15 : 13} /> Record
+      Record <Plus size={13} aria-hidden="true" />
     </button>
   );
 }

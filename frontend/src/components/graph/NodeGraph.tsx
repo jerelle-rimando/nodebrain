@@ -12,7 +12,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { AgentNode } from './AgentNode';
-import { AgentStudioChat } from './AgentStudioChat';
+import { AgentChat } from './AgentChat';
 import { LogsPanel } from '../shared/LogsPanel';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
@@ -582,10 +582,11 @@ export function NodeGraph() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  // Whose thread the Agent Studio chat shows: null is Agent Studio itself.
+  // The agent whose chat is open beside the graph, if any.
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   // The logs overlay: closed (null), or open on every agent ('') or one.
   const [logsFor, setLogsFor] = useState<string | null>(null);
+  const chatAgent = chatAgentId ? agents.find((a) => a.id === chatAgentId) ?? null : null;
 
   useEffect(() => {
     if (logsFor === null) return;
@@ -707,9 +708,11 @@ export function NodeGraph() {
 
   return (
     <div className="h-full flex">
-      <div className="w-[400px] flex-shrink-0 border-r border-brain-border">
-        <AgentStudioChat agentId={chatAgentId} onAgentChange={setChatAgentId} />
-      </div>
+      {chatAgent && (
+        <div className="w-[400px] flex-shrink-0 border-r border-brain-border">
+          <AgentChat agent={chatAgent} onClose={() => setChatAgentId(null)} />
+        </div>
+      )}
 
     <div className="flex-1 min-w-0 h-full relative">
       <ReactFlow
@@ -750,7 +753,7 @@ export function NodeGraph() {
           <div className="text-center">
             <p className="text-brain-text-dim text-sm">No agents yet</p>
             <p className="text-brain-text-dim text-xs mt-1">
-              Describe one in Agent Studio, on the left, to create it
+              Add one from Templates and it shows up here
             </p>
           </div>
         </div>

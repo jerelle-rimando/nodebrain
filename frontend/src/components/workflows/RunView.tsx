@@ -226,8 +226,8 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
     }
   }
 
-  // The question goes into the site chat's composer beside this view, for
-  // the person to read and send. That chat knows the site's workflows and
+  // The question goes into the site chat's composer, which the Dashboard
+  // brings back in place of this view, for the person to read and send. That chat knows the site's workflows and
   // recent runs, but can't see the browser.
   function askAgent() {
     setChatDraft(repair.askText);

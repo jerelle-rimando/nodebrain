@@ -22,7 +22,7 @@ import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 
 // Nav order follows the arc of a user's journey through the app:
 //   work surfaces first  — Dashboard (workflows + site chat, the home screen),
-//                           NodeGraph (LLM agents and Agent Studio)
+//                           NodeGraph (LLM agents, their logs and chats)
 //   discovery/setup next  — Templates (one-click starting points) and
 //                           Integrations (capabilities) a new user needs early
 //   set-once config       — Vault (configure credentials once, rarely revisit)

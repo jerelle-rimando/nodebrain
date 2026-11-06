@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Circle, Loader2, Send } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, CircleDashed, Loader2 } from 'lucide-react';
 import type { SiteSummary } from '@shared/types';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
@@ -11,7 +11,7 @@ import { CHAT_MODEL_KEY, CHAT_PROVIDER_KEY, CLOUD_DEFAULT_MODEL, CLOUD_DEFAULT_P
 // workflows recorded there — what they ask for, their steps, how recent runs
 // went. It explains; it can't run, record or fix anything (those are the
 // list's buttons). The site picker lives in its header and also scopes the
-// list beside it.
+// list beside it, on the right.
 //
 // The conversation is kept per site while the app is open; it isn't saved.
 
@@ -27,6 +27,23 @@ export function SiteChatPanel({ sites, current, onChoose }: {
   const availableModels = useStore((s) => s.availableModels);
   const [provider, setProvider] = useState(() => localStorage.getItem(CHAT_PROVIDER_KEY) ?? CLOUD_DEFAULT_PROVIDER);
   const [model, setModel] = useState(() => localStorage.getItem(CHAT_MODEL_KEY) ?? CLOUD_DEFAULT_MODEL);
+
+  // Local first: until the person picks a model, an installed local engine
+  // replaces the cloud seed. A model they picked is never replaced.
+  useEffect(() => {
+    if (localStorage.getItem('nb_default_model_chosen') === '1') return;
+    if (provider !== CLOUD_DEFAULT_PROVIDER || model !== CLOUD_DEFAULT_MODEL) return;
+    api.getLocalEngineStatus()
+      .then((status) => {
+        if (!status.available) return;
+        localStorage.setItem(CHAT_PROVIDER_KEY, status.provider);
+        localStorage.setItem(CHAT_MODEL_KEY, status.model);
+        setProvider(status.provider);
+        setModel(status.model);
+      })
+      .catch(() => { /* backend unreachable: keep the cloud fallback */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [threads, setThreads] = useState<Record<string, Turn[]>>({});
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -75,24 +92,19 @@ export function SiteChatPanel({ sites, current, onChoose }: {
   }
 
   return (
-    <aside aria-label="Chat about this site" className="h-full flex flex-col border-l border-brain-border bg-brain-surface">
-      <div className="px-3 py-2.5 border-b border-brain-border flex-shrink-0">
-        {current ? <SitePicker sites={sites} current={current} onChoose={onChoose} />
-          : <p className="px-1 py-1.5 text-sm text-brain-text-dim">No site yet</p>}
+    <aside aria-label="Chat about this site" className="h-full flex flex-col bg-brain-surface">
+      <div className="px-[22px] py-4 border-b border-brain-border flex-shrink-0">
+        {current ? <SitePicker sites={sites} current={current} onChoose={onChoose} /> : (
+          <p className="flex items-center gap-2 text-[15px] font-medium text-brain-text-muted">
+            <CircleDashed size={17} aria-hidden="true" />
+            No site yet
+            <ChevronDown size={15} aria-hidden="true" />
+          </p>
+        )}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {!current ? (
-          <div className="h-full flex flex-col items-center justify-center text-center px-4">
-            <span className="w-10 h-10 rounded-full bg-brain-error/10 border border-brain-error/30 flex items-center justify-center">
-              <Circle size={14} className="text-brain-error fill-brain-error" />
-            </span>
-            <p className="text-sm font-medium text-brain-text mt-3">Nothing recorded yet</p>
-            <p className="text-xs text-brain-text-dim mt-1.5 leading-relaxed max-w-[260px]">
-              Press Record to walk through a task in your browser. NodeBrain will remember the steps and set up an agent for that site.
-            </p>
-          </div>
-        ) : turns.length === 0 ? (
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-[22px] py-4 space-y-3">
+        {!current ? null : turns.length === 0 ? (
           <p className="text-xs text-brain-text-dim leading-relaxed">
             {canAsk
               ? `Ask about the workflows recorded on ${current.name}: what they need from you, what each step does, or why one stopped.`
@@ -111,7 +123,7 @@ export function SiteChatPanel({ sites, current, onChoose }: {
         )}
       </div>
 
-      <div className="px-3 pt-2 pb-2.5 border-t border-brain-border flex-shrink-0">
+      <div className="px-[22px] pt-2 pb-3 flex-shrink-0">
         <div className="rounded-xl border border-brain-border bg-brain-bg focus-within:border-brain-accent transition-colors">
           <textarea
             ref={inputRef}
@@ -122,10 +134,11 @@ export function SiteChatPanel({ sites, current, onChoose }: {
             aria-label="Ask anything about this project"
             disabled={!canAsk}
             rows={2}
-            className="w-full bg-transparent px-3 pt-2 text-sm text-brain-text placeholder-brain-text-dim resize-none focus:outline-none disabled:opacity-50"
+            className="w-full bg-transparent px-3 pt-2.5 text-sm text-brain-text placeholder-brain-text-muted resize-none focus:outline-none disabled:cursor-not-allowed"
           />
-          <div className="flex items-center gap-2 px-2 pb-2">
+          <div className="flex items-center gap-2 pl-3 pr-2 pb-2">
             <ModelPickerButton
+              plain
               provider={provider}
               model={model}
               availableModels={availableModels}
@@ -138,8 +151,8 @@ export function SiteChatPanel({ sites, current, onChoose }: {
               }}
             />
             <button type="button" onClick={() => void send()} disabled={!input.trim() || sending || !canAsk} aria-label="Send"
-              className="ml-auto w-8 h-8 rounded-lg bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors">
-              <Send size={14} className="text-white" />
+              className="ml-auto w-[42px] h-[38px] rounded-lg bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors flex-shrink-0">
+              <ArrowUp size={18} className="text-white" />
             </button>
           </div>
         </div>

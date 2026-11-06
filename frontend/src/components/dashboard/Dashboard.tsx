@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Workflow as WorkflowIcon } from 'lucide-react';
+import { Circle, Loader2 } from 'lucide-react';
 import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
 import { api } from '../../utils/api';
+import { useStore } from '../../stores/appStore';
 import { EmojiPicker } from './EmojiPicker';
 import { RunFormScreen } from '../workflows/RunFormScreen';
 import { RunView } from '../workflows/RunView';
 import { OPEN_STATES, RecordButton, StartRecordingDialog } from '../workflows/RecordControls';
 import { SiteChatPanel, type PickerSite } from '../workflows/SiteChatPanel';
 
-// The Dashboard, the app's home: on the left the list (scoped to one site), or a
-// workflow's run form or run view; on the right a chat about that site,
-// whose header holds the site picker.
+// The Dashboard, the app's home: on the left a chat about one site, whose
+// header holds the site picker, or in its place a workflow's run form or run
+// view; on the right the list of that site's workflows, always.
 type Screen =
   | { name: 'list' }
   | { name: 'form'; workflowId: string }
@@ -25,6 +26,13 @@ export function Dashboard() {
   const [recordings, setRecordings] = useState<RecordingStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SITE_KEY));
+
+  // A stopped run's "ask the agent" puts its question in the chat's composer,
+  // so the chat comes back in place of the run view.
+  const chatDraft = useStore((s) => s.chatDraft);
+  useEffect(() => {
+    if (chatDraft) setScreen({ name: 'list' });
+  }, [chatDraft]);
 
   const choose = useCallback((siteKey: string) => {
     setChosen(siteKey);
@@ -65,9 +73,9 @@ export function Dashboard() {
     ?? [...sites].sort((a, b) => (b.lastActivity ?? '').localeCompare(a.lastActivity ?? ''))[0]
     ?? null;
 
-  let main;
+  let runScreen = null;
   if (screen.name === 'form') {
-    main = (
+    runScreen = (
       <RunFormScreen
         key={screen.workflowId}
         workflowId={screen.workflowId}
@@ -76,7 +84,7 @@ export function Dashboard() {
       />
     );
   } else if (screen.name === 'run') {
-    main = (
+    runScreen = (
       <RunView
         key={screen.runId}
         workflowId={screen.workflowId}
@@ -85,39 +93,35 @@ export function Dashboard() {
         onRunAgain={() => setScreen({ name: 'form', workflowId: screen.workflowId })}
       />
     );
-  } else if (!overview) {
-    main = (
-      <div className="h-full flex items-center justify-center">
-        {error ? <p role="alert" className="text-sm text-brain-error">{error}</p> : <Loader2 size={16} className="animate-spin text-brain-text-dim" />}
-      </div>
-    );
-  } else {
-    main = (
-      <WorkflowList
-        overview={overview} recordings={recordings} sites={sites} current={current} error={error}
-        onChoose={choose} onReload={load}
-        onRecordingStarted={(status) => {
-          choose(status.siteKey);
-          setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
-        }}
-        onRun={(workflowId) => setScreen({ name: 'form', workflowId })}
-        onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
-      />
-    );
   }
 
   return (
     <div className="h-full flex">
-      <div className="flex-1 min-w-0">{main}</div>
-      <div className="w-[360px] flex-shrink-0">
-        <SiteChatPanel sites={sites} current={current} onChoose={choose} />
+      <div className="basis-[55%] min-w-0 border-r border-brain-border">
+        {runScreen}
+        {/* Stays mounted behind a run so each site's conversation survives it. */}
+        <div className={runScreen ? 'hidden' : 'h-full'}>
+          <SiteChatPanel sites={sites} current={current} onChoose={choose} />
+        </div>
+      </div>
+      <div className="basis-[45%] min-w-0">
+        <WorkflowList
+          overview={overview} recordings={recordings} sites={sites} current={current} error={error}
+          onChoose={choose} onReload={load}
+          onRecordingStarted={(status) => {
+            choose(status.siteKey);
+            setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
+          }}
+          onRun={(workflowId) => setScreen({ name: 'form', workflowId })}
+          onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
+        />
       </div>
     </div>
   );
 }
 
 function WorkflowList({ overview, recordings, sites, current, error, onChoose, onReload, onRecordingStarted, onRun, onOpenRun }: {
-  overview: WorkflowsOverview;
+  overview: WorkflowsOverview | null;
   recordings: RecordingStatus[];
   sites: PickerSite[];
   current: PickerSite | null;
@@ -130,59 +134,34 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
 }) {
   const [dialog, setDialog] = useState<{ address: string } | null>(null);
 
-  // Record is the one way to start a recording. It opens on the current
-  // site's address; changing the address records on another site.
-  const dialogEl = (
-    <StartRecordingDialog
-      open={dialog !== null}
-      initialAddress={dialog?.address}
-      onClose={() => setDialog(null)}
-      onStarted={(status) => { setDialog(null); onRecordingStarted(status); }}
-    />
-  );
-
-  // Nothing recorded anywhere yet: recording is the only thing to do.
-  if (!current) {
-    return (
-      <div className="h-full overflow-y-auto">
-        <div className="max-w-xl mx-auto px-6 py-10">
-          <div className="rounded-xl border border-dashed border-brain-border bg-brain-surface px-8 py-12 text-center">
-            <div className="w-12 h-12 mx-auto rounded-xl bg-brain-accent/10 border border-brain-accent/30 flex items-center justify-center">
-              <WorkflowIcon size={22} className="text-brain-accent" />
-            </div>
-            <h1 className="text-base font-semibold text-brain-text mt-4">Record your first workflow</h1>
-            <p className="text-sm text-brain-text-dim mt-2 max-w-sm mx-auto leading-relaxed">
-              Show NodeBrain a task you do on a website, like getting a quote. Do it once in your browser,
-              and NodeBrain can repeat it for you with new details.
-            </p>
-            <div className="flex justify-center mt-6">
-              <RecordButton onClick={() => setDialog({ address: '' })} big />
-            </div>
-          </div>
-        </div>
-        {dialogEl}
+  let body;
+  if (!overview) {
+    body = (
+      <div className="h-full flex items-center justify-center">
+        {error ? <p role="alert" className="text-sm text-brain-error">{error}</p> : <Loader2 size={16} className="animate-spin text-brain-text-dim" />}
       </div>
     );
-  }
-
-  const rows = overview.workflows.filter((w) => w.siteAgentId === current.id);
-  const recording = recordings.find((r) => r.siteKey === current.siteKey);
-  const others = sites.filter((s) => s.siteKey !== current.siteKey);
-  const othersNeedingYou = others.filter((s) => s.attention);
-
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold text-brain-text">Workflows</h1>
-            <p className="text-xs text-brain-text-dim truncate">Recorded on {current.name}</p>
-          </div>
-          <div className="ml-auto">
-            <RecordButton onClick={() => setDialog({ address: current.startUrl })} />
-          </div>
-        </div>
-
+  } else if (!current) {
+    // Nothing recorded anywhere yet. Recording is the only thing to do, and
+    // the header's Record button does it.
+    body = (
+      <div className="h-full flex flex-col items-center justify-center text-center px-8">
+        <span className="w-10 h-10 rounded-full bg-brain-error/10 border border-brain-error/30 flex items-center justify-center">
+          <Circle size={14} className="text-brain-error fill-brain-error" />
+        </span>
+        <h2 className="text-[15px] text-brain-text mt-3">Record your first workflow</h2>
+        <p className="text-[13px] text-brain-text-dim mt-1.5 leading-relaxed max-w-sm">
+          Show NodeBrain a task you do on a website. Do it once in your browser, and it can repeat it with new details.
+        </p>
+      </div>
+    );
+  } else {
+    const rows = overview.workflows.filter((w) => w.siteAgentId === current.id);
+    const recording = recordings.find((r) => r.siteKey === current.siteKey);
+    const others = sites.filter((s) => s.siteKey !== current.siteKey);
+    const othersNeedingYou = others.filter((s) => s.attention);
+    body = (
+      <div className="h-full overflow-y-auto px-[22px] py-5">
         {error && <p role="alert" className="text-xs text-brain-error mb-3">{error}</p>}
         <ul className="space-y-2">
           {recording && <RecordingRow status={recording} />}
@@ -194,7 +173,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
           ))}
         </ul>
         {rows.length === 0 && !recording && (
-          <p className="text-sm text-brain-text-dim">No workflows on this site yet. Press Record to show NodeBrain one.</p>
+          <p className="text-sm text-brain-text-dim">No workflows on {current.name} yet. Press Record to show NodeBrain one.</p>
         )}
 
         {others.length > 0 && (
@@ -218,8 +197,27 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
           </p>
         )}
       </div>
-      {dialogEl}
-    </div>
+    );
+  }
+
+  // Record is the one way to start a recording. It opens on the current
+  // site's address; changing the address records on another site.
+  return (
+    <section aria-label="Your Workflows" className="h-full flex flex-col">
+      <div className="flex items-center gap-3 px-[22px] py-4 border-b border-brain-border flex-shrink-0">
+        <h1 className="text-[15px] font-medium text-brain-text">Your Workflows</h1>
+        <div className="ml-auto">
+          <RecordButton onClick={() => setDialog({ address: current?.startUrl ?? '' })} />
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">{body}</div>
+      <StartRecordingDialog
+        open={dialog !== null}
+        initialAddress={dialog?.address}
+        onClose={() => setDialog(null)}
+        onStarted={(status) => { setDialog(null); onRecordingStarted(status); }}
+      />
+    </section>
   );
 }
 
