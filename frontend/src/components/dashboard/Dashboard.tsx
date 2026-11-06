@@ -204,7 +204,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   // site's address; changing the address records on another site.
   return (
     <section aria-label="Your Workflows" className="h-full flex flex-col">
-      <div className="h-[72px] flex items-center gap-3 px-[22px] border-b border-brain-border flex-shrink-0">
+      <div className="h-[72px] flex items-center gap-3 px-[22px] flex-shrink-0">
         <h1 className="text-[15px] font-medium text-brain-text">Your Workflows</h1>
         <div className="ml-auto">
           <RecordButton onClick={() => setDialog({ address: current?.startUrl ?? '' })} />

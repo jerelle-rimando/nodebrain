@@ -37,10 +37,12 @@ function ProviderIcon({ provider }: { provider: string }) {
 // the first thing a user sees.
 const PROVIDER_ORDER = ['ollama'];
 
+const MENU_WIDTH = 288;
+
 export function ModelPickerButton({ provider, model, availableModels, onChange, plain = false }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{ bottom: number; right: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -80,7 +82,9 @@ export function ModelPickerButton({ provider, model, availableModels, onChange, 
       if (!rect) return;
       setMenuPos({
         bottom: window.innerHeight - rect.top + 4,
-        right: window.innerWidth - rect.right,
+        // Opens rightward from the button's left edge (the composer sits on
+        // the left of the screen), kept inside the window.
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8)),
       });
     }
     updatePosition();
@@ -136,8 +140,8 @@ export function ModelPickerButton({ provider, model, availableModels, onChange, 
       {open && menuPos && createPortal(
         <div
           ref={menuRef}
-          style={{ position: 'fixed', bottom: menuPos.bottom, right: menuPos.right }}
-          className="w-72 max-h-80 flex flex-col bg-brain-elevated border border-brain-border rounded-lg shadow-xl z-50 overflow-hidden"
+          style={{ position: 'fixed', bottom: menuPos.bottom, left: menuPos.left, width: MENU_WIDTH }}
+          className="max-h-80 flex flex-col bg-brain-elevated border border-brain-border rounded-lg shadow-xl z-50 overflow-hidden"
         >
           <div className="flex items-center gap-2 px-2.5 py-2 border-b border-brain-border flex-shrink-0">
             <Search size={13} className="text-brain-text-dim flex-shrink-0" />

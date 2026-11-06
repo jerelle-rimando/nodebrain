@@ -25,24 +25,20 @@ export function SiteChatPanel({ sites, current, onChoose }: {
   onChoose: (siteKey: string) => void;
 }) {
   const availableModels = useStore((s) => s.availableModels);
-  const [provider, setProvider] = useState(() => localStorage.getItem(CHAT_PROVIDER_KEY) ?? CLOUD_DEFAULT_PROVIDER);
-  const [model, setModel] = useState(() => localStorage.getItem(CHAT_MODEL_KEY) ?? CLOUD_DEFAULT_MODEL);
-
-  // Local first: until the person picks a model, an installed local engine
-  // replaces the cloud seed. A model they picked is never replaced.
+  // A model picked here is kept. Without one, the composer stays blank for the
+  // moment it takes to ask whether the local engine is installed, then shows
+  // the local model, or the cloud one when there's no local engine. That
+  // default isn't saved, so installing local later takes effect.
+  const [provider, setProvider] = useState(() => localStorage.getItem(CHAT_PROVIDER_KEY) ?? '');
+  const [model, setModel] = useState(() => localStorage.getItem(CHAT_MODEL_KEY) ?? '');
   useEffect(() => {
-    if (localStorage.getItem('nb_default_model_chosen') === '1') return;
-    if (provider !== CLOUD_DEFAULT_PROVIDER || model !== CLOUD_DEFAULT_MODEL) return;
+    if (localStorage.getItem(CHAT_MODEL_KEY)) return;
+    let cancelled = false;
+    const use = (p: string, m: string) => { if (!cancelled) { setProvider(p); setModel(m); } };
     api.getLocalEngineStatus()
-      .then((status) => {
-        if (!status.available) return;
-        localStorage.setItem(CHAT_PROVIDER_KEY, status.provider);
-        localStorage.setItem(CHAT_MODEL_KEY, status.model);
-        setProvider(status.provider);
-        setModel(status.model);
-      })
-      .catch(() => { /* backend unreachable: keep the cloud fallback */ });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .then((status) => status.available ? use(status.provider, status.model) : use(CLOUD_DEFAULT_PROVIDER, CLOUD_DEFAULT_MODEL))
+      .catch(() => use(CLOUD_DEFAULT_PROVIDER, CLOUD_DEFAULT_MODEL));
+    return () => { cancelled = true; };
   }, []);
   const [threads, setThreads] = useState<Record<string, Turn[]>>({});
   const [input, setInput] = useState('');
@@ -93,7 +89,7 @@ export function SiteChatPanel({ sites, current, onChoose }: {
 
   return (
     <aside aria-label="Chat about this site" className="h-full flex flex-col bg-brain-surface">
-      <div className="h-[72px] flex items-center px-[22px] border-b border-brain-border flex-shrink-0">
+      <div className="h-[72px] flex items-center px-[22px] flex-shrink-0">
         {current ? <SitePicker sites={sites} current={current} onChoose={onChoose} /> : (
           <p className="flex items-center gap-2 text-[15px] font-medium text-brain-text-muted">
             <CircleDashed size={17} aria-hidden="true" />
@@ -145,7 +141,6 @@ export function SiteChatPanel({ sites, current, onChoose }: {
               onChange={(p, m) => {
                 localStorage.setItem(CHAT_PROVIDER_KEY, p);
                 localStorage.setItem(CHAT_MODEL_KEY, m);
-                localStorage.setItem('nb_default_model_chosen', '1');
                 setProvider(p);
                 setModel(m);
               }}
