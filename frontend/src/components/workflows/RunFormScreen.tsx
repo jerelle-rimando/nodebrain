@@ -37,7 +37,7 @@ function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
       className="flex items-center gap-1 text-xs text-brain-text-dim hover:text-brain-text transition-colors">
-      <ArrowLeft size={13} /> All workflows
+      <ArrowLeft size={13} /> Back to chat
     </button>
   );
 }

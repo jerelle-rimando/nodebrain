@@ -100,7 +100,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
       <div className="px-6 pt-4 pb-3 border-b border-brain-border bg-brain-surface flex-shrink-0">
         <button type="button" onClick={onBack}
           className="flex items-center gap-1 text-xs text-brain-text-dim hover:text-brain-text transition-colors">
-          <ArrowLeft size={13} /> All workflows
+          <ArrowLeft size={13} /> Back to chat
         </button>
         <div className="flex items-center gap-3 mt-2">
           <div className="min-w-0 flex-1">

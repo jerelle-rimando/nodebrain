@@ -93,7 +93,7 @@ export function SiteChatPanel({ sites, current, onChoose }: {
 
   return (
     <aside aria-label="Chat about this site" className="h-full flex flex-col bg-brain-surface">
-      <div className="px-[22px] py-4 border-b border-brain-border flex-shrink-0">
+      <div className="h-[72px] flex items-center px-[22px] border-b border-brain-border flex-shrink-0">
         {current ? <SitePicker sites={sites} current={current} onChoose={onChoose} /> : (
           <p className="flex items-center gap-2 text-[15px] font-medium text-brain-text-muted">
             <CircleDashed size={17} aria-hidden="true" />
@@ -182,9 +182,9 @@ function SitePicker({ sites, current, onChoose }: {
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex-1 min-w-0">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}
-        className="w-full flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-brain-border/60 transition-colors text-left">
+        className="w-full flex items-center gap-2.5 rounded-lg px-1.5 py-0.5 hover:bg-brain-border/60 transition-colors text-left">
         <SiteIcon icon={current.icon} />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-brain-text truncate">{current.name}</span>
