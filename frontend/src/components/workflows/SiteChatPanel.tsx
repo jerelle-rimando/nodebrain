@@ -7,7 +7,7 @@ import { ModelPickerButton } from '../dashboard/ModelPickerButton';
 import { AiDisclaimer } from '../shared/AiDisclaimer';
 import { CHAT_MODEL_KEY, CHAT_PROVIDER_KEY, CLOUD_DEFAULT_MODEL, CLOUD_DEFAULT_PROVIDER } from '../../utils/chatModel';
 
-// The Workflows tab's chat: you talk to one site (Jimcor), and it knows the
+// The Dashboard's chat: you talk to one site (Jimcor), and it knows the
 // workflows recorded there — what they ask for, their steps, how recent runs
 // went. It explains; it can't run, record or fix anything (those are the
 // list's buttons). The site picker lives in its header and also scopes the
@@ -31,6 +31,18 @@ export function SiteChatPanel({ sites, current, onChoose }: {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Text handed over from a stopped workflow's "ask the agent": it goes in
+  // the box for the person to read and send.
+  const chatDraft = useStore((s) => s.chatDraft);
+  const setChatDraft = useStore((s) => s.setChatDraft);
+  useEffect(() => {
+    if (!chatDraft) return;
+    setInput(chatDraft);
+    setChatDraft(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [chatDraft, setChatDraft]);
 
   const turns = current ? threads[current.siteKey] ?? [] : [];
   // A site with only a recording open has no saved workflows to ask about yet.
@@ -102,6 +114,7 @@ export function SiteChatPanel({ sites, current, onChoose }: {
       <div className="px-3 pt-2 pb-2.5 border-t border-brain-border flex-shrink-0">
         <div className="rounded-xl border border-brain-border bg-brain-bg focus-within:border-brain-accent transition-colors">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}

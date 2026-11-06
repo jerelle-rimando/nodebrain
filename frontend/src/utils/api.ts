@@ -107,7 +107,7 @@ export const api = {
   releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
   runScreenshotUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/screenshot`,
   raiseRunBrowser: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/raise`, { method: 'POST' }),
-  // The Workflows tab's chat panel: questions about one site's workflows
+  // The Dashboard's site chat: questions about one site's workflows
   askAboutSite: (siteId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, provider: string, model: string) =>
     request<{ reply: string }>(`/sites/${siteId}/chat`, {
       method: 'POST',

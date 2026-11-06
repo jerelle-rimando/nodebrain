@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { Terminal, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TaskLog } from '@shared/types';
 
-export type RunStatus = 'failed' | 'success' | 'approval' | 'running';
+type RunStatus = 'failed' | 'success' | 'approval' | 'running';
 
 const LEVEL_COLORS: Record<string, string> = {
   info: '#94a3b8',
@@ -31,7 +31,7 @@ function formatLogTime(timestamp: string): string {
   });
 }
 
-export function deriveStatus(groupLogs: TaskLog[]): RunStatus {
+function deriveStatus(groupLogs: TaskLog[]): RunStatus {
   const hasFailed = groupLogs.some(
     (l) => l.level === 'error' || l.message.includes('Task failed'),
   );
@@ -120,19 +120,12 @@ const OUTCOME_LABEL: Record<RunStatus, string> = {
   running:  'In progress',
 };
 
-export function LogsPanel() {
+// `agentId` opens the panel already filtered to that agent.
+export function LogsPanel({ agentId }: { agentId?: string }) {
   const { logs, agents, tasks, updateTask } = useStore();
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [agentFilter, setAgentFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState(agentId ?? '');
   const [levelFilter, setLevelFilter] = useState('');
-
-  useEffect(() => {
-    const id = useStore.getState().logsFilterAgentId;
-    if (id) {
-      setAgentFilter(id);
-      useStore.getState().setLogsFilterAgentId(null);
-    }
-  }, []);
 
   // Build a map of taskId → all logs (unfiltered, sorted asc) for status derivation
   const allLogsByTask = new Map<string, TaskLog[]>();

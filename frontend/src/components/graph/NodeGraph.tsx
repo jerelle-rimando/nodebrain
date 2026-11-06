@@ -12,6 +12,8 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { AgentNode } from './AgentNode';
+import { AgentStudioChat } from './AgentStudioChat';
+import { LogsPanel } from '../shared/LogsPanel';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
 import { formatCronSchedule } from '../../utils/formatSchedule';
@@ -32,6 +34,7 @@ import {
   ScrollText,
   Database,
   Download,
+  MessageSquare,
 } from 'lucide-react';
 
 const nodeTypes = { agentNode: AgentNode };
@@ -54,12 +57,14 @@ interface AgentPanelProps {
   agent: Agent;
   onClose: () => void;
   onDelete: (id: string) => void;
+  onChat: (id: string) => void;
+  onViewLogs: (id: string) => void;
 }
 
 type MemoryItem = { id: string; text: string; source: string; timestamp: string };
 
-function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
-  const { setActiveTab, setLogsFilterAgentId, updateAgent: storeUpdateAgent, availableModels } = useStore();
+function AgentPanel({ agent, onClose, onDelete, onChat, onViewLogs }: AgentPanelProps) {
+  const { updateAgent: storeUpdateAgent, availableModels } = useStore();
   const [tab, setTab] = useState<'config' | 'tasks' | 'memory'>('config');
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -157,8 +162,17 @@ function AgentPanel({ agent, onClose, onDelete }: AgentPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => { setLogsFilterAgentId(agent.id); setActiveTab('dashboard'); onClose(); }}
+            onClick={() => onChat(agent.id)}
+            title="Chat with this agent"
+            aria-label="Chat with this agent"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-accent hover:bg-brain-accent/10 transition-colors"
+          >
+            <MessageSquare size={13} />
+          </button>
+          <button
+            onClick={() => { onViewLogs(agent.id); onClose(); }}
             title="View logs"
+            aria-label="View logs"
             className="w-7 h-7 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-accent hover:bg-brain-accent/10 transition-colors"
           >
             <ScrollText size={13} />
@@ -568,6 +582,17 @@ export function NodeGraph() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  // Whose thread the Agent Studio chat shows: null is Agent Studio itself.
+  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  // The logs overlay: closed (null), or open on every agent ('') or one.
+  const [logsFor, setLogsFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (logsFor === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLogsFor(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [logsFor]);
 
   const onConnect = useCallback(
     async (params: Connection) => {
@@ -681,7 +706,12 @@ export function NodeGraph() {
   );
 
   return (
-    <div className="h-full relative">
+    <div className="h-full flex">
+      <div className="w-[400px] flex-shrink-0 border-r border-brain-border">
+        <AgentStudioChat agentId={chatAgentId} onAgentChange={setChatAgentId} />
+      </div>
+
+    <div className="flex-1 min-w-0 h-full relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -707,12 +737,20 @@ export function NodeGraph() {
         />
       </ReactFlow>
 
+      <button
+        type="button"
+        onClick={() => setLogsFor('')}
+        className="absolute top-3 left-3 z-[5] flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-brain-border bg-brain-surface text-brain-text-dim hover:text-brain-text hover:border-brain-muted transition-colors"
+      >
+        <ScrollText size={12} /> Logs
+      </button>
+
       {agents.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center">
             <p className="text-brain-text-dim text-sm">No agents yet</p>
             <p className="text-brain-text-dim text-xs mt-1">
-              Create agents from the Dashboard to see them here
+              Describe one in Agent Studio, on the left, to create it
             </p>
           </div>
         </div>
@@ -723,8 +761,38 @@ export function NodeGraph() {
           agent={selectedAgent}
           onClose={() => setSelectedAgent(null)}
           onDelete={handleDeleteAgent}
+          onChat={setChatAgentId}
+          onViewLogs={setLogsFor}
         />
       )}
+
+      {/* Agent logs: every agent run, grouped, slid in over the graph.
+          Closes on the dimmed area, Escape, or its own close button. */}
+      {logsFor !== null && (
+        <div className="absolute inset-0 z-30">
+          <div className="absolute inset-0 bg-brain-bg/70" onClick={() => setLogsFor(null)} />
+          <div
+            role="dialog"
+            aria-label="Agent logs"
+            className="absolute inset-y-0 right-0 w-[min(560px,85%)] flex flex-col bg-brain-surface border-l border-brain-border shadow-2xl"
+          >
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-brain-border flex-shrink-0">
+              <span className="text-[10px] text-brain-text-muted uppercase tracking-wider">Esc to close</span>
+              <button
+                onClick={() => setLogsFor(null)}
+                aria-label="Close logs"
+                className="w-6 h-6 flex items-center justify-center rounded-lg text-brain-text-dim hover:text-brain-text hover:bg-brain-border transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <LogsPanel agentId={logsFor || undefined} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
     </div>
   );
 }

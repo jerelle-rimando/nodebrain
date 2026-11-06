@@ -20,7 +20,7 @@ export interface TakeControlRequest {
   agentId?: string;
 }
 
-type ActiveTab = 'dashboard' | 'graph' | 'workflows' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
+type ActiveTab = 'dashboard' | 'graph' | 'templates' | 'vault' | 'integrations' | 'analytics' | 'settings';
 
 interface AppState {
   agents: Agent[];
@@ -34,8 +34,6 @@ interface AppState {
   chatPhase: { requestId: string; phase: string } | null;
 
   activeTab: ActiveTab;
-  selectedAgentId: string | null;
-  logsFilterAgentId: string | null;
   pendingApprovals: ToolApprovalRequest[];
   pendingTakeControls: TakeControlRequest[];
   // Whether the Electron-proxied backend is currently reachable. Driven by
@@ -44,7 +42,7 @@ interface AppState {
   // A finished recording waiting on the review screen. Nothing is saved
   // until the person presses Save workflow there.
   recordingReview: RecordingStatus | null;
-  // Text handed to the chat composer from elsewhere in the app (a stopped
+  // Text handed to the site chat's composer from elsewhere in the app (a stopped
   // workflow's "Ask the agent"). The composer takes it once and clears it;
   // the person reads it and sends it themselves.
   chatDraft: string | null;
@@ -72,8 +70,6 @@ interface AppState {
   setChatPhase: (phase: { requestId: string; phase: string } | null) => void;
 
   setActiveTab: (tab: ActiveTab) => void;
-  setSelectedAgent: (id: string | null) => void;
-  setLogsFilterAgentId: (id: string | null) => void;
   addPendingApproval: (req: ToolApprovalRequest) => void;
   removePendingApproval: (approvalId: string) => void;
   addPendingTakeControl: (req: TakeControlRequest) => void;
@@ -92,8 +88,6 @@ export const useStore = create<AppState>((set) => ({
   availableModels: {},
   chatPhase: null,
   activeTab: 'dashboard',
-  selectedAgentId: null,
-  logsFilterAgentId: null,
   pendingApprovals: [],
   pendingTakeControls: [],
   backendConnected: true,
@@ -123,8 +117,6 @@ export const useStore = create<AppState>((set) => ({
   setChatPhase: (chatPhase) => set({ chatPhase }),
 
   setActiveTab: (activeTab) => set({ activeTab }),
-  setSelectedAgent: (selectedAgentId) => set({ selectedAgentId }),
-  setLogsFilterAgentId: (logsFilterAgentId) => set({ logsFilterAgentId }),
   addPendingApproval: (req) => set((s) => ({ pendingApprovals: [...s.pendingApprovals, req] })),
   removePendingApproval: (approvalId) => set((s) => ({ pendingApprovals: s.pendingApprovals.filter((r) => r.approvalId !== approvalId) })),
   setBackendConnected: (backendConnected) => set({ backendConnected }),

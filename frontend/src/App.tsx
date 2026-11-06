@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, GitFork, Workflow, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud, Settings } from 'lucide-react';
+import { MessageSquare, GitFork, LayoutTemplate, Shield, Plug, BarChart3, User, Cloud, Settings } from 'lucide-react';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { NodeGraph } from './components/graph/NodeGraph';
 import { CredentialVault } from './components/vault/CredentialVault';
@@ -11,7 +11,6 @@ import { AnalyticsPage } from './components/analytics/AnalyticsPage';
 import { ServersPage } from './components/servers/ServersPage';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { TemplatesPage } from './components/templates/TemplatesPage';
-import { WorkflowsPage } from './components/workflows/WorkflowsPage';
 import { ToastContainer } from './components/shared/Toast';
 import { ApprovalModal } from './components/shared/ApprovalModal';
 import { RecordingReview } from './components/recorder/RecordingReview';
@@ -22,7 +21,8 @@ import { ConnectionBanner } from './components/shared/ConnectionBanner';
 import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 
 // Nav order follows the arc of a user's journey through the app:
-//   work surfaces first  — Dashboard, NodeGraph (where you actually do things)
+//   work surfaces first  — Dashboard (workflows + site chat, the home screen),
+//                           NodeGraph (LLM agents and Agent Studio)
 //   discovery/setup next  — Templates (one-click starting points) and
 //                           Integrations (capabilities) a new user needs early
 //   set-once config       — Vault (configure credentials once, rarely revisit)
@@ -33,7 +33,6 @@ import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
 const NAV_ITEMS = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: MessageSquare },
   { id: 'graph' as const, label: 'NodeGraph', icon: GitFork },
-  { id: 'workflows' as const, label: 'Workflows', icon: Workflow },
   { id: 'templates' as const, label: 'Templates', icon: LayoutTemplate },
   { id: 'integrations' as const, label: 'Integrations', icon: Plug },
   { id: 'vault' as const, label: 'Vault', icon: Shield },
@@ -166,13 +165,12 @@ export default function App() {
           </div>
         </header>
 
-        {/* Content — the dashboard hosts its own collapsible Execution Logs panel */}
+        {/* Content */}
         <div className="flex flex-1 overflow-hidden">
           <main className="flex-1 overflow-hidden">
             {showServers && <ServersPage />}
             {!showServers && activeTab === 'dashboard' && <Dashboard />}
             {!showServers && activeTab === 'graph' && <NodeGraph />}
-            {!showServers && activeTab === 'workflows' && <WorkflowsPage />}
             {!showServers && activeTab === 'templates' && <TemplatesPage />}
             {!showServers && activeTab === 'vault' && <CredentialVault />}
             {!showServers && activeTab === 'integrations' && <IntegrationsPage />}

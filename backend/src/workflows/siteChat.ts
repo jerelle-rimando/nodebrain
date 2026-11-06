@@ -6,7 +6,7 @@ import {
 import { buildRunForm } from './runPlan';
 import { buildOverview } from './workflowList';
 
-// The chat panel on the Workflows tab talks to one site. It gets what
+// The site chat on the Dashboard talks to one site. It gets what
 // NodeBrain knows about that site's recorded workflows, in the same plain
 // words the screens use: names, what each asks for, the steps, where each
 // stands now, and how recent runs went. It can explain; it can't act (run,

@@ -40,7 +40,7 @@ workflowsRouter.put('/workflows/:id/icon', (req: Request, res: Response) => {
 });
 
 // POST /api/sites/:id/chat { messages: [{ role, content }], provider?, model? } → { reply }
-// The Workflows tab's chat panel: questions about this site's workflows.
+// The Dashboard's site chat: questions about this site's workflows.
 const chatSchema = z.object({
   messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(8_000) })).min(1).max(60),
   provider: z.string().max(40).optional(),

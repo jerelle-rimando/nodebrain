@@ -226,9 +226,9 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
     }
   }
 
-  // The chat panel this should open doesn't exist yet. Until it does, the
-  // question goes into the Dashboard chat's composer, for the person to
-  // read and send. The chat can't see the browser or this run.
+  // The question goes into the site chat's composer beside this view, for
+  // the person to read and send. That chat knows the site's workflows and
+  // recent runs, but can't see the browser.
   function askAgent() {
     setChatDraft(repair.askText);
     setActiveTab('dashboard');

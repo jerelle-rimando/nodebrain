@@ -96,11 +96,11 @@ http://localhost:5173
 
 1. Click the **Vault** tab (shield icon) and add your API key for your preferred provider
 2. Click the **Integrations** tab (plug icon) to connect external services like Telegram, GitHub, Slack, Notion, and more
-3. Go to the **Dashboard** tab and type something like "Create an agent that summarizes news every morning"
-4. Click your agent in the Active Agents list to chat with it directly
-5. Switch to the **NodeGraph** tab to see your agent as a node, view task history, and run tasks visually
+3. On the **Dashboard**, press **Record** and do a task once in your browser. NodeBrain saves it as a workflow you can run again with new details, and you can ask about it in the chat on the right
+4. To build an AI agent instead, go to the **NodeGraph** tab, switch Agent Studio (on the left) to Agent mode, and type something like "Create an agent that summarizes news every morning"
+5. Click your agent on the graph to see its settings and task history, run a task, or press the chat button to talk to it directly
 
-> 💡 **Note on running actions:** NodeBrain currently performs tool actions (sending messages, reading files, etc.) through **agents**. Create an agent for the task, or open an existing agent and give it the task directly. Typing a one-off command into the general Dashboard chat will hold a conversation but does not yet execute tools on its own — this is a known limitation being addressed in an upcoming release.
+> 💡 **Note on running actions:** NodeBrain currently performs tool actions (sending messages, reading files, etc.) through **agents**. Create an agent for the task, or open an existing agent and give it the task directly. Typing a one-off command into Agent Studio in Chat mode will hold a conversation but does not yet execute tools on its own — this is a known limitation being addressed in an upcoming release.
 
 ### Supported AI Providers
 
@@ -142,10 +142,10 @@ NodeBrain is provided **as-is** with no warranty of any kind, express or implied
 NodeBrain is built around several primary systems:
 
 ### Dashboard ⚙️
-Create and control agents through chat. Click any agent in the Active Agents list to open a dedicated chat with that agent directly — no need to reference it by name. Execution logs group into per-run summary cards showing what each run did and whether it succeeded.
+The home screen. On the left, the workflows you have recorded on one website: run them, follow a run, or fix one that stopped. On the right, a chat that knows that site's workflows; its header picks which site you are looking at.
 
 ### NodeGraph 🌐
-Visualize agents and their execution status in a live graph interface. Click any node to open a detail panel showing agent configuration, task history, and a direct run interface. Node border colors reflect live status — purple for running, red for error. Scheduled agents display their next run time directly on the node.
+Visualize agents and their execution status in a live graph interface. Agent Studio, on the left, creates agents from a description and holds a chat with each one. The Logs button groups every agent run into a summary card showing what it did and whether it succeeded. Click any node to open a detail panel showing agent configuration, task history, and a direct run interface. Node border colors reflect live status — purple for running, red for error. Scheduled agents display their next run time directly on the node.
 
 ### Credential Vault 🔒
 Securely store and manage encrypted API keys for AI providers and integrations. Launch at startup, usage telemetry, and reset all data are in the Settings tab.
