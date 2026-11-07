@@ -129,6 +129,8 @@ export async function launchBrowser(profileDir: string, startUrl: string): Promi
     '--remote-debugging-address=127.0.0.1',
     '--no-first-run',
     '--no-default-browser-check',
+    // Maximized, not fullscreen: the title bar, tabs and window buttons stay.
+    '--start-maximized',
     'about:blank',
   ], { stdio: 'ignore', detached: false });
 

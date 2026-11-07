@@ -1,8 +1,15 @@
 import { useEffect } from 'react';
 import { useStore } from '../stores/appStore';
 import type { ToolApprovalRequest, TakeControlRequest } from '../stores/appStore';
-import type { TaskLog, Task, Agent, RecordingStatus } from '@shared/types';
+import type { TaskLog, Task, Agent, RecordingStatus, WorkflowRun } from '@shared/types';
 import { api } from '../utils/api';
+
+// When the site's browser window closes (Done, discard, a run ending), the
+// person should land back on NodeBrain rather than whatever window was behind
+// the browser. Desktop app only; a no-op in a plain browser tab.
+function bringAppForward(): void {
+  (window as any).electronAPI?.bringToFront?.().catch(() => {});
+}
 
 // A brief drop shouldn't flash the "reconnecting" banner — only surface it
 // once the stream has actually been down for a couple of seconds.
@@ -87,6 +94,7 @@ export function useLiveSync() {
       es.addEventListener('recording:finished', (e) => {
         const status: RecordingStatus = JSON.parse((e as MessageEvent).data);
         if (status.state === 'review') useStore.getState().setRecordingReview(status);
+        bringAppForward();
       });
 
       es.addEventListener('recording:browser_closed', (e) => {
@@ -103,7 +111,18 @@ export function useLiveSync() {
         if (useStore.getState().recordingReview?.id === id) useStore.getState().setRecordingReview(null);
       };
       es.addEventListener('recording:saved', clearReview);
-      es.addEventListener('recording:discarded', clearReview);
+      es.addEventListener('recording:discarded', (e) => {
+        clearReview(e);
+        bringAppForward();
+      });
+
+      // A run closes its browser window when it ends. Scheduled runs happen
+      // while the person may be busy in another app, so they don't pull
+      // NodeBrain forward.
+      es.addEventListener('run:finished', (e) => {
+        const run = JSON.parse((e as MessageEvent).data) as WorkflowRun | undefined;
+        if (run && run.trigger !== 'schedule') bringAppForward();
+      });
 
       es.onerror = () => {
         es.close();

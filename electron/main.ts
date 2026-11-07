@@ -1497,6 +1497,21 @@ function registerIpcHandlers(): void {
     else mainWindow?.maximize();
   });
   ipcMain.handle('window-close', () => { mainWindow?.hide(); });
+  // The recorder, a run and a discard all close the site's browser window.
+  // Windows then activates whatever was behind it, which is often not
+  // NodeBrain. Going topmost for a moment puts NodeBrain above the other
+  // windows; dropping it straight away leaves it an ordinary window.
+  // Measured on Windows 11 (2026-11): this raises the window, but Windows
+  // doesn't let a background app take keyboard focus, so the window that
+  // Windows activated keeps it until the person clicks in NodeBrain.
+  ipcMain.handle('window-bring-to-front', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(false);
+  });
 
   ipcMain.handle('is_onboarding_complete', () => store.get('onboardingComplete') ?? false);
 

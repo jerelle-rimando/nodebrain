@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMinimize: () => ipcRenderer.invoke('window-minimize'),
   windowMaximize: () => ipcRenderer.invoke('window-maximize'),
   windowClose: () => ipcRenderer.invoke('window-close'),
+  bringToFront: () => ipcRenderer.invoke('window-bring-to-front'),
   isOnboardingComplete: () => ipcRenderer.invoke('is_onboarding_complete'),
   completeOnboarding: () => ipcRenderer.invoke('complete_onboarding'),
   getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
