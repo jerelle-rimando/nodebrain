@@ -116,7 +116,9 @@ export function Dashboard() {
           onOpenForm={(workflowId) => setScreen({ name: 'form', workflowId })}
           onRun={async (workflowId) => {
             const result = await runNow(workflowId);
-            if (result.runId) setScreen({ name: 'run', workflowId, runId: result.runId });
+            // A run that starts straight away goes on in the background: the
+            // chat stays, the row shows it running, and the row opens it.
+            if (result.runId) await load();
             else setScreen({ name: 'form', workflowId, error: result.error });
           }}
           onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
@@ -127,8 +129,9 @@ export function Dashboard() {
 }
 
 // Run on a row runs: when every required box would be filled from the last
-// run, it starts straight away with those values. Otherwise (never run, or a
-// secret box, which is never filled for you) the form opens to ask.
+// run, it starts straight away with those values, and a workflow with no
+// boxes always does. Otherwise (never run, or a secret box, which is never
+// filled for you) the form opens to ask.
 async function runNow(workflowId: string): Promise<{ runId?: string; error?: string }> {
   let form;
   try {
@@ -136,7 +139,7 @@ async function runNow(workflowId: string): Promise<{ runId?: string; error?: str
   } catch {
     return {};
   }
-  if (!form.lastRun) return {};
+  if (!form.lastRun && form.fields.length > 0) return {};
   const values: Record<string, string> = {};
   for (const f of form.fields) {
     const v = f.secret ? '' : (f.previousValue ?? '');
@@ -197,7 +200,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
         <ul className="space-y-2">
           {recording && <RecordingRow status={recording} />}
           {rows.map((w) => (
-            <Row key={w.id} row={w} onOpen={() => onOpenForm(w.id)} onAction={() => {
+            <Row key={w.id} row={w} onOpen={() => (w.state !== 'idle' && w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
               if (w.state === 'idle' || !w.runId) return onRun(w.id);
               onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
             }} onIconChanged={onReload} />
@@ -259,8 +262,8 @@ const TONE: Record<WorkflowRow['state'], string> = {
   paused: 'text-brain-warning', running: 'text-brain-accent', stopped: 'text-brain-warning', idle: 'text-brain-text-dim',
 };
 
-// The row itself opens the run form (to change the details first); its
-// button does the verb.
+// The row itself opens its run while one is going (or waiting on you), else
+// the run form (to change the details first); its button does the verb.
 function Row({ row, onOpen, onAction, onIconChanged }: {
   row: WorkflowRow; onOpen: () => void; onAction: () => void | Promise<void>; onIconChanged: () => void;
 }) {

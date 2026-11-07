@@ -128,8 +128,8 @@ export function SiteChatPanel({ sites, current, onChoose }: {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-            placeholder="Ask anything about this project"
-            aria-label="Ask anything about this project"
+            placeholder="Ask anything about this site"
+            aria-label="Ask anything about this site"
             disabled={!canAsk}
             rows={2}
             className="w-full bg-transparent px-3 pt-2.5 text-sm text-brain-text placeholder-brain-text-muted resize-none focus:outline-none disabled:cursor-not-allowed"
