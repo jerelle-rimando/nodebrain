@@ -73,7 +73,21 @@ export const ELEMENT_FACTS_SOURCE = `  const clean = (s, max = 120) => (s || '')
               isButtonLike ? clean(el.value) : undefined, textOf(el)].filter(Boolean),
     };
     if (tag === 'select') fp.optionLabels = Array.from(el.selectedOptions || []).map((o) => clean(o.label || o.text));
+    if (!isButtonLike) fp.fieldIndex = fieldIndexOf(el);
     return fp;
+  }
+
+  // Where a field sits among the page's visible fill-in fields, from 1. Pages
+  // often label fields uselessly ("Input: Text"); the position still tells
+  // two of them apart.
+  function fieldIndexOf(el) {
+    try {
+      if (!el.matches('input,textarea,select')) return undefined;
+      const fields = Array.from(document.querySelectorAll('input,textarea,select')).filter((f) =>
+        f === el || (!/^(hidden|submit|button|reset|image)$/i.test(f.type || '') && f.getClientRects().length > 0));
+      const i = fields.indexOf(el);
+      return i >= 0 ? i + 1 : undefined;
+    } catch { return undefined; }
   }
 
 `;

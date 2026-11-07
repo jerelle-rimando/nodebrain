@@ -210,6 +210,7 @@ export interface WorkflowStepFingerprint {
   landmark?: string; // nearest enclosing landmark or dialog, e.g. 'form "Login"'
   container?: string; // name of the list or group an option sits in, e.g. 'State'
   autocomplete?: string;
+  fieldIndex?: number; // position among the page's visible fill-in fields, from 1
 }
 
 export type WorkflowSignal =

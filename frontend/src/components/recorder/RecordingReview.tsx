@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight, KeyRound, Lock } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react';
 import type { RecordedValue, RecordedValueMode, RecordingStatus } from '@shared/types';
 import { useStore } from '../../stores/appStore';
 import { api } from '../../utils/api';
@@ -51,7 +51,7 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
       });
       const asks = saved.result?.fieldCount ?? 0;
       toast.success(asks
-        ? `Saved "${trimmedName}". Each time it runs, it will ask you for ${plural(asks, 'value', 'values')}.`
+        ? `Saved "${trimmedName}". Each time it runs, it will ask you for ${plural(asks, 'thing', 'things')}.`
         : `Saved "${trimmedName}".`);
       setRecordingReview(null);
     } catch (err) {
@@ -92,15 +92,13 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
         className="relative w-full max-w-xl mx-4 max-h-[90vh] flex flex-col bg-brain-surface border border-brain-border rounded-xl shadow-2xl animate-slide-up"
       >
         {/* Header */}
-        <div className="flex items-start gap-3 px-5 py-4 border-b border-brain-border">
-          <div className="w-8 h-8 rounded-lg bg-brain-success/10 border border-brain-success/30 flex items-center justify-center flex-shrink-0">
-            <CheckCircle2 size={15} className="text-brain-success" />
-          </div>
+        <div className="flex items-start gap-2.5 px-5 py-4 border-b border-brain-border">
+          <CheckCircle2 size={18} className="text-brain-success flex-shrink-0 mt-px" />
           <div className="min-w-0">
-            <p id="recording-review-title" className="text-sm font-semibold text-brain-text">
+            <p id="recording-review-title" className="text-[15px] leading-snug font-medium text-brain-text">
               Got it — {plural(draft.stepCount, 'step', 'steps')} on {draft.siteKey}
             </p>
-            <p className="text-xs text-brain-text-dim mt-0.5">Check what should change each time you run this.</p>
+            <p className="text-[13px] text-brain-text-dim mt-0.5">Tick anything you'll type differently next time</p>
           </div>
         </div>
 
@@ -134,20 +132,12 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
                     <ValueRow key={v.stepKey} value={v} choice={choices[v.stepKey]} onChange={(p) => setChoice(v.stepKey, p)} />
                   ))}
                 </ul>
-                <p className="text-xs text-brain-text-muted mt-2 leading-relaxed">
-                  <span className="text-brain-text-dim">Changes</span> means you'll give a new value each time it runs.{' '}
-                  <span className="text-brain-text-dim">Secret</span> keeps it locked away like a password.
+                <p className="text-xs text-brain-text-muted mt-2">
+                  Hidden entries are encrypted and never shown again. Good for confidential details.
                 </p>
               </>
             )}
           </div>
-
-          {draft.usesSavedLogin && (
-            <div className="flex items-start gap-2 text-xs text-brain-text-dim">
-              <KeyRound size={13} className="mt-0.5 flex-shrink-0" />
-              <span>Your sign-in for {draft.siteKey} will be saved in the Vault, so it isn't listed here.</span>
-            </div>
-          )}
 
           <div>
             <button
@@ -180,7 +170,7 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
         {/* Footer */}
         <div className="flex items-center gap-2 px-5 py-4 border-t border-brain-border">
           <p className="text-xs text-brain-text-muted mr-auto">
-            {changingCount > 0 ? `Will ask for ${plural(changingCount, 'value', 'values')} each run` : 'Runs the same way every time'}
+            {changingCount > 0 ? `Will ask for ${plural(changingCount, 'thing', 'things')} each run` : 'Runs the same way every time'}
           </p>
           <button
             type="button"
@@ -213,13 +203,17 @@ function ValueRow({ value, choice, onChange }: {
   // A clicked option the recorder pinned some other way (not by its name)
   // can't take a different value, or be locked away, yet.
   const locked = value.kind === 'option-click' && !value.canChange;
+  const shown = readable(value.value);
   return (
     <li className="flex items-center gap-3 rounded-lg border border-brain-border bg-brain-bg px-3 py-2.5">
       <div className="min-w-0 flex-1">
-        <p className="text-sm text-brain-text truncate flex items-center gap-1.5" title={value.value}>
-          {choice.secret && <Lock size={11} className="text-brain-text-dim flex-shrink-0" />}
-          {value.value ? value.value : <span className="italic text-brain-text-dim">Left empty</span>}
-        </p>
+        {!value.value ? (
+          <p className="text-sm italic text-brain-text-dim">Left empty</p>
+        ) : choice.secret ? (
+          <p className="text-sm text-brain-text-dim tracking-widest" aria-label="Hidden">••••••</p>
+        ) : (
+          <p className="text-sm text-brain-text truncate" title={shown}>{shown}</p>
+        )}
         <p className="text-xs text-brain-text-dim truncate" title={value.label}>{value.label}</p>
       </div>
 
@@ -247,19 +241,32 @@ function ValueRow({ value, choice, onChange }: {
         })}
       </div>
 
-      <label
-        className={`flex flex-shrink-0 items-center gap-1.5 text-xs text-brain-text-dim ${locked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-        title={locked ? "This one can't be kept secret." : 'Store it encrypted, like a password. Good for things like a tax ID.'}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={choice.secret}
+        aria-label={`Hide ${value.label}`}
+        disabled={locked}
+        onClick={() => onChange({ secret: !choice.secret })}
+        title={locked ? "This one can't be hidden." : undefined}
+        className="flex flex-shrink-0 items-center gap-1.5 text-xs text-brain-text-dim hover:text-brain-text disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
-        <input
-          type="checkbox"
-          checked={choice.secret}
-          disabled={locked}
-          onChange={(e) => onChange({ secret: e.target.checked })}
-          className="accent-brain-accent"
-        />
-        Secret
-      </label>
+        <span className={`relative inline-flex w-7 h-4 rounded-full transition-colors ${choice.secret ? 'bg-brain-accent' : 'bg-brain-border'}`}>
+          <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${choice.secret ? 'translate-x-3' : 'translate-x-0'}`} />
+        </span>
+        Hide
+      </button>
     </li>
   );
+}
+
+// "2026-11-06" → "6 November 2026"; "2026-11-06T14:30" → "6 November 2026, 14:30".
+// Anything else is shown as typed.
+function readable(raw: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(raw.trim());
+  if (!m || Number(m[1]) < 1000) return raw;
+  const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (date.getUTCMonth() !== Number(m[2]) - 1) return raw; // not a real day
+  const day = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return m[4] ? `${day}, ${m[4]}` : day;
 }

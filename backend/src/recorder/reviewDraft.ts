@@ -46,6 +46,32 @@ function fieldName(fp: WorkflowStepFingerprint): string | undefined {
   return fp.label || fp.name || fp.placeholder || undefined;
 }
 
+// Labels that only restate what kind of control it is ("Input: Text",
+// "Text field", "Number") say nothing about what goes in it.
+const CONTROL_WORDS = new Set([
+  'input', 'field', 'textbox', 'textfield', 'textarea', 'box', 'entry', 'control', 'enter', 'type', 'here', 'your', 'a', 'the',
+  'value', 'text', 'string', 'number', 'numeric', 'date', 'time', 'datetime', 'local', 'select', 'dropdown',
+]);
+
+export function isUselessLabel(label: string | undefined): boolean {
+  const words = label?.toLowerCase().split(/[^a-z]+/).filter(Boolean) ?? [];
+  return words.length > 0 && words.every((w) => CONTROL_WORDS.has(w));
+}
+
+function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
+
+// Where the field sits and what it takes: "2nd box · text".
+function positionLabel(fp: WorkflowStepFingerprint): string | undefined {
+  if (!fp.fieldIndex || fp.fieldIndex < 1) return undefined;
+  if (fp.tag === 'select') return `${ordinal(fp.fieldIndex)} dropdown`;
+  const kind = fp.tag === 'textarea' ? 'text' : (fp.inputType || 'text').replace('datetime-local', 'date and time');
+  return `${ordinal(fp.fieldIndex)} box · ${kind}`;
+}
+
 // The label shown under a value: the field's own label for typed text and
 // dropdowns. A clicked option's own name is the value, so its label comes
 // from the list or group it sits in, else the control clicked just before
@@ -55,7 +81,9 @@ export function labelFor(steps: DraftStep[], index: number): string {
   const step = steps[index];
   const fp = step.fingerprint;
   if (step.action !== 'click' && step.action !== 'check') {
-    return fieldName(fp) ?? (fp.role && UNNAMED[fp.role]) ?? 'A field';
+    const own = fieldName(fp);
+    if (own && !isUselessLabel(own)) return own;
+    return positionLabel(fp) ?? own ?? (fp.role && UNNAMED[fp.role]) ?? 'A field';
   }
   if (fp.container) return fp.container;
   for (let i = index - 1; i >= Math.max(0, index - 3); i--) {

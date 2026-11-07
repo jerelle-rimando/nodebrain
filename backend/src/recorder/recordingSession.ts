@@ -67,7 +67,7 @@ interface PageRecord {
   fp: {
     tag?: string; inputType?: string; autocomplete?: string; nameAttr?: string; testId?: string;
     label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[]; title?: string;
-    names?: string[]; optionLabels?: string[];
+    names?: string[]; optionLabels?: string[]; fieldIndex?: number;
   };
   page: Page;
   consumed: boolean;
@@ -112,6 +112,10 @@ type RecordingContext = BrowserContext & {
 const PASSWORD_NAME = /\b(password|passcode|passphrase|pwd|pin)\b/i;
 const USERNAME_HINT = /\b(user(name)?|e-?mail|login|account|user ?id|member ?id)\b/i;
 const SAVED_RESULT_TTL_MS = 60 * 60 * 1000;
+// Keys that change nothing on the page by themselves.
+const INERT_KEYS = new Set(['CapsLock', 'NumLock', 'ScrollLock', 'Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'OS', 'Fn']);
+// Keys that only move the caret inside a text field.
+const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
 
 const sessions = new Map<string, RecordingSession>();
 
@@ -443,8 +447,28 @@ class RecordingSession {
     if (!this.accepting()) return;
     if (action.selector?.includes(PILL_HOST_ID)) return; // a click on our own pill
     if (['openPage', 'closePage'].includes(action.name) || action.name.startsWith('assert')) return;
+    // Caps Lock and friends change nothing on the page. Recorded, they also
+    // split a field's typing in two: Playwright only merges back-to-back
+    // fills, so "J", CapsLock, "ames" came out as a "J" step and a "James" step.
+    if (action.name === 'press' && !action.modifiers && action.key && INERT_KEYS.has(action.key)) return;
 
     const last = this.steps[this.steps.length - 1];
+
+    // Typing that resumes in the same field after a click or caret move
+    // there arrives as a new fill. Only the field's final content counts, so
+    // it replaces the earlier fill and the moves in between are dropped.
+    if (action.name === 'fill') {
+      const resumed = this.resumedFill(page, action);
+      if (resumed) {
+        const dropped = this.steps.splice(resumed.index + 1).length;
+        await this.updateStep(resumed.step, page, action);
+        if (dropped) {
+          this.pushCount();
+          recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
+        }
+        return;
+      }
+    }
 
     // Typing arrives as one fill updated per keystroke. A mouse-down pick may
     // have been slotted in after the field being typed into; skip past it.
@@ -477,6 +501,23 @@ class RecordingSession {
     this.steps.splice(at, 0, step);
     this.pushCount();
     recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
+  }
+
+  // The earlier fill of this same field, when nothing but clicks on it or
+  // caret moves in it came after. Anything else in between (another field,
+  // a picked option, Enter, a page change) keeps the steps apart, since what
+  // happened there may have depended on the partial text.
+  private resumedFill(page: Page, action: RecorderAction): { step: CapturedStep; index: number } | undefined {
+    if (!action.selector) return undefined;
+    const alias = this.aliasOf(page);
+    for (let i = this.steps.length - 1; i >= 0; i--) {
+      const s = this.steps[i];
+      if (s.picked || s.pageAlias !== alias || s.locator !== action.selector || s.signals.length) return undefined;
+      if (s.action === 'fill') return { step: s, index: i };
+      const caretMove = s.action === 'press' && !s.args.modifiers && CARET_KEYS.has(String(s.args.key));
+      if (s.action !== 'click' && !caretMove) return undefined;
+    }
+    return undefined;
   }
 
   // An option chosen on mouse-down (see pageScript.ts). Playwright reported
@@ -987,6 +1028,7 @@ export function fingerprintFromFacts(facts: SnapshotFacts, fp?: PageRecord['fp']
     urlPath: fp?.urlPath,
     ordinal: facts.ordinal,
     framePath: fp?.framePath,
+    fieldIndex: typeof fp?.fieldIndex === 'number' ? fp.fieldIndex : undefined,
   };
   for (const k of Object.keys(out) as (keyof WorkflowStepFingerprint)[]) if (out[k] === undefined) delete out[k];
   return out;
