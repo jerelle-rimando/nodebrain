@@ -15,7 +15,7 @@ import { SiteChatPanel, type PickerSite } from '../workflows/SiteChatPanel';
 // view; on the right the list of that site's workflows, always.
 type Screen =
   | { name: 'list' }
-  | { name: 'form'; workflowId: string }
+  | { name: 'form'; workflowId: string; error?: string }
   | { name: 'run'; workflowId: string; runId: string };
 
 const SITE_KEY = 'nb_workflows_site';
@@ -62,7 +62,7 @@ export function Dashboard() {
   for (const rec of recordings) {
     if (!sites.some((s) => s.siteKey === rec.siteKey)) {
       sites.push({
-        id: `recording:${rec.id}`, siteKey: rec.siteKey, name: rec.siteName, icon: deriveAgentEmoji(rec.siteName),
+        id: `recording:${rec.id}`, siteKey: rec.siteKey, name: rec.siteName, icon: deriveAgentEmoji(rec.siteName), favicon: rec.siteIcon,
         startUrl: rec.startUrl, workflowCount: 0, attention: 'Recording now', recordingOnly: true,
       });
     }
@@ -79,6 +79,7 @@ export function Dashboard() {
       <RunFormScreen
         key={screen.workflowId}
         workflowId={screen.workflowId}
+        initialError={screen.error}
         onBack={() => setScreen({ name: 'list' })}
         onStarted={(runId) => setScreen({ name: 'run', workflowId: screen.workflowId, runId })}
       />
@@ -112,7 +113,12 @@ export function Dashboard() {
             choose(status.siteKey);
             setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
           }}
-          onRun={(workflowId) => setScreen({ name: 'form', workflowId })}
+          onOpenForm={(workflowId) => setScreen({ name: 'form', workflowId })}
+          onRun={async (workflowId) => {
+            const result = await runNow(workflowId);
+            if (result.runId) setScreen({ name: 'run', workflowId, runId: result.runId });
+            else setScreen({ name: 'form', workflowId, error: result.error });
+          }}
           onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
         />
       </div>
@@ -120,7 +126,31 @@ export function Dashboard() {
   );
 }
 
-function WorkflowList({ overview, recordings, sites, current, error, onChoose, onReload, onRecordingStarted, onRun, onOpenRun }: {
+// Run on a row runs: when every required box would be filled from the last
+// run, it starts straight away with those values. Otherwise (never run, or a
+// secret box, which is never filled for you) the form opens to ask.
+async function runNow(workflowId: string): Promise<{ runId?: string; error?: string }> {
+  let form;
+  try {
+    form = await api.getRunForm(workflowId);
+  } catch {
+    return {};
+  }
+  if (!form.lastRun) return {};
+  const values: Record<string, string> = {};
+  for (const f of form.fields) {
+    const v = f.secret ? '' : (f.previousValue ?? '');
+    if (f.required && !v.trim()) return {};
+    values[f.key] = v;
+  }
+  try {
+    return { runId: (await api.startWorkflowRun(workflowId, values)).id };
+  } catch (err) {
+    return { error: err instanceof Error && err.message !== 'backend unreachable' ? err.message : undefined };
+  }
+}
+
+function WorkflowList({ overview, recordings, sites, current, error, onChoose, onReload, onRecordingStarted, onRun, onOpenForm, onOpenRun }: {
   overview: WorkflowsOverview | null;
   recordings: RecordingStatus[];
   sites: PickerSite[];
@@ -129,7 +159,8 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   onChoose: (siteKey: string) => void;
   onReload: () => void;
   onRecordingStarted: (status: RecordingStatus) => void;
-  onRun: (workflowId: string) => void;
+  onRun: (workflowId: string) => Promise<void>;
+  onOpenForm: (workflowId: string) => void;
   onOpenRun: (workflowId: string, runId: string) => void;
 }) {
   const [dialog, setDialog] = useState<{ address: string } | null>(null);
@@ -166,9 +197,9 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
         <ul className="space-y-2">
           {recording && <RecordingRow status={recording} />}
           {rows.map((w) => (
-            <Row key={w.id} row={w} onAction={() => {
-              if (w.state === 'idle' || !w.runId) onRun(w.id);
-              else onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
+            <Row key={w.id} row={w} onOpen={() => onOpenForm(w.id)} onAction={() => {
+              if (w.state === 'idle' || !w.runId) return onRun(w.id);
+              onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
             }} onIconChanged={onReload} />
           ))}
         </ul>
@@ -228,8 +259,13 @@ const TONE: Record<WorkflowRow['state'], string> = {
   paused: 'text-brain-warning', running: 'text-brain-accent', stopped: 'text-brain-warning', idle: 'text-brain-text-dim',
 };
 
-function Row({ row, onAction, onIconChanged }: { row: WorkflowRow; onAction: () => void; onIconChanged: () => void }) {
+// The row itself opens the run form (to change the details first); its
+// button does the verb.
+function Row({ row, onOpen, onAction, onIconChanged }: {
+  row: WorkflowRow; onOpen: () => void; onAction: () => void | Promise<void>; onIconChanged: () => void;
+}) {
   const [picking, setPicking] = useState(false);
+  const [acting, setActing] = useState(false);
   const needsYou = row.state === 'paused' || row.state === 'stopped';
 
   async function setIcon(emoji: string | null) {
@@ -239,8 +275,9 @@ function Row({ row, onAction, onIconChanged }: { row: WorkflowRow; onAction: () 
   }
 
   return (
-    <li className={`flex items-center gap-3 rounded-lg border bg-brain-surface px-4 py-3 ${needsYou ? 'border-brain-warning/40' : 'border-brain-border'}`}>
-      <div className="relative flex-shrink-0">
+    <li onClick={onOpen}
+      className={`flex items-center gap-3 rounded-lg border bg-brain-surface px-4 py-3 cursor-pointer hover:border-brain-border-bright transition-colors ${needsYou ? 'border-brain-warning/40' : 'border-brain-border'}`}>
+      <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         <button type="button" onClick={() => setPicking((v) => !v)} title="Change icon" aria-label={`Change the icon for ${row.name}`}
           className="w-8 h-8 rounded-lg bg-brain-bg border border-brain-border hover:border-brain-border-bright flex items-center justify-center text-base transition-colors">
           {row.icon}
@@ -257,14 +294,20 @@ function Row({ row, onAction, onIconChanged }: { row: WorkflowRow; onAction: () 
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1">
+      <div role="button" tabIndex={0} aria-label={`Open ${row.name}`} className="min-w-0 flex-1 focus:outline-none"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}>
         <p className="flex items-center gap-1.5 text-sm text-brain-text">
           <span className="truncate">{row.name}</span>
           {row.state === 'running' && <Loader2 size={13} className="animate-spin text-brain-accent flex-shrink-0" aria-label="Running" />}
         </p>
         <p className={`text-xs truncate ${TONE[row.state]}`}>{row.stateText}</p>
       </div>
-      <ActionButton label={VERB[row.state]} strong={needsYou} onClick={onAction} />
+      <span onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
+        <ActionButton label={acting ? 'Starting…' : VERB[row.state]} strong={needsYou} disabled={acting} onClick={async () => {
+          setActing(true);
+          try { await onAction(); } finally { setActing(false); }
+        }} />
+      </span>
     </li>
   );
 }

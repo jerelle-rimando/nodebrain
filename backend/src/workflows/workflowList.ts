@@ -9,6 +9,7 @@ import {
 import { isRunActive, getRepairHold, describeStepTarget, isMissError } from '../replay/replayEngine';
 import { repairStatus } from '../replay/repair';
 import { listTakeControlRequests } from '../browser/takeControl';
+import { siteIconUrl } from '../recorder/siteLook';
 
 // The Workflows list and its site picker, in plain words. Everything here is
 // read from what's stored and what's running; no model is involved, and the
@@ -51,6 +52,7 @@ export function buildOverview(now = new Date()): WorkflowsOverview {
       siteKey: s.siteKey,
       name: s.name,
       icon: s.emoji ?? deriveAgentEmoji(s.name),
+      favicon: siteIconUrl(s.siteKey),
       startUrl: s.startUrl,
       workflowCount: mine.length,
       attention: waiting ? waiting.stateText

@@ -9,13 +9,14 @@ import {
 } from '../../shared-types';
 import { getDataDir } from '../db/database';
 import {
-  getWorkflowById, getSiteAgentById, getFieldsByWorkflow, getStepsByVersion, getStepLiteralValue,
+  getWorkflowById, getSiteAgentById, updateSiteAgent, getFieldsByWorkflow, getStepsByVersion, getStepLiteralValue,
   getFieldRecordedValue, createRun, updateRunStatus, addRunStep, getRunById, getRunSteps,
 } from '../db/workflowRepository';
 import { getCredentialValue } from '../vault/credentialVault';
-import { launchBrowser, closeBrowser, BrowserNotFoundError, type LaunchedBrowser } from '../recorder/browserLauncher';
+import { launchBrowser, closeBrowser, minimizeWindow, BrowserNotFoundError, type LaunchedBrowser } from '../recorder/browserLauncher';
 import { listRecordings } from '../recorder/recordingSession';
 import { siteKeyToFolderName } from '../recorder/siteIdentity';
+import { captureSiteLook, isDefaultSiteName, siteIconFile } from '../recorder/siteLook';
 import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../browser/siteBrowserLock';
 import { requestTakeControl } from '../browser/takeControl';
 import { findElement } from './elementFinder';
@@ -47,6 +48,10 @@ interface ActiveRun {
   controller: AbortController;
   launched?: LaunchedBrowser;
   closing?: Promise<void>;
+  // The window opens minimized. Once it has come forward (a pause for the
+  // person, "Show the browser", a repair), the run's end brings NodeBrain
+  // back in front of where it was.
+  shown?: boolean;
 }
 
 const active = new Map<string, ActiveRun>();
@@ -157,6 +162,11 @@ export function cancelRun(runId: string): boolean {
 export function getRunDetail(runId: string): { run: WorkflowRun; steps: WorkflowRunStep[] } | null {
   const run = getRunById(runId);
   return run ? { run, steps: getRunSteps(runId) } : null;
+}
+
+export function markRunBrowserShown(runId: string): void {
+  const entry = active.get(runId);
+  if (entry) entry.shown = true;
 }
 
 export function isRunActive(runId: string): boolean {
@@ -271,7 +281,8 @@ class Replay {
     // Secrets are dropped as soon as the run ends.
     this.inputs = {};
     this.login = undefined;
-    replayEvents.emit('run:finished', getRunById(this.run.id));
+    const finished = getRunById(this.run.id);
+    replayEvents.emit('run:finished', finished && { ...finished, browserShown: !!this.entry.shown });
   }
 
   private record(step: WorkflowStep, status: WorkflowRunStep['status'], started: number,
@@ -302,7 +313,7 @@ class Replay {
     const profileDir = this.site.profileDir
       ?? path.join(getDataDir(), 'browser-profiles', siteKeyToFolderName(this.site.siteKey));
     try {
-      this.entry.launched = await launchBrowser(profileDir, this.site.startUrl);
+      this.entry.launched = await launchBrowser(profileDir, this.site.startUrl, { background: true });
     } catch (err) {
       this.finish('failed', {
         error: err instanceof BrowserNotFoundError
@@ -324,8 +335,12 @@ class Replay {
       if ([...this.pages.values()].includes(p)) return;
       this.pages.set(`popup${this.pages.size}`, p);
       this.watchDialogs(p);
+      // A popup opens as its own window, in front; it joins the run's window
+      // in the taskbar unless the person has that one up.
+      if (!this.entry.shown) void minimizeWindow(browser, context, p);
     });
-    await first.bringToFront().catch(() => {});
+    // No bringToFront: the run goes on in the minimized window.
+    this.watchSiteLook(first);
 
     let blocks = signInBlocks(this.steps);
     for (let i = 0; i < this.steps.length; i++) {
@@ -617,10 +632,31 @@ class Replay {
     }
   }
 
+  // Sites recorded before NodeBrain read favicons and names get them on
+  // their next run: on the first few loads of a site page, while missing.
+  private watchSiteLook(page: Page): void {
+    let wantIcon = !siteIconFile(this.site.siteKey);
+    let wantName = isDefaultSiteName(this.site.siteKey, this.site.name);
+    let tries = 0;
+    const onLoad = (): void => {
+      if ((!wantIcon && !wantName) || tries >= 4) { page.off('load', onLoad); return; }
+      tries++;
+      void captureSiteLook(page, this.site.siteKey, { icon: wantIcon, name: wantName }).then((look) => {
+        if (look.iconSaved) wantIcon = false;
+        if (!look.name) return;
+        wantName = false;
+        const current = getSiteAgentById(this.site.id);
+        if (current && isDefaultSiteName(current.siteKey, current.name)) updateSiteAgent(current.id, { name: look.name });
+      }).catch(() => {});
+    };
+    page.on('load', onLoad);
+  }
+
   // Take Control: the window is the person's until they press Done or Stop.
   // A run nobody is watching can't wait for a person, so it stops instead.
   private async pause(step: WorkflowStep, page: Page, reason: string): Promise<'done' | 'stopped' | 'unattended'> {
     if (this.run.trigger === 'schedule') return 'unattended';
+    this.entry.shown = true;
     await page.bringToFront().catch(() => {});
     console.log(`[replay] ${this.run.id} ${step.stepKey}: waiting for the person in the browser`);
     const done = await requestTakeControl({ runId: this.run.id, title: this.workflow.name, reason }, this.signal);

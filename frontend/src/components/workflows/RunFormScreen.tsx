@@ -6,8 +6,9 @@ import { fillFromRow, STATUS_TONE, STATUS_WORDS, timeAgo, type PastedRow } from 
 
 // The run form: this run's details on the left, what the run will do on the
 // right with those details shown where they land. Nothing runs until Run.
-export function RunFormScreen({ workflowId, onBack, onStarted }: {
+export function RunFormScreen({ workflowId, initialError, onBack, onStarted }: {
   workflowId: string;
+  initialError?: string; // Run on the list tried to start it and couldn't
   onBack: () => void;
   onStarted: (runId: string) => void;
 }) {
@@ -30,7 +31,7 @@ export function RunFormScreen({ workflowId, onBack, onStarted }: {
     );
   }
   if (!form) return null;
-  return <Loaded form={form} onBack={onBack} onStarted={onStarted} />;
+  return <Loaded form={form} initialError={initialError} onBack={onBack} onStarted={onStarted} />;
 }
 
 function BackButton({ onClick }: { onClick: () => void }) {
@@ -42,8 +43,9 @@ function BackButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function Loaded({ form, onBack, onStarted }: {
+function Loaded({ form, initialError, onBack, onStarted }: {
   form: RunForm;
+  initialError?: string;
   onBack: () => void;
   onStarted: (runId: string) => void;
 }) {
@@ -51,7 +53,7 @@ function Loaded({ form, onBack, onStarted }: {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(form.fields.map((f) => [f.key, f.secret ? '' : (f.previousValue ?? '')])));
   const [focused, setFocused] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [starting, setStarting] = useState(false);
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 

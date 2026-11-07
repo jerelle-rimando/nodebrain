@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { chromium, type Browser, type BrowserContext } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 
 // Opens the user's installed browser (Chrome, else Edge) as an ordinary
 // window with a NodeBrain profile for one site, and attaches to it over the
@@ -102,7 +102,14 @@ async function connect(port: string): Promise<{ browser: Browser; context: Brows
   return { browser, context };
 }
 
-export async function launchBrowser(profileDir: string, startUrl: string): Promise<LaunchedBrowser> {
+export interface LaunchOptions {
+  // Replay: the window opens minimized, in the taskbar, so the person can
+  // keep working while a run goes. Recording and repair need the person at
+  // the page, so they open maximized and in front.
+  background?: boolean;
+}
+
+export async function launchBrowser(profileDir: string, startUrl: string, opts: LaunchOptions = {}): Promise<LaunchedBrowser> {
   fs.mkdirSync(profileDir, { recursive: true });
 
   // A window for this profile may still be open (an earlier recording, or a
@@ -130,7 +137,7 @@ export async function launchBrowser(profileDir: string, startUrl: string): Promi
     '--no-first-run',
     '--no-default-browser-check',
     // Maximized, not fullscreen: the title bar, tabs and window buttons stay.
-    '--start-maximized',
+    ...(opts.background ? [] : ['--start-maximized']),
     'about:blank',
   ], { stdio: 'ignore', detached: false });
 
@@ -148,7 +155,32 @@ export async function launchBrowser(profileDir: string, startUrl: string): Promi
     throw new Error("The browser didn't open for recording. If a window for this site is already open, close it and try again.");
   }
   const attached = await connect(port);
+  if (opts.background) await minimizeWindow(attached.browser, attached.context);
   return { ...attached, process: child };
+}
+
+// Chrome opens a profile's window where it was last (a recording leaves it
+// maximized) and takes focus; it ignores a minimized start (start /min,
+// STARTUPINFO) once the profile has a saved placement. So the window is
+// minimized as soon as NodeBrain is attached: it shows for a moment, then
+// goes to the taskbar, and Windows hands focus back to the window that had
+// it. Measured on Chrome 157: a minimized window still renders (rAF runs,
+// visibilityState stays "visible"), and clicks, typing and screenshots work.
+// Page.bringToFront and /json/activate both restore it, so pausing for the
+// person and "Show the browser" bring it back as before.
+export async function minimizeWindow(browser: Browser, context: BrowserContext, target?: Page): Promise<void> {
+  try {
+    const page = target ?? context.pages()[0] ?? (await context.newPage());
+    const pageSession = await context.newCDPSession(page);
+    const { targetInfo } = await pageSession.send('Target.getTargetInfo');
+    await pageSession.detach().catch(() => {});
+    const session = await browser.newBrowserCDPSession();
+    const { windowId } = await session.send('Browser.getWindowForTarget', { targetId: targetInfo.targetId });
+    await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    await session.detach().catch(() => {});
+  } catch {
+    // The run still works in a window that stayed open.
+  }
 }
 
 export async function closeBrowser(launched: LaunchedBrowser): Promise<void> {

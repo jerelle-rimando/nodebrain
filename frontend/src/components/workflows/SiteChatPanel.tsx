@@ -101,11 +101,13 @@ export function SiteChatPanel({ sites, current, onChoose }: {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-[22px] py-4 space-y-3">
         {!current ? null : turns.length === 0 ? (
-          <p className="text-xs text-brain-text-dim leading-relaxed">
-            {canAsk
-              ? `Ask about the workflows recorded on ${current.name}: what they need from you, what each step does, or why one stopped.`
-              : `Finish the recording on ${current.name} first, then you can ask about it here.`}
-          </p>
+          // Empty until the first question. A site with only a recording
+          // open says why the box is off.
+          canAsk ? null : (
+            <p className="text-xs text-brain-text-dim leading-relaxed">
+              Finish the recording on {current.name} first, then you can ask about it here.
+            </p>
+          )
         ) : turns.map((t, i) => (
           <div key={i} className={t.role === 'user' ? 'flex justify-end' : 'flex'}>
             <p className={`max-w-[88%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm leading-relaxed ${
@@ -180,7 +182,7 @@ function SitePicker({ sites, current, onChoose }: {
     <div ref={ref} className="relative flex-1 min-w-0">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open}
         className="w-full flex items-center gap-2.5 rounded-lg px-1.5 py-0.5 hover:bg-brain-border/60 transition-colors text-left">
-        <SiteIcon icon={current.icon} />
+        <SiteIcon icon={current.icon} favicon={current.favicon} />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-brain-text truncate">{current.name}</span>
           <span className="block text-xs text-brain-text-dim truncate">{current.siteKey}</span>
@@ -197,7 +199,7 @@ function SitePicker({ sites, current, onChoose }: {
               <button key={s.siteKey} type="button" role="option" aria-selected={isCurrent}
                 onClick={() => { onChoose(s.siteKey); setOpen(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-brain-border/60 transition-colors">
-                <SiteIcon icon={s.icon} />
+                <SiteIcon icon={s.icon} favicon={s.favicon} />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-brain-text truncate">{s.name}</span>
                   <span className={`block text-xs truncate ${s.attention ? 'text-brain-warning' : 'text-brain-text-dim'}`}>
@@ -214,10 +216,16 @@ function SitePicker({ sites, current, onChoose }: {
   );
 }
 
-function SiteIcon({ icon }: { icon: string }) {
+// The site's own favicon (saved while recording there); the emoji when it
+// has none or it won't load.
+function SiteIcon({ icon, favicon }: { icon: string; favicon?: string }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  const showImage = !!favicon && broken !== favicon;
   return (
     <span className="w-8 h-8 rounded-lg bg-brain-bg border border-brain-border flex items-center justify-center text-base flex-shrink-0" aria-hidden="true">
-      {icon}
+      {showImage
+        ? <img src={favicon} alt="" className="w-[18px] h-[18px] object-contain" onError={() => setBroken(favicon)} />
+        : icon}
     </span>
   );
 }

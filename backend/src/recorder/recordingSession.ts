@@ -20,6 +20,7 @@ import { siteBrowserHolder } from '../browser/siteBrowserLock';
 import { PAGE_SCRIPT, RECORDER_BINDING, PILL_HOST_ID, SET_COUNT_FN } from './pageScript';
 import { factsForRef, redactSnapshot, type SnapshotFacts } from './ariaSnapshot';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
+import { captureSiteLook, isDefaultSiteName, siteIconUrl } from './siteLook';
 import { guessName, valueRows, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
 
 // One recording: the user does a task in a real browser window while
@@ -187,7 +188,7 @@ function pruneSessions(): void {
 
 class RecordingSession {
   readonly id = uuidv4();
-  readonly siteName: string;
+  siteName: string;
   readonly profileDir: string;
   state: RecordingState = 'recording';
   endedAt?: number;
@@ -216,13 +217,13 @@ class RecordingSession {
   private secretRefs = new Set<string>();
 
   constructor(readonly startUrl: string, readonly siteKey: string) {
-    this.siteName = siteNameFromKey(siteKey);
+    this.siteName = getSiteAgentBySiteKey(siteKey)?.name ?? siteNameFromKey(siteKey);
     this.profileDir = path.join(getDataDir(), 'browser-profiles', siteKeyToFolderName(siteKey));
   }
 
   status(): RecordingStatus {
     return {
-      id: this.id, siteKey: this.siteKey, siteName: this.siteName, startUrl: this.startUrl,
+      id: this.id, siteKey: this.siteKey, siteName: this.siteName, siteIcon: siteIconUrl(this.siteKey), startUrl: this.startUrl,
       state: this.state, stepCount: this.stepCount(), error: this.error, draft: this.draft, result: this.result,
     };
   }
@@ -269,9 +270,27 @@ class RecordingSession {
       // keeps listening either way.
     });
     await page.bringToFront().catch(() => {});
+    void this.captureLook(page);
   }
 
   private markNextNavigateAsOpening = false;
+
+  // The site's favicon and its own spelling of its name, read from the page
+  // the person is on. Tried on the opening page and again on later pages of
+  // the site until both are found (a sign-in page may have neither).
+  private lookTries = 0;
+  private iconFound = false;
+  private nameFound = false;
+  private async captureLook(page: Page): Promise<void> {
+    if ((this.iconFound && this.nameFound) || this.lookTries >= 6 || this.discarding) return;
+    this.lookTries++;
+    const look = await captureSiteLook(page, this.siteKey, { icon: !this.iconFound, name: !this.nameFound });
+    if (look.iconSaved) this.iconFound = true;
+    if (look.name) {
+      this.nameFound = true;
+      if (isDefaultSiteName(this.siteKey, this.siteName)) this.siteName = look.name;
+    }
+  }
 
   private aliasOf(page: Page): string {
     let alias = this.aliases.get(page);
@@ -284,6 +303,7 @@ class RecordingSession {
 
   private watchPage(page: Page): void {
     this.aliasOf(page);
+    page.on('load', () => { if (this.accepting()) void this.captureLook(page); });
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame() || !this.accepting()) return;
       this.signalFromInteraction(page, { name: 'navigation', url: frame.url() });
@@ -837,6 +857,11 @@ class RecordingSession {
         let siteAgent = getSiteAgentBySiteKey(this.siteKey)
           ?? createSiteAgent({ siteKey: this.siteKey, name: this.siteName, startUrl: this.startUrl, profileDir: this.profileDir });
         if (!siteAgent.profileDir) siteAgent = updateSiteAgent(siteAgent.id, { profileDir: this.profileDir }) ?? siteAgent;
+        // A site saved before its page gave its name keeps the domain-made one
+        // only until a recording finds better.
+        if (siteAgent.name !== this.siteName && isDefaultSiteName(this.siteKey, siteAgent.name)) {
+          siteAgent = updateSiteAgent(siteAgent.id, { name: this.siteName }) ?? siteAgent;
+        }
 
         let savedLogin = false;
         if (this.password !== undefined) {

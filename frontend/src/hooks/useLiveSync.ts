@@ -116,12 +116,13 @@ export function useLiveSync() {
         bringAppForward();
       });
 
-      // A run closes its browser window when it ends. Scheduled runs happen
-      // while the person may be busy in another app, so they don't pull
-      // NodeBrain forward.
+      // A run's browser opens minimized so the person can do something
+      // else meanwhile; its end only pulls NodeBrain forward when that
+      // window came up during the run (and so was covering it). Scheduled
+      // runs never do.
       es.addEventListener('run:finished', (e) => {
         const run = JSON.parse((e as MessageEvent).data) as WorkflowRun | undefined;
-        if (run && run.trigger !== 'schedule') bringAppForward();
+        if (run && run.trigger !== 'schedule' && run.browserShown) bringAppForward();
       });
 
       es.onerror = () => {

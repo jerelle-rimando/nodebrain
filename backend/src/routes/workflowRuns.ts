@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow, getRunById, getSiteAgentById } from '../db/workflowRepository';
-import { startRun, cancelRun, getRunDetail, isRunActive, RunStartError } from '../replay/replayEngine';
+import { startRun, cancelRun, getRunDetail, isRunActive, markRunBrowserShown, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
 import { raiseSiteWindow } from '../browser/raiseWindow';
 import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, RepairError } from '../replay/repair';
@@ -126,6 +126,7 @@ workflowRunsRouter.post('/workflow-runs/:id/raise', async (req: Request, res: Re
     res.status(409).json({ success: false, error: "Couldn't bring the browser window forward. Look for it on your taskbar." });
     return;
   }
+  markRunBrowserShown(run.id);
   res.json({ success: true, data: { runId: run.id } });
 });
 

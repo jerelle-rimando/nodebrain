@@ -271,6 +271,7 @@ export interface WorkflowRun {
   error?: string;
   startedAt: string;
   finishedAt?: string;
+  browserShown?: boolean; // run:finished only: its window came forward during the run
 }
 
 // A run that stopped because a step's element couldn't be found, and what
@@ -320,6 +321,7 @@ export interface RecordingStatus {
   id: string;
   siteKey: string;
   siteName: string;
+  siteIcon?: string; // the site's favicon, once the recording has read it
   startUrl: string;
   state: RecordingState;
   stepCount: number; // steps the user took; the opening page load isn't counted
@@ -410,7 +412,8 @@ export interface SiteSummary {
   id: string;
   siteKey: string; // the domain shown under the name
   name: string;
-  icon: string;
+  icon: string; // emoji, shown when there's no favicon
+  favicon?: string; // URL of the site's own icon, stored locally
   startUrl: string;
   workflowCount: number;
   attention?: string;

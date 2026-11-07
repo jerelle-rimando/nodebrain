@@ -4,11 +4,26 @@ import { buildRunForm } from '../workflows/runPlan';
 import { buildOverview } from '../workflows/workflowList';
 import { setWorkflowIcon } from '../db/workflowRepository';
 import { askAboutSite, SiteChatError } from '../workflows/siteChat';
+import { ICON_TYPES, siteIconsDir } from '../recorder/siteLook';
 
 // Saved workflows for the app: the list with its sites, the run form (inputs
 // plus the steps in plain words), and the icon a person picks. Starting a run
 // is POST /api/workflows/:id/runs in workflowRuns.ts.
 export const workflowsRouter = Router();
+
+// GET /api/site-icons/<file> → a site's favicon, saved while recording or
+// running there (recorder/siteLook.ts). Only files in that folder, by a name
+// NodeBrain made; an SVG is served so that it can't run anything even if
+// opened on its own.
+workflowsRouter.get('/site-icons/:file', (req: Request, res: Response) => {
+  const m = /^([a-z0-9._-]+)\.(png|ico|svg|gif|jpg|webp)$/i.exec(req.params.file);
+  if (!m || m[1].startsWith('.')) { res.status(404).end(); return; }
+  res.setHeader('Content-Type', ICON_TYPES[m[2].toLowerCase() as keyof typeof ICON_TYPES]);
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable'); // the URL's ?v= changes with the file
+  res.sendFile(m[0], { root: siteIconsDir(), dotfiles: 'deny' }, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+});
 
 // GET /api/workflows → { sites, workflows }, each workflow with its state and next action
 workflowsRouter.get('/workflows', (_req: Request, res: Response) => {

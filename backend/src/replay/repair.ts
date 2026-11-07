@@ -21,7 +21,7 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { buildPhases } from '../workflows/runPlan';
 import { findElement } from './elementFinder';
 import {
-  getRepairHold, isRunActive, isMissError, describeStepTarget, verbFor, type RepairHold,
+  getRepairHold, isRunActive, markRunBrowserShown, isMissError, describeStepTarget, verbFor, type RepairHold,
 } from './replayEngine';
 
 // Repairing a workflow whose step can't find its element any more: the
@@ -181,6 +181,7 @@ export function releaseRun(runId: string): boolean {
 }
 
 function startLive(hold: RepairHold): void {
+  markRunBrowserShown(hold.runId); // the picker brings the window forward
   const state: RepairState = { phase: 'picking', live: true };
   states.set(hold.runId, state);
   const session = new PickSession(hold.page, hold.step, hold.steps, hold.fieldsById, hold.value, hold.recordedValue, 'picking', state);
