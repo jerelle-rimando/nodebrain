@@ -270,7 +270,7 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
           '<button class="done" type="button">Done</button>' +
           '<button class="x" type="button" title="Throw away this recording">\\u00d7</button></div>' +
         '<div class="row confirm hidden"><span>Throw away this recording?</span>' +
-          '<button class="danger" type="button">Throw away</button>' +
+          '<button class="danger" type="button">Delete</button>' +
           '<button class="plain" type="button">Keep recording</button></div>' +
         '<div class="row saving hidden"><span class="dot"></span><span class="saving-text">Finishing\\u2026</span></div>' +
       '</div>';
@@ -283,7 +283,7 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     root.querySelector('.x').addEventListener('click', () => show(confirmRow));
     root.querySelector('.plain').addEventListener('click', () => show(mainRow));
     root.querySelector('.danger').addEventListener('click', () => {
-      show(savingRow); root.querySelector('.saving-text').textContent = 'Throwing away\\u2026'; send({ type: 'discard' });
+      show(savingRow); root.querySelector('.saving-text').textContent = 'Deleting workflow\\u2026'; send({ type: 'discard' });
     });
     // Keep clicks on the pill from reaching the site's own handlers
     // (e.g. "click outside closes the menu").
