@@ -254,7 +254,7 @@ async function startLater(runId: string): Promise<void> {
     } catch (err) {
       console.error('[repair] repair failed:', err instanceof Error ? err.message : err);
       const problem = err instanceof BrowserNotFoundError
-        ? 'Fixing a workflow needs Microsoft Edge or Google Chrome, and neither was found on this computer.'
+        ? 'Fixing a workflow needs Google Chrome or Microsoft Edge, and neither was found on this computer.'
         : err instanceof RepairError ? err.message : 'Something went wrong while fixing this step. Nothing was changed.';
       states.set(runId, { phase: 'failed', live: false, problem });
     } finally {

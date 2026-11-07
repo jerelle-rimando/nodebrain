@@ -306,7 +306,7 @@ class Replay {
     } catch (err) {
       this.finish('failed', {
         error: err instanceof BrowserNotFoundError
-          ? 'Running a workflow needs Microsoft Edge or Google Chrome, and neither was found on this computer.'
+          ? 'Running a workflow needs Google Chrome or Microsoft Edge, and neither was found on this computer.'
           : "The browser didn't open. If a window for this site is already open, close it and try again.",
       });
       return;

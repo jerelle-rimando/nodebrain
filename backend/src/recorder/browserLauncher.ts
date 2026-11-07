@@ -3,9 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 
-// Opens the user's installed browser (Edge, else Chrome) as an ordinary
+// Opens the user's installed browser (Chrome, else Edge) as an ordinary
 // window with a NodeBrain profile for one site, and attaches to it over the
 // DevTools protocol so the recorder can watch.
+//
+// The profile is NodeBrain's own folder, not the person's everyday one, so
+// their usual saved sign-ins aren't in it (Chrome also refuses a debugging
+// port on its default profile).
 //
 // Why not chromium.launchPersistentContext: that adds --enable-automation and
 // pipe control, which shows the "controlled by automated test software" bar
@@ -25,24 +29,56 @@ export interface LaunchedBrowser {
   process: ChildProcess | null; // null when we attached to a window already open
 }
 
-const CANDIDATES = [
-  process.env.NODEBRAIN_BROWSER_PATH,
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft/Edge/Application/msedge.exe'),
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'),
-].filter((p): p is string => !!p);
+type BrowserKind = 'chrome' | 'edge';
+
+// Chrome first: it's where most people browse. Edge is the fallback (it ships
+// with Windows).
+const LOCAL = process.env.LOCALAPPDATA;
+const CANDIDATES: Array<{ kind: BrowserKind; exe: string }> = [
+  { kind: 'chrome' as const, exe: 'C:/Program Files/Google/Chrome/Application/chrome.exe' },
+  { kind: 'chrome' as const, exe: 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe' },
+  { kind: 'chrome' as const, exe: LOCAL ? path.join(LOCAL, 'Google/Chrome/Application/chrome.exe') : '' },
+  { kind: 'edge' as const, exe: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' },
+  { kind: 'edge' as const, exe: 'C:/Program Files/Microsoft/Edge/Application/msedge.exe' },
+  { kind: 'edge' as const, exe: LOCAL ? path.join(LOCAL, 'Microsoft/Edge/Application/msedge.exe') : '' },
+].filter((c) => !!c.exe);
 
 export class BrowserNotFoundError extends Error {
   constructor() {
-    super("Recording needs Microsoft Edge or Google Chrome, and neither was found on this computer.");
+    super("Recording needs Google Chrome or Microsoft Edge, and neither was found on this computer.");
   }
 }
 
-export function findBrowser(): string {
-  const found = CANDIDATES.find((p) => fs.existsSync(p));
+// A site's profile folder stays with the browser that made it. Its sign-ins
+// (cookies, saved passwords) are encrypted by that browser and the other one
+// can't read them, so switching would sign the person out of the site.
+// NodeBrain writes MARKER on launch. Folders made before it existed are
+// identified by Chromium's own "Last Browser" file (UTF-16 exe path).
+const MARKER = 'NodeBrain Browser';
+
+function profileBrowser(profileDir: string): BrowserKind | null {
+  try {
+    const kind = fs.readFileSync(path.join(profileDir, MARKER), 'utf8').trim();
+    if (kind === 'chrome' || kind === 'edge') return kind;
+  } catch { /* no marker */ }
+  try {
+    const last = fs.readFileSync(path.join(profileDir, 'Last Browser')).toString('utf16le').toLowerCase();
+    if (last.includes('msedge.exe')) return 'edge';
+    if (last.includes('chrome.exe')) return 'chrome';
+  } catch { /* new folder */ }
+  return null;
+}
+
+export function findBrowser(profileDir?: string): { kind: BrowserKind; exe: string } {
+  const override = process.env.NODEBRAIN_BROWSER_PATH;
+  if (override && fs.existsSync(override)) {
+    return { kind: /msedge\.exe$/i.test(override) ? 'edge' : 'chrome', exe: override };
+  }
+  const installed = CANDIDATES.filter((c) => fs.existsSync(c.exe));
+  const pinned = profileDir ? profileBrowser(profileDir) : null;
+  // If the browser that made the profile is gone, the other one opens it and
+  // the site asks for a sign-in again.
+  const found = installed.find((c) => c.kind === pinned) ?? installed[0];
   if (!found) throw new BrowserNotFoundError();
   return found;
 }
@@ -85,7 +121,8 @@ export async function launchBrowser(profileDir: string, startUrl: string): Promi
     }
   }
 
-  const exe = findBrowser();
+  const { kind, exe } = findBrowser(profileDir);
+  try { fs.writeFileSync(path.join(profileDir, MARKER), kind); } catch { /* next launch falls back to Last Browser */ }
   const child = spawn(exe, [
     `--user-data-dir=${profileDir}`,
     '--remote-debugging-port=0',
