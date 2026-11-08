@@ -18,7 +18,8 @@ import { createCredential, updateCredential, getCredentialById } from '../vault/
 import { launchBrowser, closeBrowser, type LaunchedBrowser } from './browserLauncher';
 import { siteBrowserHolder } from '../browser/siteBrowserLock';
 import { PAGE_SCRIPT, RECORDER_BINDING, PILL_HOST_ID, SET_COUNT_FN } from './pageScript';
-import { factsForRef, redactSnapshot, type SnapshotFacts } from './ariaSnapshot';
+import { factsForRef, factsForSelector, fieldRefInside, redactSnapshot, roleAndName, type SnapshotFacts } from './ariaSnapshot';
+import { escapeForSelector } from '../replay/elementFinder';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
 import { captureSiteLook, isDefaultSiteName, siteIconUrl } from './siteLook';
 import { guessName, valueRows, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
@@ -68,6 +69,7 @@ interface PageRecord {
     tag?: string; inputType?: string; autocomplete?: string; nameAttr?: string; testId?: string;
     label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[]; title?: string;
     names?: string[]; optionLabels?: string[]; fieldIndex?: number;
+    wrapped?: boolean; // a click on a plain box around this field, re-aimed at the field
   };
   page: Page;
   consumed: boolean;
@@ -96,6 +98,9 @@ interface CapturedStep {
   eventTs: number;
   // Built from a mouse-down pick (pageScript.ts), not reported by Playwright.
   picked?: boolean;
+  // A click on a plain box around a text field, recorded as a click on the
+  // field (see reaim).
+  reaimed?: boolean;
   opening?: boolean; // the page load NodeBrain did to start; not counted in the pill
 }
 
@@ -492,7 +497,15 @@ class RecordingSession {
     const step = await this.buildStep(page, action);
     if (!step) return;
     // No page event to time it by: it follows the previous recorded step.
-    const prevRecorded = [...this.steps].reverse().find((s) => !s.picked);
+    let prevRecorded = [...this.steps].reverse().find((s) => !s.picked);
+    // A click on the box around a field, re-aimed at the field, then a click
+    // on that same field: the first adds nothing, so it goes.
+    if (prevRecorded?.reaimed && prevRecorded.action === 'click' && step.action === 'click'
+        && prevRecorded.locator === step.locator && prevRecorded.pageAlias === step.pageAlias
+        && !prevRecorded.signals.length && prevRecorded.args.button === step.args.button) {
+      this.steps.splice(this.steps.indexOf(prevRecorded), 1);
+      prevRecorded = [...this.steps].reverse().find((s) => !s.picked);
+    }
     if (!step.record && prevRecorded) step.eventTs = Math.min(step.eventTs, prevRecorded.eventTs + 1);
     // Goes ahead of any mouse-down pick that happened after it (picks are
     // reported 500 ms late, so one may already be in the list).
@@ -569,11 +582,20 @@ class RecordingSession {
   }
 
   private async buildStep(page: Page, action: RecorderAction): Promise<CapturedStep | undefined> {
-    const facts = factsForRef(action.ariaSnapshot, action.ref);
+    let facts = this.factsOf(action);
     const record = await this.matchRecord(page, action, facts);
+    let locator = action.selector;
+    let reaimed = false;
+    if (action.name === 'click' && record?.fp.wrapped) {
+      const field = await this.reaim(page, action, record, facts);
+      facts = field.facts;
+      if (field.locator) locator = field.locator;
+      reaimed = true;
+    }
     const base = {
       recorderName: action.name,
-      locator: action.selector,
+      locator,
+      reaimed,
       facts,
       record,
       fingerprint: this.fingerprintOf(facts, record),
@@ -632,7 +654,9 @@ class RecordingSession {
   private async updateStep(step: CapturedStep, page: Page, action: RecorderAction): Promise<void> {
     step.snapshot = action.ariaSnapshot ?? step.snapshot;
     step.ref = action.ref ?? step.ref;
-    if (action.selector) step.locator = action.selector;
+    // A re-aimed click keeps the field's locator: Playwright's still names the box.
+    if (action.selector && !step.reaimed) step.locator = action.selector;
+    this.refreshFacts(step, action);
     if (action.name === 'navigate' && action.url) {
       step.args = { ...step.args, url: action.url };
       step.origin = safeOrigin(action.url);
@@ -707,6 +731,80 @@ class RecordingSession {
 
   private fingerprintOf(facts: SnapshotFacts, record?: PageRecord): WorkflowStepFingerprint {
     return fingerprintFromFacts(facts, record?.fp);
+  }
+
+  // The fingerprint is built from the first snapshot Playwright sends for an
+  // action. If that didn't describe the element (Roblox's "Sign in" button
+  // came out as just { tag: 'button' }: no role, no name, no heading), a
+  // later snapshot for the same action that does is used instead. One that
+  // already has a role and name is kept: the first snapshot is the one
+  // closest to the moment of the click. Clicks rarely get a later snapshot
+  // (none did in a whole recording, 2026-11-08), so factsOf's selector
+  // fallback is what fills them in; this covers typing and anything else
+  // Playwright updates.
+  private refreshFacts(step: CapturedStep, action: RecorderAction): void {
+    if (step.picked || !action.ariaSnapshot) return;
+    if (step.facts.role && step.facts.name) return;
+    const inner = step.reaimed ? fieldRefInside(action.ariaSnapshot, action.ref) : undefined;
+    const facts = step.reaimed
+      ? (inner ? factsForRef(action.ariaSnapshot, inner) : factsForSelector(action.ariaSnapshot, step.locator) ?? {})
+      : this.factsOf(action);
+    if (!facts.role) return;
+    if (step.facts.role && (facts.role !== step.facts.role || !facts.name)) return;
+    step.facts = facts;
+    step.fingerprint = this.fingerprintOf(facts, step.record);
+  }
+
+  // The snapshot facts for an action's element: by its ref, else (the ref
+  // isn't in its own snapshot) by the role and name in Playwright's selector.
+  private factsOf(action: RecorderAction): SnapshotFacts {
+    const byRef = factsForRef(action.ariaSnapshot, action.ref);
+    if (byRef.role) return byRef;
+    return factsForSelector(action.ariaSnapshot, action.selector) ?? byRef;
+  }
+
+  // A click the page re-aimed from a plain box to the one text field inside
+  // it (pageScript.ts fieldInside). Playwright's selector and snapshot ref
+  // still name the box, so the field is described and located on its own:
+  //   - facts: the field's line under the box in the snapshot; or, when the
+  //     box isn't in the snapshot (a wrapper with one child is left out),
+  //     the field's role and name as the page reports them now (a click on a
+  //     box doesn't navigate), then its line in the snapshot by those;
+  //   - locator: by role and name, the way Playwright writes them, else by
+  //     name attribute or placeholder.
+  // A locator is kept only if it finds exactly one element on the page now;
+  // otherwise the box's own selector stays, and the field's fingerprint is
+  // what a replay falls back on.
+  private async reaim(page: Page, action: RecorderAction, record: PageRecord, boxFacts: SnapshotFacts):
+      Promise<{ facts: SnapshotFacts; locator?: string }> {
+    const unique = async (sel: string) => (await page.locator(sel).count().catch(() => 0)) === 1;
+    const roleSelector = (role: string, name: string, flag: 'i' | 's') =>
+      `internal:role=${role}[name="${escapeForSelector(name)}"${flag}]`;
+    // Where it sits still holds when nothing better is known; what it is was the box's.
+    const where: SnapshotFacts = { heading: boxFacts.heading, landmark: boxFacts.landmark, frameRef: boxFacts.frameRef };
+
+    const { tag, nameAttr, placeholder } = record.fp;
+    const plain: string[] = [];
+    if (nameAttr && tag && /^[a-z]+$/.test(tag)) plain.push(`${tag}[name="${escapeForSelector(nameAttr)}"]`);
+    if (placeholder) plain.push(`internal:attr=[placeholder="${escapeForSelector(placeholder)}"s]`);
+    let plainHit: string | undefined;
+    for (const sel of plain) if (await unique(sel)) { plainHit = sel; break; }
+
+    const inner = fieldRefInside(action.ariaSnapshot, action.ref);
+    let facts: SnapshotFacts | undefined = inner ? factsForRef(action.ariaSnapshot, inner) : undefined;
+    if (!facts?.role && plainHit) {
+      const own = roleAndName(await page.locator(plainHit).ariaSnapshot({ timeout: 1_000 }).catch(() => undefined));
+      if (own) facts = factsForSelector(action.ariaSnapshot, roleSelector(own.role, own.name, 's')) ?? { ...where, ...own };
+    }
+    facts ??= where;
+
+    if (facts.role && facts.name) {
+      for (const flag of ['i', 's'] as const) {
+        const sel = roleSelector(facts.role, facts.name, flag);
+        if (await unique(sel)) return { facts, locator: sel };
+      }
+    }
+    return { facts, locator: plainHit };
   }
 
   private pushCount(): void {

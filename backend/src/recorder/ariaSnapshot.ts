@@ -88,6 +88,63 @@ export function factsForRef(snapshot: string | undefined, ref: string | undefine
   return facts;
 }
 
+// Facts for the element a role selector names, found in the snapshot by its
+// role and name, for when the action's ref isn't in its own snapshot.
+// Measured 2026-11-08 (Playwright's recorder, Chrome 157): a click on a
+// <span> inside a <button> gets the button's selector but the span's ref,
+// and the snapshot leaves the span out, so the step had no role, name or
+// heading (Roblox's "Sign in"). Plain wrappers with one child are left out
+// the same way. Only a selector that is a single role segment (optionally
+// `>> nth=K`) is read; anything scoped or chained is left alone.
+export function factsForSelector(snapshot: string | undefined, selector: string | undefined): SnapshotFacts | undefined {
+  if (!snapshot || !selector) return undefined;
+  const m = /^internal:role=([a-z]+)\[name="((?:[^"\\]|\\.)*)"([is])\](?:\s*>>\s*nth=(\d+))?$/.exec(selector.trim());
+  if (!m) return undefined;
+  const [, role, rawName, flag, nth] = m;
+  const name = rawName.replace(/\\(.)/g, '$1');
+  const lines = snapshot.split('\n').map(parseLine);
+  // Playwright's `i` is "contains, ignoring case"; `s` is exact.
+  const matches = (n: string | undefined) => n !== undefined
+    && (flag === 's' ? n === name : n.toLowerCase().includes(name.toLowerCase()));
+  const hits = lines.filter((l): l is Line => !!l && l.role === role && !!l.ref && matches(l.name));
+  let hit: Line | undefined;
+  if (nth !== undefined) hit = hits[Number(nth)];
+  else if (hits.length === 1) hit = hits[0];
+  else {
+    const same = hits.filter((l) => l.name?.toLowerCase() === name.toLowerCase());
+    if (same.length === 1) hit = same[0];
+  }
+  return hit ? factsForRef(snapshot, hit.ref) : undefined;
+}
+
+// Role and name from an element's own aria snapshot (Locator.ariaSnapshot):
+// `- textbox "Password"` → { role: 'textbox', name: 'Password' }.
+export function roleAndName(yaml: string | undefined): { role: string; name: string } | undefined {
+  const first = yaml?.split('\n').map(parseLine).find(Boolean);
+  return first?.name ? { role: first.role, name: first.name } : undefined;
+}
+
+const FIELD_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'listbox']);
+
+// The ref of the one text field nested under `ref` (a plain box drawn around
+// it), or undefined when there isn't exactly one. Used when a click on such
+// a box is recorded as a click on the field (pageScript.ts fieldInside).
+export function fieldRefInside(snapshot: string | undefined, ref: string | undefined): string | undefined {
+  if (!snapshot || !ref) return undefined;
+  const lines = snapshot.split('\n').map(parseLine);
+  const idx = lines.findIndex((l) => l?.ref === ref);
+  if (idx < 0) return undefined;
+  const indent = lines[idx]!.indent;
+  const found: string[] = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l) continue; // a text or property line (`- /url: …`)
+    if (l.indent <= indent) break; // past the box
+    if (FIELD_ROLES.has(l.role) && l.ref) found.push(l.ref);
+  }
+  return found.length === 1 ? found[0] : undefined;
+}
+
 // Replaces every occurrence of each secret, and the value shown on the
 // password field's own line, before a snapshot is written to disk. The
 // snapshot includes field values: a typed password appears as

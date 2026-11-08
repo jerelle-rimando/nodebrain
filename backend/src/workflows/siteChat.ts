@@ -39,7 +39,7 @@ export function siteContext(siteAgentId: string): string | null {
       lines.push(`  ${phase.title}${phase.note ? ` (${phase.note})` : ''}:`);
       for (const step of phase.steps) {
         const text = step.segments.map((g) => ('field' in g ? `[${labels.get(g.field) ?? 'a detail'}]` : g.text)).join('');
-        lines.push(`    - ${text}${step.pause === 'handoff' ? ' (the person does this themselves)' : step.pause === 'confirm' ? ' (waits for the person to check first)' : ''}`);
+        lines.push(`    - ${text}${step.pause === 'handoff' ? ' (the person does this themselves)' : step.pause === 'confirm' ? ' (waits for the person to check first)' : ''}${step.optional ? " (only when it's on the page: it doesn't always appear)" : ''}`);
       }
     }
     const repairs = getVersionsByWorkflow(wf.id).filter((v) => v.reason === 'repair').length;

@@ -82,11 +82,6 @@ export const api = {
 
   // Saved workflows and their runs
   getWorkflows: () => request<import('@shared/types').WorkflowsOverview>('/workflows'),
-  setWorkflowIcon: (workflowId: string, emoji: string | null) =>
-    request<{ id: string; emoji: string | null }>(`/workflows/${workflowId}/icon`, {
-      method: 'PUT',
-      body: JSON.stringify({ emoji }),
-    }),
   getRunForm: (workflowId: string) => request<import('@shared/types').RunForm>(`/workflows/${workflowId}/run-form`),
   startWorkflowRun: (workflowId: string, inputs: Record<string, string>) =>
     request<import('@shared/types').WorkflowRun>(`/workflows/${workflowId}/runs`, {
@@ -103,6 +98,7 @@ export const api = {
   cancelWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' }),
   // Fixing a run that stopped because the site changed
   startRepair: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/repair`, { method: 'POST' }),
+  markStepOptional: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/optional`, { method: 'POST' }),
   cancelRepair: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/repair/cancel`, { method: 'POST' }),
   releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
   runScreenshotUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/screenshot`,

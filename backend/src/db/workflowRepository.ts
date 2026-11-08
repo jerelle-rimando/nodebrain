@@ -26,7 +26,7 @@ const STEP_ACTIONS: readonly WorkflowStepAction[] = [
 ];
 const VALUE_SOURCES: readonly WorkflowValueSource[] = ['none', 'literal', 'field', 'credential'];
 const VALUE_TARGETS: readonly WorkflowValueTarget[] = ['text', 'option', 'locator', 'file'];
-const VERSION_REASONS: readonly WorkflowVersionReason[] = ['recorded', 'repair', 'edit', 'rollback'];
+const VERSION_REASONS: readonly WorkflowVersionReason[] = ['recorded', 'repair', 'optional', 'edit', 'rollback'];
 const FIELD_KINDS: readonly WorkflowFieldKind[] = ['text', 'option', 'file'];
 const RUN_TRIGGERS: readonly WorkflowRunTrigger[] = ['manual', 'schedule', 'chat'];
 const RUN_STATUSES: readonly WorkflowRunStatus[] = [
@@ -70,7 +70,7 @@ interface StepRow {
   args: string; value_source: string; value_target: string | null;
   literal_value: string | null; literal_value_enc: string | null; literal_secret: number;
   field_id: string | null; credential_part: string | null; signals: string;
-  requires_confirmation: number; snapshot_path: string | null;
+  requires_confirmation: number; snapshot_path: string | null; optional: number;
 }
 
 interface FieldRow {
@@ -133,6 +133,7 @@ function rowToStep(row: StepRow): WorkflowStep {
     credentialPart: (row.credential_part ?? undefined) as WorkflowStep['credentialPart'],
     signals: JSON.parse(row.signals) as WorkflowSignal[],
     requiresConfirmation: row.requires_confirmation === 1,
+    optional: row.optional === 1,
     snapshotPath: row.snapshot_path ?? undefined,
   };
 }
@@ -306,22 +307,6 @@ function deleteWorkflowRows(workflowId: string): void {
   dbRun('DELETE FROM workflows WHERE id = ?', [workflowId]);
 }
 
-// ── Icons ───────────────────────────────────────────────────────────────────
-
-// Icons the person picked, by workflow id. A workflow without one shows an
-// icon derived from its name.
-export function getWorkflowIcons(): Map<string, string> {
-  const rows = dbAll<{ workflow_id: string; emoji: string }>('SELECT workflow_id, emoji FROM workflow_icons');
-  return new Map(rows.map((r) => [r.workflow_id, r.emoji]));
-}
-
-// null goes back to the derived icon.
-export function setWorkflowIcon(workflowId: string, emoji: string | null): boolean {
-  if (!getWorkflowById(workflowId)) return false;
-  dbRun('DELETE FROM workflow_icons WHERE workflow_id = ?', [workflowId]);
-  if (emoji) dbRun('INSERT INTO workflow_icons (workflow_id, emoji) VALUES (?, ?)', [workflowId, emoji]);
-  return true;
-}
 
 // ── Fields ──────────────────────────────────────────────────────────────────
 
@@ -424,6 +409,7 @@ export interface StepInput {
   credentialPart?: 'username' | 'password';
   signals?: WorkflowSignal[];
   requiresConfirmation?: boolean;
+  optional?: boolean;
   snapshotPath?: string;
 }
 
@@ -455,6 +441,7 @@ function inputToColumns(input: StepInput): StepColumns {
     signals: JSON.stringify(input.signals ?? []),
     requires_confirmation: input.requiresConfirmation ? 1 : 0,
     snapshot_path: input.snapshotPath ?? null,
+    optional: input.optional ? 1 : 0,
   };
 }
 
@@ -476,6 +463,7 @@ function patchColumns(cols: StepColumns, patch: StepPatch): StepColumns {
   if (has('credentialPart')) out.credential_part = patch.credentialPart ?? null;
   if (has('signals')) out.signals = JSON.stringify(patch.signals ?? []);
   if (has('requiresConfirmation')) out.requires_confirmation = patch.requiresConfirmation ? 1 : 0;
+  if (has('optional')) out.optional = patch.optional ? 1 : 0;
   if (has('snapshotPath')) out.snapshot_path = patch.snapshotPath ?? null;
   if (has('literalValue') || has('literalSecret')) {
     const secret = has('literalSecret') ? !!patch.literalSecret : cols.literal_secret === 1;
@@ -570,11 +558,11 @@ function insertSteps(versionId: string, workflowId: string, steps: StepColumns[]
     dbRun(
       `INSERT INTO workflow_steps (id, version_id, step_key, position, action, locator, fingerprint, page_alias, origin, args,
          value_source, value_target, literal_value, literal_value_enc, literal_secret, field_id, credential_part, signals,
-         requires_confirmation, snapshot_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         requires_confirmation, snapshot_path, optional)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [uuidv4(), versionId, s.step_key, s.position, s.action, s.locator, s.fingerprint, s.page_alias, s.origin, s.args,
        s.value_source, s.value_target, s.literal_value, s.literal_value_enc, s.literal_secret, s.field_id,
-       s.credential_part, s.signals, s.requires_confirmation, s.snapshot_path],
+       s.credential_part, s.signals, s.requires_confirmation, s.snapshot_path, s.optional],
     );
   }
 }

@@ -217,8 +217,8 @@ function SitePicker({ sites, current, onChoose }: {
 }
 
 // The site's own favicon (saved while recording there); the emoji when it
-// has none or it won't load.
-function SiteIcon({ icon, favicon }: { icon: string; favicon?: string }) {
+// has none or it won't load. Workflow rows use it too.
+export function SiteIcon({ icon, favicon }: { icon: string; favicon?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   const showImage = !!favicon && broken !== favicon;
   return (

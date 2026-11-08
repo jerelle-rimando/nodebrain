@@ -4,9 +4,12 @@ import type { Database as SqlJsDatabase } from 'sql.js';
 // chain of immutable versions, each holding its own copy of the steps; runs
 // record which version they executed.
 //
-// Everything here is additive: new tables and new indexes only, all
-// IF NOT EXISTS, so it is idempotent across startups and an existing install
-// upgrades by simply gaining empty tables. No existing table is altered.
+// Everything here is additive and idempotent across startups: new tables
+// and indexes (IF NOT EXISTS), and new columns with a constant default, each
+// added only when PRAGMA table_info says it's missing (addColumn). Nothing
+// is dropped, renamed or rebuilt. A per-step setting is a column, not a side
+// table, because every version holds its own copy of the steps: a version
+// made by a fix carries it forward, and a rollback takes it back.
 //
 // Integrity rules live in workflowRepository.ts, not in the schema:
 // - No FOREIGN KEY clauses. Nothing sets PRAGMA foreign_keys, and sql.js's
@@ -72,7 +75,8 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
       credential_part TEXT,
       signals TEXT NOT NULL DEFAULT '[]',
       requires_confirmation INTEGER NOT NULL DEFAULT 0,
-      snapshot_path TEXT
+      snapshot_path TEXT,
+      optional INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS workflow_fields (
       id TEXT PRIMARY KEY,
@@ -100,8 +104,9 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
       started_at TEXT NOT NULL,
       finished_at TEXT
     );
-    -- A workflow's icon when the person picked one; otherwise it's derived
-    -- from the name (deriveAgentEmoji), like an agent's.
+    -- Icons people picked for workflows, from when each workflow row had its
+    -- own emoji. No longer read: rows show their site's favicon. Kept so
+    -- older installs' data is left untouched.
     CREATE TABLE IF NOT EXISTS workflow_icons (
       workflow_id TEXT PRIMARY KEY,
       emoji TEXT NOT NULL
@@ -132,4 +137,17 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_fields_key ON workflow_fields(workflow_id, key);
     CREATE INDEX IF NOT EXISTS idx_workflow_run_steps_run ON workflow_run_steps(run_id, position);
   `);
+
+  // Installs from before optional steps. Fresh ones have it from CREATE TABLE.
+  addColumn(db, 'workflow_steps', 'optional', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+// Same guard as database.ts's own column migrations: an unguarded ADD COLUMN
+// throws "duplicate column name" on the next startup and the app can't open.
+function addColumn(db: SqlJsDatabase, table: string, column: string, definition: string): void {
+  const stmt = db.prepare(`PRAGMA table_info(${table})`);
+  const cols: string[] = [];
+  while (stmt.step()) cols.push((stmt.getAsObject() as { name: string }).name);
+  stmt.free();
+  if (cols.length > 0 && !cols.includes(column)) db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }

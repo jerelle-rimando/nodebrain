@@ -116,12 +116,45 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     return t && t.nodeType === 1 ? t : null;
   }
 
+  // A click on a plain box drawn around one text field (Roblox's
+  // div[data-testid=text-input-container] around its password input) is
+  // about the field: the box has nothing to find it by on a redesigned page.
+  // Only text-entry fields count (a checkbox's wrapper is often the real
+  // control), only a field at most three levels down, and only when the
+  // field fills a good part of the box, so a click on a big container that
+  // happens to hold one field stays a click on that container.
+  const TEXT_FIELD = 'input:not([type]),input[type=text],input[type=password],input[type=email],input[type=tel],' +
+    'input[type=url],input[type=search],input[type=number],input[type=date],input[type=datetime-local],' +
+    'input[type=month],input[type=time],input[type=week],textarea,select,[contenteditable=""],[contenteditable=true]';
+  function fieldInside(el) {
+    try {
+      if (el.matches('input,textarea,select,button,a,label,[role],[contenteditable]')) return null;
+      const fields = Array.from(el.querySelectorAll(TEXT_FIELD)).filter((f) => f.getClientRects().length > 0);
+      if (fields.length !== 1) return null;
+      const f = fields[0];
+      let depth = 0;
+      for (let p = f.parentElement; p && p !== el; p = p.parentElement) depth++;
+      if (depth > 2) return null;
+      const a = el.getBoundingClientRect();
+      const b = f.getBoundingClientRect();
+      if (b.width * b.height <= 0 || a.width * a.height > 4 * b.width * b.height) return null;
+      return f;
+    } catch { return null; }
+  }
+
   function capture(kind, e) {
     const raw = targetOf(e);
     if (!raw) return;
-    const el = kind === 'click' ? interactive(raw) : raw;
+    let el = kind === 'click' ? interactive(raw) : raw;
+    let wrapped = false;
+    if (kind === 'click') {
+      const inner = fieldInside(el);
+      if (inner) { el = inner; wrapped = true; }
+    }
     try {
-      send({ type: 'event', kind, key: e.key, detail: e.detail, docId, elementId: idOf(el), ts: Date.now(), fp: fingerprint(el) });
+      const fp = fingerprint(el);
+      if (wrapped) fp.wrapped = true;
+      send({ type: 'event', kind, key: e.key, detail: e.detail, docId, elementId: idOf(el), ts: Date.now(), fp });
     } catch {}
   }
 

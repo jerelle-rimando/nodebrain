@@ -4,11 +4,10 @@ import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/ty
 import { deriveAgentEmoji } from '@shared/emoji';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
-import { EmojiPicker } from './EmojiPicker';
 import { RunFormScreen } from '../workflows/RunFormScreen';
 import { RunView } from '../workflows/RunView';
 import { OPEN_STATES, RecordButton, StartRecordingDialog } from '../workflows/RecordControls';
-import { SiteChatPanel, type PickerSite } from '../workflows/SiteChatPanel';
+import { SiteChatPanel, SiteIcon, type PickerSite } from '../workflows/SiteChatPanel';
 
 // The Dashboard, the app's home: on the left a chat about one site, whose
 // header holds the site picker, or in its place a workflow's run form or run
@@ -108,7 +107,7 @@ export function Dashboard() {
       <div className="basis-[45%] min-w-0">
         <WorkflowList
           overview={overview} recordings={recordings} sites={sites} current={current} error={error}
-          onChoose={choose} onReload={load}
+          onChoose={choose}
           onRecordingStarted={(status) => {
             choose(status.siteKey);
             setRecordings((rs) => (rs.some((r) => r.id === status.id) ? rs : [...rs, status]));
@@ -153,14 +152,13 @@ async function runNow(workflowId: string): Promise<{ runId?: string; error?: str
   }
 }
 
-function WorkflowList({ overview, recordings, sites, current, error, onChoose, onReload, onRecordingStarted, onRun, onOpenForm, onOpenRun }: {
+function WorkflowList({ overview, recordings, sites, current, error, onChoose, onRecordingStarted, onRun, onOpenForm, onOpenRun }: {
   overview: WorkflowsOverview | null;
   recordings: RecordingStatus[];
   sites: PickerSite[];
   current: PickerSite | null;
   error: string | null;
   onChoose: (siteKey: string) => void;
-  onReload: () => void;
   onRecordingStarted: (status: RecordingStatus) => void;
   onRun: (workflowId: string) => Promise<void>;
   onOpenForm: (workflowId: string) => void;
@@ -200,10 +198,10 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
         <ul className="space-y-2">
           {recording && <RecordingRow status={recording} />}
           {rows.map((w) => (
-            <Row key={w.id} row={w} onOpen={() => (w.state !== 'idle' && w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
+            <Row key={w.id} row={w} site={current} onOpen={() => (w.state !== 'idle' && w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
               if (w.state === 'idle' || !w.runId) return onRun(w.id);
               onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
-            }} onIconChanged={onReload} />
+            }} />
           ))}
         </ul>
         {rows.length === 0 && !recording && (
@@ -264,39 +262,18 @@ const TONE: Record<WorkflowRow['state'], string> = {
 
 // The row itself opens its run while one is going (or waiting on you), else
 // the run form (to change the details first); its button does the verb.
-function Row({ row, onOpen, onAction, onIconChanged }: {
-  row: WorkflowRow; onOpen: () => void; onAction: () => void | Promise<void>; onIconChanged: () => void;
+// Its icon is the site's favicon: every workflow on a site shares it, and the
+// name tells them apart.
+function Row({ row, site, onOpen, onAction }: {
+  row: WorkflowRow; site: PickerSite; onOpen: () => void; onAction: () => void | Promise<void>;
 }) {
-  const [picking, setPicking] = useState(false);
   const [acting, setActing] = useState(false);
   const needsYou = row.state === 'paused' || row.state === 'stopped';
-
-  async function setIcon(emoji: string | null) {
-    setPicking(false);
-    await api.setWorkflowIcon(row.id, emoji).catch(() => {});
-    onIconChanged();
-  }
 
   return (
     <li onClick={onOpen}
       className={`flex items-center gap-3 rounded-lg border bg-brain-surface px-4 py-3 cursor-pointer hover:border-brain-border-bright transition-colors ${needsYou ? 'border-brain-warning/40' : 'border-brain-border'}`}>
-      <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-        <button type="button" onClick={() => setPicking((v) => !v)} title="Change icon" aria-label={`Change the icon for ${row.name}`}
-          className="w-8 h-8 rounded-lg bg-brain-bg border border-brain-border hover:border-brain-border-bright flex items-center justify-center text-base transition-colors">
-          {row.icon}
-        </button>
-        {picking && (
-          <div className="absolute left-0 top-full">
-            <EmojiPicker onSelect={(e) => void setIcon(e)} onClose={() => setPicking(false)} />
-            {row.iconPicked && (
-              <button type="button" onMouseDown={(e) => e.stopPropagation()} onClick={() => void setIcon(null)}
-                className="absolute z-50 left-0 mt-[15.5rem] w-64 rounded-b-xl border border-t-0 border-brain-border bg-brain-surface px-3 py-1.5 text-xs text-brain-text-dim hover:text-brain-text text-left">
-                Use the icon from its name
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <SiteIcon icon={site.icon} favicon={site.favicon} />
       <div role="button" tabIndex={0} aria-label={`Open ${row.name}`} className="min-w-0 flex-1 focus:outline-none"
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}>
         <p className="flex items-center gap-1.5 text-sm text-brain-text">

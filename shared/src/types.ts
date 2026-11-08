@@ -162,7 +162,9 @@ export interface Workflow {
   updatedAt: string;
 }
 
-export type WorkflowVersionReason = 'recorded' | 'repair' | 'edit' | 'rollback';
+// 'optional': the person said a step that couldn't be found doesn't always
+// appear (repairedStepKey is that step, fromRunId the run it stopped).
+export type WorkflowVersionReason = 'recorded' | 'repair' | 'optional' | 'edit' | 'rollback';
 
 export interface WorkflowVersion {
   id: string;
@@ -238,6 +240,10 @@ export interface WorkflowStep {
   credentialPart?: 'username' | 'password';
   signals: WorkflowSignal[];
   requiresConfirmation: boolean;
+  // Only happens sometimes (a consent dialog, a cookie banner): when its
+  // element isn't on the page the run skips it; when it is, the step runs.
+  // Set only by the person, from the Fix screen.
+  optional: boolean;
   snapshotPath?: string;
 }
 
@@ -280,8 +286,13 @@ export interface WorkflowRun {
 export interface WorkflowRunRepair {
   live: boolean; // the run's window is still open, waiting at the stopped step
   fixed: boolean; // a repair from this run has been saved
-  canFix: boolean;
+  fixedBy?: 'pointing' | 'optional'; // how: shown where it is, or marked as not always appearing
+  canFix: boolean; // "Show me where it is"
   whyNot?: string; // when it can't be fixed from here
+  canMarkOptional: boolean; // "This doesn't always appear"
+  // Said before marking a step that looks like it sends the form: a run
+  // where it's missing would finish without sending.
+  optionalCaution?: string;
   // Where "Show me where it is" has got to; unset when nothing is happening.
   phase?: 'opening' | 'browsing' | 'picking' | 'checking' | 'saving' | 'failed';
   problem?: string; // the last thing that went wrong while pointing
@@ -400,8 +411,7 @@ export interface WorkflowRow {
   id: string;
   siteAgentId: string;
   name: string; // without the site's name in front: the list's header carries it
-  icon: string;
-  iconPicked: boolean; // the person chose it (else derived from the name)
+  // No icon of its own: a row shows its site's favicon (SiteSummary.favicon).
   state: WorkflowRowState;
   stateText: string; // "Running now, step 4 of 9"
   runId?: string; // the run Continue / Open / Fix goes to
@@ -445,6 +455,7 @@ export interface PlanStep {
   stepKey: string;
   segments: PlanSegment[];
   pause?: 'handoff' | 'confirm'; // stops and waits for the person
+  optional?: boolean; // skipped when it isn't on the page
 }
 
 export interface PlanPhase {

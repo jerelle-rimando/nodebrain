@@ -330,6 +330,7 @@ function StepLine({ step, byKey, values, focused }: {
             {step.pause === 'handoff' ? ' — waits for you to do this' : ' — waits for you to check first'}
           </span>
         )}
+        {step.optional && <span className="text-brain-text-muted"> — only if it appears</span>}
       </span>
     </li>
   );

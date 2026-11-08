@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  AppWindow, ArrowLeft, CheckCircle2, Circle, Hand, Loader2, MessageSquare, MinusCircle, MousePointerClick, PauseCircle,
+  AppWindow, ArrowLeft, CheckCircle2, Circle, EyeOff, Hand, Loader2, MessageSquare, MinusCircle, MousePointerClick, PauseCircle,
   RotateCcw, Square, Wrench, XCircle,
 } from 'lucide-react';
 import type { RunForm, WorkflowRun, WorkflowRunRepair, WorkflowRunStep } from '@shared/types';
@@ -15,7 +15,8 @@ import { STATUS_TONE, STATUS_WORDS } from './runFormUtils';
 //
 // A run that stopped because a step's element couldn't be found shows the
 // Fix panel at the top: what it got as far as, what it couldn't find, and
-// two ways out — point at the element in the browser, or ask in the chat.
+// three ways out — point at the element in the browser, say it doesn't
+// always appear (the step becomes optional), or ask in the chat.
 export function RunView({ workflowId, runId, onBack, onRunAgain }: {
   workflowId: string;
   runId: string;
@@ -170,6 +171,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
                         <span className="mt-0.5 flex-shrink-0"><StepIcon row={r} current={s.stepKey === currentKey} waiting={waiting && s.stepKey === currentKey} pause={!!s.pause} /></span>
                         <span className="min-w-0">
                           <span className={r || s.stepKey === currentKey ? 'text-brain-text' : 'text-brain-text-muted'}>{text}</span>
+                          {s.optional && !r?.error && <span className="text-brain-text-muted"> — only if it appears</span>}
                           {r?.error && <span className={`block ${r.status === 'failed' ? 'text-brain-warning' : 'text-brain-text-muted'}`}>{r.error}</span>}
                         </span>
                       </li>
@@ -210,6 +212,7 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   const setChatDraft = useStore((s) => s.setChatDraft);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [marking, setMarking] = useState(false);
   const [showPicture, setShowPicture] = useState(false);
   const busy = !!repair.phase && repair.phase !== 'failed';
 
@@ -232,6 +235,21 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   function askAgent() {
     setChatDraft(repair.askText);
     setActiveTab('dashboard');
+  }
+
+  // The step only happens sometimes. A run that's waiting skips it and
+  // carries on; later runs skip it whenever it's missing.
+  async function notAlways() {
+    setError(null);
+    setMarking(true);
+    try {
+      await api.markStepOptional(runId);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save that.");
+    } finally {
+      setMarking(false);
+    }
   }
 
   async function cancel() {
@@ -293,24 +311,45 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
       ) : (
         <>
           {repair.whyNot && <p className="text-xs text-brain-text-dim mt-2">{repair.whyNot}</p>}
-          {repair.canFix && (
+          {(repair.canFix || repair.canMarkOptional) && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button type="button" onClick={showMe} disabled={starting}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-50 text-white rounded-lg transition-colors">
-                <MousePointerClick size={13} /> {starting ? 'Opening…' : 'Show me where it is'}
-              </button>
+              {repair.canFix && (
+                <button type="button" onClick={showMe} disabled={starting || marking}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-50 text-white rounded-lg transition-colors">
+                  <MousePointerClick size={13} /> {starting ? 'Opening…' : 'Show me where it is'}
+                </button>
+              )}
+              {repair.canMarkOptional && (
+                <button type="button" onClick={notAlways} disabled={starting || marking}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-border text-brain-text hover:border-brain-border-bright disabled:opacity-50 rounded-lg transition-colors">
+                  <EyeOff size={13} /> {marking ? 'Saving…' : 'This doesn’t always appear'}
+                </button>
+              )}
               <button type="button" onClick={askAgent}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-border text-brain-text-dim hover:text-brain-text hover:border-brain-border-bright rounded-lg transition-colors">
                 <MessageSquare size={13} /> I don’t know either — ask the agent
               </button>
             </div>
           )}
-          {repair.canFix && (
-            <p className="text-xs text-brain-text-dim mt-2">
-              {repair.live
-                ? 'Point at the new one in the browser, and NodeBrain carries on from this step. The earlier steps aren’t done again.'
-                : 'Point at the new one, and the next run will use it.'}
-            </p>
+          {(repair.canFix || repair.canMarkOptional) && (
+            <ul className="text-xs text-brain-text-dim mt-2 space-y-1">
+              {repair.canFix && (
+                <li>
+                  {repair.live
+                    ? 'Moved? Point at the new one in the browser, and NodeBrain carries on from this step. The earlier steps aren’t done again.'
+                    : 'Moved? Point at the new one, and the next run will use it.'}
+                </li>
+              )}
+              {repair.canMarkOptional && (
+                <li>
+                  Only there sometimes, like a one-time notice or a cookie banner? Runs will skip it when it’s missing and still do it when it’s there.
+                  {repair.live ? ' This run skips it now and carries on.' : ''}
+                </li>
+              )}
+              {repair.canMarkOptional && repair.optionalCaution && (
+                <li className="text-brain-warning">{repair.optionalCaution}</li>
+              )}
+            </ul>
           )}
           {repair.live && (
             <button type="button" onClick={fixLater}

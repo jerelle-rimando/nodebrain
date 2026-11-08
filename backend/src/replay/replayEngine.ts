@@ -25,8 +25,9 @@ import { findElement } from './elementFinder';
 // model in the loop. Each step's element is found by its saved locator, else
 // its fingerprint (elementFinder.ts); a step that can't be found stops the
 // run as needs_attention with the step recorded, and nothing is guessed or
-// skipped. The one deliberate skip is a sign-in the profile doesn't need
-// (see signInBlocks).
+// skipped. Two deliberate skips: a sign-in the profile doesn't need (see
+// signInBlocks), and a step the person marked optional ("This doesn't always
+// appear") whose element isn't on the page this time.
 //
 // Secrets (saved passwords, secret literals, secret field values) are read
 // in memory when their step runs. They are never written to a run row, a run
@@ -41,6 +42,14 @@ const FALLBACK_TIMEOUT_MS = 3_000; // the page has had its 15 s by then
 const ACTION_TIMEOUT_MS = 15_000;
 const NAVIGATE_TIMEOUT_MS = 60_000;
 const SIGN_IN_CHECK_MS = 15_000;
+// An optional step (a consent dialog, a cookie banner) gets a shorter look:
+// most runs where it's missing would otherwise wait the full 18 s for it.
+// Long enough for a dialog that opens just after the page loads.
+const OPTIONAL_PRIMARY_TIMEOUT_MS = 6_000;
+const OPTIONAL_FALLBACK_TIMEOUT_MS = 1_000;
+// What the run view says under an optional step that was skipped.
+const OPTIONAL_SKIPPED_TEXT = "Wasn't on the page this time. It doesn't always appear, so NodeBrain carried on.";
+const OPTIONAL_MARKED_TEXT = "You said this doesn't always appear, so NodeBrain skipped it and carried on.";
 
 interface ActiveRun {
   runId: string;
@@ -85,7 +94,9 @@ export interface RepairHold {
   recordedValue?: string;
   signal: AbortSignal;
   redact: (text: string) => string;
-  resume: (steps: WorkflowStep[]) => void; // carry on with a repaired version's steps
+  // Carry on with a fixed version's steps: run this step again (it was shown
+  // where it is), or skip it (it was marked as not always appearing).
+  resume: (steps: WorkflowStep[], then: 'retry' | 'skip') => void;
   release: () => void; // stop waiting: the run ends as needs_attention
 }
 
@@ -363,8 +374,12 @@ class Replay {
         // A repair brings a new version's steps; the same step runs again.
         const repaired = outcome.repairable ? await this.holdForRepair(step, outcome.error) : null;
         if (repaired) {
-          this.steps = repaired;
+          this.steps = repaired.steps;
           blocks = signInBlocks(this.steps);
+          if (repaired.then === 'skip') {
+            this.record(step, 'skipped', Date.now(), { error: OPTIONAL_MARKED_TEXT });
+            continue;
+          }
           this.justRepaired = step.stepKey;
           i--;
           continue;
@@ -525,9 +540,17 @@ class Replay {
 
     const found = await findElement(page, step, {
       value: resolved.value, recordedValue: resolved.recordedValue,
-      primaryTimeoutMs: PRIMARY_TIMEOUT_MS, fallbackTimeoutMs: FALLBACK_TIMEOUT_MS, signal: this.signal,
+      primaryTimeoutMs: step.optional ? OPTIONAL_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
+      fallbackTimeoutMs: step.optional ? OPTIONAL_FALLBACK_TIMEOUT_MS : FALLBACK_TIMEOUT_MS,
+      signal: this.signal,
     });
     if (this.closedOrStopped()) return this.stopped(step, started);
+    // Not there this time, and the person said it doesn't always appear.
+    // Several matches isn't "not there": that still stops, as any step would.
+    if (!found.found && step.optional && !found.ambiguous) {
+      this.record(step, 'skipped', started, { error: OPTIONAL_SKIPPED_TEXT });
+      return { ok: true };
+    }
     if (!found.found) {
       const missed = await this.stop(step, started, 'needs_attention', await this.missMessage(page, step, what, found.ambiguous ?? false), true);
       return { ...missed, repairable: true } as StepOutcome;
@@ -713,12 +736,14 @@ class Replay {
 
   // The run stopped on a step whose element it couldn't find. A person
   // watching can point at the element (replay/repair.ts) and the run carries
-  // on from this step with the repaired version. Until then the window stays
-  // as it is and the run shows as needs_attention. Returns the repaired
-  // version's steps, or null when the hold ends without a repair: the person
+  // on from this step with the repaired version. Or they say the step doesn't
+  // always appear, and the run skips it and carries on from the next one.
+  // Until then the window stays as it is and the run shows as
+  // needs_attention. Returns the fixed version's steps and whether to retry
+  // or skip the step, or null when the hold ends without a fix: the person
   // closed the window or chose to fix it later, the run was stopped, or
   // nobody answered within REPAIR_HOLD_MS. A run nobody is watching isn't held.
-  private async holdForRepair(step: WorkflowStep, error: string): Promise<WorkflowStep[] | null> {
+  private async holdForRepair(step: WorkflowStep, error: string): Promise<{ steps: WorkflowStep[]; then: 'retry' | 'skip' } | null> {
     if (this.run.trigger === 'schedule' || this.closedOrStopped()) return null;
     const page = this.pages.get(step.pageAlias);
     const browser = this.entry.launched?.browser;
@@ -731,14 +756,14 @@ class Replay {
     replayEvents.emit('run:needs_repair', getRunById(this.run.id));
     console.log(`[replay] ${this.run.id} ${step.stepKey}: holding the window for a repair`);
 
-    const repaired = await new Promise<WorkflowStep[] | null>((resolve) => {
-      const end = (steps: WorkflowStep[] | null) => {
+    const repaired = await new Promise<{ steps: WorkflowStep[]; then: 'retry' | 'skip' } | null>((resolve) => {
+      const end = (fixed: { steps: WorkflowStep[]; then: 'retry' | 'skip' } | null) => {
         if (holds.get(this.run.id) !== hold) return;
         holds.delete(this.run.id);
         clearTimeout(timer);
         this.signal.removeEventListener('abort', onGone);
         browser.off('disconnected', onGone);
-        resolve(steps);
+        resolve(fixed);
       };
       const onGone = () => end(null);
       const hold: RepairHold = {
@@ -746,7 +771,7 @@ class Replay {
         step, steps: this.steps, fieldsById: this.fieldsById, page,
         value: value.value, recordedValue: value.recordedValue, signal: this.signal,
         redact: (text) => this.redact(text),
-        resume: (steps) => end(steps),
+        resume: (steps, then) => end({ steps, then }),
         release: () => end(null),
       };
       const timer = setTimeout(onGone, REPAIR_HOLD_MS);

@@ -4,7 +4,7 @@ import type { Locator, Page } from 'playwright-core';
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type WorkflowField, type WorkflowRun, type WorkflowRunRepair, type WorkflowRunStep, type WorkflowStep,
-  type WorkflowStepFingerprint,
+  type WorkflowStepFingerprint, type WorkflowVersion,
 } from '../../shared-types';
 import { getDataDir } from '../db/database';
 import {
@@ -42,6 +42,11 @@ import {
 // A repair writes a new version (deriveVersion, reason 'repair'): every step
 // copied, the repaired one with a new locator and fingerprint. The old
 // version keeps the old locator, so rollback works.
+//
+// The other fix is "This doesn't always appear" (markOptional): the step is
+// conditional (a consent dialog, a cookie banner), so a new version (reason
+// 'optional') marks it optional. Runs then skip it when it's missing and
+// still do it when it's there. No browser is needed for this one.
 //
 // Two cases:
 //   - live: the run is holding its window open at the stopped step
@@ -84,32 +89,40 @@ export function repairStatus(runId: string): WorkflowRunRepair | undefined {
   const step = steps.find((s) => s.stepKey === run.failedStepKey);
   if (!step) return undefined;
   const fields = getFieldsByWorkflow(workflow.id);
-  // Fixed: a repair of this step, from this run, saved after it stopped
-  // there. (A run can be repaired more than once as it goes.)
-  const fixedBy = hold ? undefined : getVersionsByWorkflow(workflow.id).find((v) =>
-    v.reason === 'repair' && v.fromRunId === runId && v.repairedStepKey === run.failedStepKey
-    && v.createdAt >= stoppedAt.stoppedAt);
+  // Fixed: a fix of this step (shown where it is, or marked optional), from
+  // this run, saved after it stopped there. (A run can be fixed more than
+  // once as it goes.)
+  const fixedBy = hold ? undefined : fixVersions(workflow.id, runId).find((v) =>
+    v.repairedStepKey === run.failedStepKey && v.createdAt >= stoppedAt.stoppedAt);
   const state = states.get(runId);
   const live = !!hold;
 
-  let whyNot: string | undefined;
+  // Reasons neither fix can be made from here...
+  let blocked: string | undefined;
   if (!live && !fixedBy && workflow.currentVersionId !== stoppedAt.versionId) {
-    whyNot = 'This workflow has changed since this run, so it can’t be fixed from here. Run it again; if it stops, you can fix it then.';
+    blocked = 'This workflow has changed since this run, so it can’t be fixed from here. Run it again; if it stops, you can fix it then.';
   } else if (!live && !fixedBy && isRunActive(runId)) {
-    whyNot = 'This run is still closing its window. Try again in a moment.';
-  } else if (!live && !fixedBy && step.valueTarget === 'locator' && valueForLater(run, step, fields) === undefined) {
-    whyNot = 'This step picks a choice that was kept secret, so it can only be fixed while a run is open. Run it again and fix it when it stops.';
+    blocked = 'This run is still closing its window. Try again in a moment.';
   }
+  // ...and one that only stops pointing, which needs the step's value.
+  let whyNot = blocked;
+  if (!whyNot && !live && !fixedBy && step.valueTarget === 'locator' && valueForLater(run, step, fields) === undefined) {
+    whyNot = 'This step picks a choice that was kept secret, so it can only be shown while a run is open. Run it again and fix it when it stops.';
+  }
+  const pointing = !!state?.phase && state.phase !== 'failed';
 
   const failedRow = [...runSteps].reverse().find((r) => r.stepKey === step.stepKey && r.status === 'failed');
   return {
     live,
     fixed: !!fixedBy,
+    fixedBy: fixedBy ? (fixedBy.reason === 'optional' ? 'optional' : 'pointing') : undefined,
     canFix: !fixedBy && !whyNot,
     whyNot,
+    canMarkOptional: !fixedBy && !blocked && !pointing,
+    optionalCaution: optionalCaution(step, steps),
     phase: state?.phase,
     problem: state?.problem,
-    explanation: explain(run, steps, step, fields, runSteps, live, !!fixedBy, hold?.value),
+    explanation: explain(run, steps, step, fields, runSteps, live, fixedBy?.reason, hold?.value),
     askText: askText(run, workflow.name, steps, step, fields, runSteps, hold?.value),
     hasScreenshot: !!screenshotFile(failedRow),
   };
@@ -120,10 +133,15 @@ export function repairStatus(runId: string): WorkflowRunRepair | undefined {
 function stoppedVersion(run: WorkflowRun, runSteps: WorkflowRunStep[]): { versionId: string; stoppedAt: string } {
   const failed = [...runSteps].reverse().find((r) => r.stepKey === run.failedStepKey && r.status === 'failed');
   const stoppedAt = failed?.createdAt ?? run.finishedAt ?? run.startedAt;
-  const during = getVersionsByWorkflow(run.workflowId)
-    .filter((v) => v.reason === 'repair' && v.fromRunId === run.id && v.createdAt < stoppedAt)
+  const during = fixVersions(run.workflowId, run.id)
+    .filter((v) => v.createdAt < stoppedAt)
     .sort((a, b) => b.number - a.number)[0];
   return { versionId: during?.id ?? run.versionId, stoppedAt };
+}
+
+// Versions made by fixing a step that this run stopped at.
+function fixVersions(workflowId: string, runId: string): WorkflowVersion[] {
+  return getVersionsByWorkflow(workflowId).filter((v) => (v.reason === 'repair' || v.reason === 'optional') && v.fromRunId === runId);
 }
 
 // The picture the run took when it stopped, if it's still there and inside
@@ -171,6 +189,38 @@ export function cancelRepair(runId: string): boolean {
   return true;
 }
 
+// "This doesn't always appear": the step is conditional (a consent dialog, a
+// cookie banner). Saved as a new version with the step marked optional. A
+// live run skips it and carries on from the next step; after the run, the
+// next run uses it. Either way, later runs skip it only when it's missing.
+export function markOptional(runId: string): void {
+  const status = repairStatus(runId);
+  if (!status) throw new RepairError('This run doesn’t need fixing.');
+  if (status.fixed) throw new RepairError('This has already been fixed. Run the workflow again to use it.');
+  if (!status.canMarkOptional) {
+    throw new RepairError(status.whyNot && !status.canFix ? status.whyNot : 'Finish showing NodeBrain where it is first, or cancel that.');
+  }
+  const run = getRunById(runId)!;
+  const hold = getRepairHold(runId);
+  const versionId = hold ? hold.versionId : stoppedVersion(run, getRunSteps(runId)).versionId;
+  const stepKey = run.failedStepKey!;
+  const wf = getWorkflowById(run.workflowId);
+  if (!wf || wf.currentVersionId !== versionId) {
+    throw new RepairError('This workflow was changed since this run stopped, so nothing was saved. Run it again.');
+  }
+  let version;
+  try {
+    version = deriveVersion(run.workflowId, { reason: 'optional', repairedStepKey: stepKey, fromRunId: runId }, {
+      [stepKey]: { optional: true },
+    });
+  } catch (err) {
+    console.error('[repair] could not mark optional:', err instanceof Error ? err.message : err);
+    throw new RepairError('NodeBrain couldn’t save that. Nothing was changed.');
+  }
+  console.log(`[repair] workflow ${run.workflowId}: step ${stepKey} marked optional as version ${version.number} (from run ${runId})`);
+  hold?.resume(getStepsByVersion(version.id), 'skip');
+}
+
 // "Close the browser, fix it later": a live run stops waiting and ends.
 export function releaseRun(runId: string): boolean {
   const hold = getRepairHold(runId);
@@ -196,7 +246,7 @@ function startLive(hold: RepairHold): void {
       state.phase = 'saving';
       const steps = saveRepair(hold.workflowId, hold.versionId, hold.step.stepKey, hold.runId, picked);
       await session.close();
-      hold.resume(steps); // the run carries on from the repaired step
+      hold.resume(steps, 'retry'); // the run carries on from the repaired step
     } catch (err) {
       console.error('[repair] live repair failed:', err instanceof Error ? err.message : err);
       problem = err instanceof RepairError ? err.message : 'Something went wrong while fixing this step. Nothing was changed.';
@@ -725,6 +775,33 @@ function gerund(sentence: string | undefined): string {
   return 'the step before';
 }
 
+// Said under "This doesn't always appear" when the step is one a workflow
+// can't really do without: the click that sends a form, or the one that
+// submits a sign-in: a click or key press that took the browser to another
+// page after a saved sign-in was typed on this one. (signInBlocks isn't used
+// here: it ends a block at the first click after the password, which on the
+// Roblox recording was a click on the page background, not "Sign in".)
+function optionalCaution(step: WorkflowStep, steps: WorkflowStep[]): string | undefined {
+  if (signsIn(step, steps)) {
+    return 'This step looks like the one that signs in. If it’s marked as not always appearing, a run where it’s missing will carry on without signing in.';
+  }
+  if (submitLike(step)) {
+    return 'This step looks like the one that sends the form. If it’s marked as not always appearing, a run where it’s missing will finish without sending anything.';
+  }
+  return undefined;
+}
+
+function signsIn(step: WorkflowStep, steps: WorkflowStep[]): boolean {
+  if ((step.action !== 'click' && step.action !== 'press') || !step.signals.some((s) => s.name === 'navigation')) return false;
+  for (let i = steps.findIndex((s) => s.stepKey === step.stepKey) - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s.pageAlias !== step.pageAlias) continue;
+    if (s.action === 'navigate' || s.signals.some((x) => x.name === 'navigation')) return false;
+    if (s.valueSource === 'credential') return true;
+  }
+  return false;
+}
+
 function submitLike(step: WorkflowStep): boolean {
   if (step.action === 'press') return step.args.key === 'Enter';
   if (step.action !== 'click') return false;
@@ -737,7 +814,7 @@ function submitLike(step: WorkflowStep): boolean {
 // and the 2 after it didn't happen. Nothing on this page has been sent."
 function explain(
   run: WorkflowRun, steps: WorkflowStep[], step: WorkflowStep, fields: WorkflowField[],
-  runSteps: WorkflowRunStep[], live: boolean, fixed: boolean, liveValue: string | undefined,
+  runSteps: WorkflowRunStep[], live: boolean, fixed: WorkflowVersion['reason'] | undefined, liveValue: string | undefined,
 ): string {
   const words = sentences(run, steps, fields);
   const fieldsById = new Map(fields.map((f) => [f.id, f]));
@@ -774,7 +851,9 @@ function explain(
     second += ` Earlier on this page I ${did || 'pressed a button'}, so that part may already have gone through.`;
   }
 
-  const third = fixed
+  const third = fixed === 'optional'
+    ? 'You said it doesn’t always appear, so from now on runs skip it when it isn’t there, and still do it when it is.'
+    : fixed
     ? 'You’ve shown NodeBrain the new one, so the next run will use it.'
     : live
       ? 'The browser is still open where I stopped.'

@@ -215,7 +215,7 @@ function planStep(step: WorkflowStep, all: WorkflowStep[], fieldsById: Map<strin
   }
 
   const pause = step.action === 'handoff' ? 'handoff' as const : step.requiresConfirmation ? 'confirm' as const : undefined;
-  return { stepKey: step.stepKey, segments, pause };
+  return { stepKey: step.stepKey, segments, pause, ...(step.optional ? { optional: true } : {}) };
 }
 
 function shortUrl(url: string): string {

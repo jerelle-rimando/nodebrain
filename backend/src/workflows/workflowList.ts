@@ -4,7 +4,6 @@ import {
 } from '../../shared-types';
 import {
   getAllSiteAgents, getAllWorkflows, getRunsByWorkflow, getRunSteps, getStepsByVersion, getFieldsByWorkflow,
-  getWorkflowIcons,
 } from '../db/workflowRepository';
 import { isRunActive, getRepairHold, describeStepTarget, isMissError } from '../replay/replayEngine';
 import { repairStatus } from '../replay/repair';
@@ -16,7 +15,6 @@ import { siteIconUrl } from '../recorder/siteLook';
 // replay engine, repair flow and Take Control are only asked, never changed.
 
 export function buildOverview(now = new Date()): WorkflowsOverview {
-  const icons = getWorkflowIcons();
   const paused = new Map(listTakeControlRequests().filter((r) => r.runId).map((r) => [r.runId!, r]));
   const sites = getAllSiteAgents();
   const siteNames = new Map(sites.map((s) => [s.id, s.name]));
@@ -29,13 +27,10 @@ export function buildOverview(now = new Date()): WorkflowsOverview {
     const last = runs[0];
     const touched = last && last.startedAt > wf.updatedAt ? last.startedAt : wf.updatedAt;
     if (touched > (lastActivity.get(wf.siteAgentId) ?? '')) lastActivity.set(wf.siteAgentId, touched);
-    const picked = icons.get(wf.id);
     workflows.push({
       id: wf.id,
       siteAgentId: wf.siteAgentId,
       name: withoutSiteName(wf.name, siteNames.get(wf.siteAgentId)),
-      icon: picked ?? deriveAgentEmoji(wf.name, wf.description),
-      iconPicked: !!picked,
       ...rowState(last, runs, paused.has(last?.id ?? '') ? paused.get(last!.id)!.reason : undefined, now),
     });
   }
