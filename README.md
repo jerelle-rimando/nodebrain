@@ -40,10 +40,10 @@ The system revolves around persistent AI agents that can:
 
 NodeBrain is currently unsigned. Windows may show a SmartScreen warning — click "More info" → "Run anyway" to proceed. The full source code is on GitHub if you want to verify it yourself. Download from the **Releases** tab.
 
-- **NodeBrain Setup 0.3.8.exe**  
+- **NodeBrain Setup 0.5.0.exe**  
   Installs NodeBrain on your system.
 
-- **NodeBrain-0.3.8-portable.exe**  
+- **NodeBrain-0.5.0-portable.exe**  
   Run instantly without installation.
 
 ### Installation (Development)
