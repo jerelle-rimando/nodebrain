@@ -19,7 +19,8 @@ import { siteKeyToFolderName } from '../recorder/siteIdentity';
 import { captureSiteLook, isDefaultSiteName, siteIconFile } from '../recorder/siteLook';
 import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../browser/siteBrowserLock';
 import { requestTakeControl } from '../browser/takeControl';
-import { findElement } from './elementFinder';
+import { findElement, SETTLED_MS } from './elementFinder';
+import { trackActivity } from './pageActivity';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -37,14 +38,17 @@ export const replayEvents = new EventEmitter();
 
 export class RunStartError extends Error {}
 
+// The most a step waits for its saved locator, then its fingerprint. Both
+// end early once the page has settled (elementFinder.ts SETTLED_MS): only a
+// page still loading or busy waits the full time.
 const PRIMARY_TIMEOUT_MS = 15_000; // page loads and slow widgets
 const FALLBACK_TIMEOUT_MS = 3_000; // the page has had its 15 s by then
 const ACTION_TIMEOUT_MS = 15_000;
 const NAVIGATE_TIMEOUT_MS = 60_000;
 const SIGN_IN_CHECK_MS = 15_000;
-// An optional step (a consent dialog, a cookie banner) gets a shorter look:
-// most runs where it's missing would otherwise wait the full 18 s for it.
-// Long enough for a dialog that opens just after the page loads.
+// An optional step (a consent dialog, a cookie banner) follows the same
+// settled-page rule as any step; these shorter limits only matter on a page
+// that never goes quiet, where an ordinary step would wait the full 18 s.
 const OPTIONAL_PRIMARY_TIMEOUT_MS = 6_000;
 const OPTIONAL_FALLBACK_TIMEOUT_MS = 1_000;
 // What the run view says under an optional step that was skipped.
@@ -340,11 +344,13 @@ class Replay {
     browser.on('disconnected', () => { this.browserGone = true; });
     const first = context.pages()[0] ?? (await context.newPage());
     this.pages.set('page', first);
+    trackActivity(first);
     this.watchDialogs(first);
     // Popups get the same names the recorder gave them: page, popup1, popup2…
     context.on('page', (p) => {
       if ([...this.pages.values()].includes(p)) return;
       this.pages.set(`popup${this.pages.size}`, p);
+      trackActivity(p);
       this.watchDialogs(p);
       // A popup opens as its own window, in front; it joins the run's window
       // in the taskbar unless the person has that one up.
@@ -417,7 +423,9 @@ class Replay {
     const recordedPath = anchor.fingerprint.urlPath;
     if (!page || !anchor.locator || !recordedPath) return false;
     const box = page.locator(anchor.locator);
-    const deadline = Date.now() + SIGN_IN_CHECK_MS;
+    const start = Date.now();
+    const deadline = start + SIGN_IN_CHECK_MS;
+    const activity = trackActivity(page);
     let elsewhereSince: number | undefined;
     while (Date.now() < deadline && !this.signal.aborted && !this.browserGone) {
       if ((await box.count().catch(() => 0)) > 0) return false;
@@ -429,6 +437,10 @@ class Replay {
         if (Date.now() - elsewhereSince > 1500) break;
       } else {
         elsewhereSince = undefined;
+        // Still on the sign-in page, settled, and the saved box isn't there:
+        // the page changed, and waiting won't bring it. The step itself
+        // tries the fingerprint (a redesigned sign-in page, like Roblox's).
+        if (here === recordedPath && Date.now() - start >= SETTLED_MS && (await activity.quietMs()) >= SETTLED_MS) break;
       }
       await new Promise((r) => setTimeout(r, 250));
     }
@@ -543,6 +555,7 @@ class Replay {
       primaryTimeoutMs: step.optional ? OPTIONAL_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
       fallbackTimeoutMs: step.optional ? OPTIONAL_FALLBACK_TIMEOUT_MS : FALLBACK_TIMEOUT_MS,
       signal: this.signal,
+      activity: trackActivity(page),
     });
     if (this.closedOrStopped()) return this.stopped(step, started);
     // Not there this time, and the person said it doesn't always appear.

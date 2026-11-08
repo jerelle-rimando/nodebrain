@@ -1,4 +1,5 @@
 import type { Locator, Page } from 'playwright-core';
+import type { PageActivity } from './pageActivity';
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type WorkflowStep, type WorkflowStepFingerprint,
@@ -25,9 +26,18 @@ export interface FindOptions {
   primaryTimeoutMs: number;
   fallbackTimeoutMs: number;
   signal?: AbortSignal; // the run was stopped: give up at once
+  // The page's activity (pageActivity.ts). With it, the wait for the saved
+  // locator ends early once the page has settled: see SETTLED_MS.
+  activity?: PageActivity;
 }
 
 const POLL_MS = 200;
+// The saved locator is waited for until the page settles, not for the whole
+// primaryTimeoutMs: once the step has waited this long and the page has been
+// quiet this long (loaded, no requests, no nodes added or removed), the
+// element isn't coming, and the fingerprint is tried at once. A page still
+// loading or busy gets the full timeout, as before.
+export const SETTLED_MS = 2_000;
 const NTH = /\s*>>\s*nth=(-?\d+)\s*$/;
 
 // Playwright's quoted selector strings escape backslash and double quote.
@@ -171,6 +181,7 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
   }
 
   let ambiguousPrimary = false;
+  let settled = false; // the wait above ended because the page went quiet
   if (primary) {
     tried.push('saved locator');
     const loc = page.locator(primary);
@@ -182,6 +193,10 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
       // Still more than one after a moment: the page has settled, waiting won't help.
       if (count > 1 && Date.now() - start > 1500) { ambiguousPrimary = true; break; }
       if (Date.now() >= deadline || opts.signal?.aborted) break;
+      if (opts.activity && Date.now() - start >= SETTLED_MS && (await opts.activity.quietMs()) >= SETTLED_MS) {
+        settled = true;
+        break;
+      }
       await sleep(POLL_MS);
     }
   }
@@ -195,7 +210,8 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
       reason: ambiguousPrimary ? 'several elements match' : 'not found on this page',
     };
   }
-  const deadline = Date.now() + opts.fallbackTimeoutMs;
+  // A settled page won't change while the fingerprint is tried: one pass.
+  const deadline = Date.now() + (settled ? 0 : opts.fallbackTimeoutMs);
   let ambiguous = ambiguousPrimary;
   for (;;) {
     const r = await tryFallback(page, fp, !positionStale, valueBound);
