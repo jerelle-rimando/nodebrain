@@ -125,6 +125,7 @@ NodeBrain is model-agnostic and works with any of the following out of the box:
 - All API keys are encrypted with AES-256 before being stored locally
 - Your agent definitions, credentials, task history, and RAG memory are stored only on your machine and are never sent to NodeBrain. Data leaves your machine in these cases: when you use a hosted provider, the content your agents process is sent to that provider's API; integrations send data to their own services (e.g. a Telegram message goes to Telegram's API); and, only if you opt in, anonymous usage telemetry (event names, counts, timings, error categories, app version, OS, and a random install ID) is sent to NodeBrain. Telemetry is off by default and never includes prompts, agent names, file paths, message contents, or credentials — see [PRIVACY.md](PRIVACY.md). Use Ollama if you need inference to stay fully local.
 - The database is stored at `%APPDATA%\NodeBrain\data\nodebrain.db` (Windows) or `~/Library/Application Support/NodeBrain/data/nodebrain.db` (Mac). It is never inside the install directory.
+- On Windows, uninstalling asks whether to also remove the downloaded local AI model and engine (`%LOCALAPPDATA%\NodeBrain`, kept by default) and your workflows, saved passwords and site sign-ins (`%APPDATA%\NodeBrain` plus the vault key in Credential Manager, kept by default). Updates never remove either.
 - Never commit your `.env` file — it is already in `.gitignore`
 
 ### ⚠️ Local Filesystem Integration Warning

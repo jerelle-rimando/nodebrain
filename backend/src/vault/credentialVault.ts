@@ -15,9 +15,23 @@ export function initVaultKey(): void {
   delete process.env.VAULT_SECRET;
 }
 
+function keyFromSecret(secret: string): string {
+  return CryptoJS.SHA256(secret).toString();
+}
+
+// Decrypts with an explicit secret instead of the process's vault key. Used by
+// probeVaultKeys to test candidate keys; '' means it didn't decrypt.
+export function decryptWithSecret(ciphertext: string, secret: string): string {
+  try {
+    return CryptoJS.AES.decrypt(ciphertext, keyFromSecret(secret)).toString(CryptoJS.enc.Utf8);
+  } catch {
+    return ''; // wrong key: usually "Malformed UTF-8 data"
+  }
+}
+
 function getEncryptionKey(): string {
   if (cachedSecret !== null) {
-    return CryptoJS.SHA256(cachedSecret).toString();
+    return keyFromSecret(cachedSecret);
   }
   // Defensive fallback: initVaultKey() should have been called before any decrypt.
   // If reached, cache-and-delete now so this path can only fire once.
@@ -27,7 +41,7 @@ function getEncryptionKey(): string {
   }
   cachedSecret = envKey;
   delete process.env.VAULT_SECRET;
-  return CryptoJS.SHA256(cachedSecret).toString();
+  return keyFromSecret(cachedSecret);
 }
 
 export function encryptValue(plaintext: string): string {

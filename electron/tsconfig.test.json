@@ -1,0 +1,12 @@
+{
+  // Tests compile to test-dist/, not dist/ — dist/ ships inside the app.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./test-dist",
+    "rootDir": ".",
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["./test/**/*.ts", "./vaultKey.ts"],
+  "exclude": ["node_modules", "dist", "test-dist", "wizard"]
+}

@@ -81,6 +81,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: NodeBrain
+  # Asks on uninstall whether to also remove the downloaded AI model and the
+  # user's data, and never touches either during an update. Lives outside
+  # electron/assets so it isn't shipped inside the app.
+  include: build-resources/uninstaller.nsh
   # No spaces: latest.yml references this exact name, and GitHub turns spaces in
   # uploaded asset names into dots, which 404s every auto-update download.
   artifactName: ${productName}-Setup-${version}.${ext}

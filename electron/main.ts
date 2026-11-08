@@ -10,6 +10,7 @@ import * as os from 'os';
 import { autoUpdater } from 'electron-updater';
 import extractZip from 'extract-zip';
 import { startTelemetrySender, TelemetrySender, TELEMETRY_CONFIG_FILE_NAME } from './telemetrySender';
+import { resolveVaultSecret, CREDENTIAL_MANAGER_HELP, KeytarLike, ProbeResult } from './vaultKey';
 
 interface TelemetryConsentState {
   installId: string;
@@ -19,7 +20,11 @@ interface TelemetryConsentState {
 
 interface StoreSchema {
   setupComplete: boolean;
-  vaultSecret: string;
+  // Legacy plaintext copy of the vault key (≤0.5.0). Only read so it can be
+  // migrated to Credential Manager and deleted — never written.
+  vaultSecret?: string;
+  // One-way fingerprint of the vault key — see getOrCreateVaultSecret.
+  vaultKeyCheck?: string;
   onboardingComplete: boolean;
   backendUrl?: string;
   telemetry: TelemetryConsentState;
@@ -143,45 +148,112 @@ function getModelsDir(): string {
 }
 
 // ── Vault secret ──────────────────────────────────────────────────────────────
-async function getOrCreateVaultSecret(): Promise<string> {
-  const SERVICE = 'NodeBrain';
-  const ACCOUNT = 'vault-secret';
+// Only in Windows Credential Manager; the ≤0.5.0 plaintext copy in the store is
+// migrated out. All the decisions live in vaultKey.ts — this is the wiring.
+let resolvedVaultSecret: string | null = null;
 
-  let keytarLib: any = null;
+const VAULT_HELP_SUFFIX = 'Until it can, NodeBrain keeps using the copy in its settings file, which is less safe. It will try again next time it starts.';
+
+// Runs backend/src/vault/probeVaultKeys in a child (it needs the backend's
+// sql.js + crypto-js) to learn which candidate keys decrypt existing data.
+// Candidates go in the env, not argv. Resolves null on any failure.
+function runVaultKeyProbe(candidates: string[]): Promise<ProbeResult> {
+  return new Promise((resolve) => {
+    const entry = isDev
+      ? path.join(__dirname, '../backend/src/vault/probeVaultKeys.ts')
+      : path.join(process.resourcesPath, 'backend/dist/backend/src/vault/probeVaultKeys.js');
+    const cwd = isDev ? path.join(__dirname, '../backend') : path.join(process.resourcesPath, 'backend');
+    const args = isDev ? [path.join(cwd, 'node_modules/tsx/dist/cli.mjs'), entry] : [entry];
+    let out = '';
+    let settled = false;
+    const done = (r: ProbeResult) => { if (!settled) { settled = true; resolve(r); } };
+    let child: ChildProcess;
+    try {
+      child = spawn(process.execPath, args, {
+        cwd,
+        windowsHide: true,
+        shell: false,
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          NODEBRAIN_VAULT_PROBE_KEYS: JSON.stringify(candidates),
+          ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
+        },
+      });
+    } catch (err) {
+      log(`vault key probe: spawn failed: ${err}`);
+      return done(null);
+    }
+    const timer = setTimeout(() => { log('vault key probe: timed out'); child.kill(); done(null); }, 30_000);
+    child.stdout?.on('data', (b: Buffer) => { out += b.toString(); });
+    child.stderr?.on('data', (b: Buffer) => log(`vault key probe: ${b.toString().trim()}`));
+    child.on('error', (err) => { clearTimeout(timer); log(`vault key probe: ${err}`); done(null); });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) { log(`vault key probe: exited ${code}`); return done(null); }
+      try {
+        const parsed = JSON.parse(out.trim().split('\n').pop() ?? '');
+        if (typeof parsed.samples !== 'number' || !Array.isArray(parsed.works) || parsed.works.length !== candidates.length) throw new Error('bad shape');
+        done({ samples: parsed.samples, works: parsed.works.map(Boolean) });
+      } catch (err) {
+        log(`vault key probe: unreadable output: ${err}`);
+        done(null);
+      }
+    });
+  });
+}
+
+async function getOrCreateVaultSecret(): Promise<string> {
+  if (resolvedVaultSecret) return resolvedVaultSecret;
+
+  let keytarLib: KeytarLike | null = null;
+  let keytarLoadError: string | undefined;
   try {
     const keytar = await import('keytar');
     keytarLib = ('default' in keytar) ? (keytar as any).default : keytar;
-  } catch { /* keytar unavailable */ }
-
-  let keytarSecret: string | null = null;
-  if (keytarLib) {
-    try { keytarSecret = await keytarLib.getPassword(SERVICE, ACCOUNT) as string | null; } catch { /* ignore */ }
+  } catch (err) {
+    keytarLoadError = String((err as Error)?.message ?? err);
+    log(`vault key: keytar failed to load: ${keytarLoadError}`);
   }
 
-  let storeSecret: string | undefined;
-  try { storeSecret = store.get('vaultSecret') as string | undefined; } catch { /* ignore */ }
-
-  if (keytarSecret) {
-    // keytar is authoritative; keep store in sync
-    try { store.set('vaultSecret', keytarSecret); } catch { /* ignore */ }
-    return keytarSecret;
-  }
-
-  if (storeSecret) {
-    // store has it; backfill keytar
-    if (keytarLib) {
-      try { await keytarLib.setPassword(SERVICE, ACCOUNT, storeSecret); } catch { /* ignore */ }
-    }
-    return storeSecret;
-  }
-
-  // Neither has a secret — generate and persist to both
-  const secret = crypto.randomBytes(32).toString('hex');
-  if (keytarLib) {
-    try { await keytarLib.setPassword(SERVICE, ACCOUNT, secret); } catch { /* ignore */ }
-  }
-  try { store.set('vaultSecret', secret); } catch { /* ignore */ }
-  return secret;
+  resolvedVaultSecret = await resolveVaultSecret({
+    keytar: keytarLib,
+    keytarLoadError,
+    probeKeys: runVaultKeyProbe,
+    store: {
+      getLegacySecret: () => store.get('vaultSecret') as string | undefined,
+      deleteLegacySecret: () => store.delete('vaultSecret'),
+      getCheck: () => store.get('vaultKeyCheck') as string | undefined,
+      setCheck: (check) => store.set('vaultKeyCheck', check),
+      isSetupComplete: () => !!store.get('setupComplete'),
+    },
+    ui: {
+      log,
+      warnNotMigrated: (reason) => {
+        // Not awaited: startup carries on with the legacy copy.
+        void dialog.showMessageBox({
+          type: 'warning',
+          title: 'NodeBrain',
+          message: "Couldn't move your saved-password key to Windows Credential Manager",
+          detail: `${CREDENTIAL_MANAGER_HELP}\n\n${VAULT_HELP_SUFFIX}\n\nDetails: ${reason}`,
+        });
+      },
+      warn: (message, detail) => {
+        void dialog.showMessageBox({ type: 'warning', title: 'NodeBrain', message, detail });
+      },
+      stop: async (message, detail, continueLabel) => {
+        const { response } = await dialog.showMessageBox({
+          type: 'error', title: 'NodeBrain', message, detail,
+          buttons: ['Quit', continueLabel], defaultId: 0, cancelId: 0, noLink: true,
+        });
+        if (response === 1) return;
+        log('vault key: user chose Quit');
+        app.exit(1);
+        await new Promise<never>(() => {}); // never resolve: we're exiting
+      },
+    },
+  });
+  return resolvedVaultSecret;
 }
 
 // ── Telemetry: identity ───────────────────────────────────────────────────────
@@ -1358,8 +1430,6 @@ function registerIpcHandlers(): void {
     store.set('setupComplete', true);
     log('Setup marked complete');
   });
-
-  ipcMain.handle('get-vault-secret', () => getOrCreateVaultSecret());
 
   // ── Telemetry ────────────────────────────────────────────────────────────
   // Every branch is wrapped so a telemetry failure can never surface to (or

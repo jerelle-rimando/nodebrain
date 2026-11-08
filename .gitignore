@@ -150,3 +150,5 @@ backend/logs/
 dist-electron/
 backend/dist/
 frontend/dist/
+# Compiled electron/ tests
+electron/test-dist/
