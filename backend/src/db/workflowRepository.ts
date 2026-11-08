@@ -770,6 +770,12 @@ export function addRunStep(runId: string, input: RunStepInput): WorkflowRunStep 
   return step;
 }
 
+// A picture taken after the step row was written (the Fix screen's "Show the
+// page", for a run that stopped in its minimized window).
+export function setRunStepScreenshot(runStepId: string, screenshotPath: string): void {
+  dbRun('UPDATE workflow_run_steps SET screenshot_path = ? WHERE id = ?', [screenshotPath, runStepId]);
+}
+
 export function getRunSteps(runId: string): WorkflowRunStep[] {
   return dbAll<RunStepRow>(
     'SELECT * FROM workflow_run_steps WHERE run_id = ? ORDER BY position ASC, created_at ASC', [runId],

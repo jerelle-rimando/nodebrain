@@ -299,6 +299,9 @@ export interface WorkflowRunRepair {
   explanation: string; // what it got as far as, what it couldn't find, what didn't happen
   askText: string; // what "Ask the agent" puts in the chat
   hasScreenshot: boolean;
+  // No picture yet, but the run's window is still open: "Show the page" can
+  // take one (a run in its minimized window can't take it when it stops).
+  canTakePicture: boolean;
 }
 
 export type WorkflowRunStepStatus = 'ok' | 'failed' | 'skipped' | 'repaired';

@@ -4,7 +4,7 @@ import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow, getRunById, ge
 import { startRun, cancelRun, getRunDetail, isRunActive, markRunBrowserShown, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
 import { raiseSiteWindow } from '../browser/raiseWindow';
-import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, markOptional, RepairError } from '../replay/repair';
+import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, markOptional, takeStoppedPicture, RepairError } from '../replay/repair';
 
 // Replaying saved workflows. A run starts here and goes on in the
 // background; progress arrives on /api/events as run:started, run:step and
@@ -86,6 +86,22 @@ workflowRunsRouter.post('/workflow-runs/:id/repair', async (req: Request, res: R
     }
     console.error('[workflow-runs] repair failed to start:', err instanceof Error ? err.message : err);
     res.status(500).json({ success: false, error: "Couldn't start fixing this step." });
+  }
+});
+
+// "Show the page": the picture of where a waiting run stopped, taken now
+// with its window brought forward.
+workflowRunsRouter.post('/workflow-runs/:id/picture', async (req: Request, res: Response) => {
+  try {
+    await takeStoppedPicture(req.params.id);
+    res.json({ success: true, data: repairStatus(req.params.id) ?? null });
+  } catch (err) {
+    if (err instanceof RepairError) {
+      res.status(400).json({ success: false, error: err.message });
+      return;
+    }
+    console.error('[workflow-runs] picture failed:', err instanceof Error ? err.message : err);
+    res.status(500).json({ success: false, error: "Couldn't take a picture of the page." });
   }
 });
 

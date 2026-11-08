@@ -213,6 +213,7 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [taking, setTaking] = useState(false);
   const [showPicture, setShowPicture] = useState(false);
   const busy = !!repair.phase && repair.phase !== 'failed';
 
@@ -235,6 +236,24 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   function askAgent() {
     setChatDraft(repair.askText);
     setActiveTab('dashboard');
+  }
+
+  // A run that stopped in its minimized window has no picture: the browser
+  // comes forward for a moment to take one, then NodeBrain comes back on top
+  // with it.
+  async function takePicture() {
+    setError(null);
+    setTaking(true);
+    try {
+      await api.takeRunPicture(runId);
+      setShowPicture(true);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't take a picture of the page.");
+    } finally {
+      (window as any).electronAPI?.bringToFront?.().catch(() => {});
+      setTaking(false);
+    }
   }
 
   // The step only happens sometimes. A run that's waiting skips it and
@@ -282,6 +301,14 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
             <img src={api.runScreenshotUrl(runId)} alt="The page when the run stopped"
               className="mt-2 rounded border border-brain-border max-h-80 w-auto" />
           )}
+        </div>
+      )}
+      {!repair.hasScreenshot && repair.canTakePicture && (
+        <div className="mt-2">
+          <button type="button" onClick={takePicture} disabled={taking}
+            className="text-xs text-brain-text-dim hover:text-brain-text underline underline-offset-2 disabled:opacity-50">
+            {taking ? 'Taking a picture of the page…' : 'Show the page where it stopped'}
+          </button>
         </div>
       )}
 

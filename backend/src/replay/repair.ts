@@ -125,6 +125,8 @@ export function repairStatus(runId: string): WorkflowRunRepair | undefined {
     explanation: explain(run, steps, step, fields, runSteps, live, fixedBy?.reason, hold?.value),
     askText: askText(run, workflow.name, steps, step, fields, runSteps, hold?.value),
     hasScreenshot: !!screenshotFile(failedRow),
+    // Taken on request while the window is still open (see takeStoppedPicture).
+    canTakePicture: live && !screenshotFile(failedRow),
   };
 }
 
@@ -219,6 +221,15 @@ export function markOptional(runId: string): void {
   }
   console.log(`[repair] workflow ${run.workflowId}: step ${stepKey} marked optional as version ${version.number} (from run ${runId})`);
   hold?.resume(getStepsByVersion(version.id), 'skip');
+}
+
+// "Show the page": a run that stopped in its minimized window has no picture
+// (none can be taken while it's minimized; replayEngine.ts screenshot). While
+// the run is still waiting, this brings the window forward and takes it.
+export async function takeStoppedPicture(runId: string): Promise<void> {
+  const hold = getRepairHold(runId);
+  if (!hold) throw new RepairError('The browser window for this run has closed, so there’s no page to show.');
+  if (!(await hold.takePicture())) throw new RepairError('Couldn’t take a picture of the page. Use “Show the browser” to look at it.');
 }
 
 // "Close the browser, fix it later": a live run stops waiting and ends.

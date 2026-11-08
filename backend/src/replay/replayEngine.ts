@@ -10,7 +10,7 @@ import {
 import { getDataDir } from '../db/database';
 import {
   getWorkflowById, getSiteAgentById, updateSiteAgent, getFieldsByWorkflow, getStepsByVersion, getStepLiteralValue,
-  getFieldRecordedValue, createRun, updateRunStatus, addRunStep, getRunById, getRunSteps,
+  getFieldRecordedValue, createRun, updateRunStatus, addRunStep, getRunById, getRunSteps, setRunStepScreenshot,
 } from '../db/workflowRepository';
 import { getCredentialValue } from '../vault/credentialVault';
 import { launchBrowser, closeBrowser, minimizeWindow, BrowserNotFoundError, type LaunchedBrowser } from '../recorder/browserLauncher';
@@ -102,6 +102,9 @@ export interface RepairHold {
   // where it is), or skip it (it was marked as not always appearing).
   resume: (steps: WorkflowStep[], then: 'retry' | 'skip') => void;
   release: () => void; // stop waiting: the run ends as needs_attention
+  // The Fix screen's "Show the page": brings the window forward and takes
+  // the picture of where it stopped, which isn't taken while it's minimized.
+  takePicture: () => Promise<boolean>;
 }
 
 const holds = new Map<string, RepairHold>();
@@ -728,8 +731,15 @@ class Replay {
 
   // A picture of where the run stopped, so the person can see it. Not taken
   // once a secret (other than a masked password) is showing on the page.
+  // Not taken while the window is minimized (it's only showing once the
+  // person has brought it up): Chrome draws no frames for a minimized
+  // window, and every way of capturing waits for one. Measured 2026-11-08 on
+  // Chrome 157: 5 s timeouts and no picture on every miss, once 110 s;
+  // Playwright's anti-throttling launch flags didn't change it, and restoring
+  // the window off-screen to capture took keyboard focus. The Fix screen's
+  // "Show the page" takes it instead, with the window brought forward.
   private async screenshot(step: WorkflowStep): Promise<string | undefined> {
-    if (this.secretShown) return undefined;
+    if (this.secretShown || !this.entry.shown) return undefined;
     const page = this.pages.get(step.pageAlias);
     if (!page || page.isClosed()) return undefined;
     const dir = path.join(getDataDir(), 'workflow-runs', this.run.id);
@@ -741,6 +751,22 @@ class Replay {
     }
     const ok = await page.screenshot({ path: file, timeout: 5_000 }).then(() => true, () => false);
     return ok ? file : undefined;
+  }
+
+  // "Show the page" on a run held for a fix: the window comes forward (as
+  // for "Show me where it is"), the picture is taken, and the stopped step's
+  // row gets it.
+  private async takePicture(step: WorkflowStep): Promise<boolean> {
+    const page = this.pages.get(step.pageAlias);
+    if (!page || page.isClosed() || this.secretShown) return false;
+    this.entry.shown = true;
+    await page.bringToFront().catch(() => {});
+    const file = await this.screenshot(step);
+    if (!file) return false;
+    const row = [...getRunSteps(this.run.id)].reverse().find((r) => r.stepKey === step.stepKey && r.status === 'failed');
+    if (!row) return false;
+    setRunStepScreenshot(row.id, file);
+    return true;
   }
 
   private describeTarget(step: WorkflowStep, value: string | undefined): string {
@@ -786,6 +812,7 @@ class Replay {
         redact: (text) => this.redact(text),
         resume: (steps, then) => end({ steps, then }),
         release: () => end(null),
+        takePicture: () => this.takePicture(step),
       };
       const timer = setTimeout(onGone, REPAIR_HOLD_MS);
       holds.set(this.run.id, hold);

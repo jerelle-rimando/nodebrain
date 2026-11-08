@@ -98,6 +98,7 @@ export const api = {
   cancelWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' }),
   // Fixing a run that stopped because the site changed
   startRepair: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/repair`, { method: 'POST' }),
+  takeRunPicture: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/picture`, { method: 'POST' }),
   markStepOptional: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/optional`, { method: 'POST' }),
   cancelRepair: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/repair/cancel`, { method: 'POST' }),
   releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
