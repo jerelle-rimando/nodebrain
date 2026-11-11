@@ -21,6 +21,7 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { requestTakeControl } from '../browser/takeControl';
 import { findElement, SETTLED_MS } from './elementFinder';
 import { trackActivity } from './pageActivity';
+import { isTypeahead, offers, readBack, waitForList } from './typeahead';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -251,6 +252,24 @@ type StepOutcome =
 
 interface ResolvedValue { value?: string; recordedValue?: string; shownOnPage: boolean }
 
+interface TypeaheadBox {
+  pageAlias: string;
+  locator: string; // the saved locator, to recognise later steps on the same box
+  el: Locator; // where it was found this run
+  what: string; // "the "What state is your business in?" dropdown"
+  typed?: string; // the text the last fill put in (may be secret: memory only)
+  moved: boolean; // a key other than the pick was pressed after the typing
+  secret: boolean;
+}
+
+interface Pick {
+  kind: 'key' | 'option';
+  field: Locator; // the box to read back
+  fieldWhat: string;
+  intended: string; // may be secret: memory only, and kept out of messages
+  secret: boolean;
+}
+
 class Replay {
   private secrets: string[] = [];
   private pages = new Map<string, Page>();
@@ -263,6 +282,9 @@ class Replay {
   private fieldsById: Map<string, WorkflowField>;
   private done = false;
   private justRepaired?: string; // step key: its next success is recorded as 'repaired'
+  // The typeahead box the last step typed into or clicked, for the pick that
+  // follows it (typeahead.ts). Cleared by any step elsewhere.
+  private typeahead?: TypeaheadBox;
 
   constructor(
     private run: WorkflowRun, private workflow: Workflow, private site: SiteAgent,
@@ -367,6 +389,7 @@ class Replay {
       if (this.signal.aborted) { this.finish('cancelled', { error: 'You stopped the run.' }); return; }
       const block = blocks.find((b) => b.start === i);
       if (block && (await this.alreadySignedIn(this.steps[block.anchor]))) {
+        this.typeahead = undefined;
         for (let j = block.start; j <= block.end; j++) {
           this.record(this.steps[j], 'skipped', Date.now(), {
             error: "Already signed in, so this sign-in step wasn't needed.",
@@ -508,6 +531,11 @@ class Replay {
 
   private async runStep(step: WorkflowStep): Promise<StepOutcome> {
     const started = Date.now();
+    // Steps that never reach an element (a page change, a hand-off, a key
+    // sent to the page) forget the typeahead box; the rest decide in
+    // trackTypeahead.
+    const box = this.typeahead;
+    this.typeahead = undefined;
     const page = await this.pageFor(step);
     if (!page) {
       return this.stop(step, started, 'needs_attention',
@@ -553,6 +581,7 @@ class Replay {
       return { ok: true };
     }
 
+    this.typeahead = box;
     const found = await findElement(page, step, {
       value: resolved.value, recordedValue: resolved.recordedValue,
       primaryTimeoutMs: step.optional ? OPTIONAL_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
@@ -585,6 +614,22 @@ class Replay {
       this.secretShown = true;
     }
     const before = page.url();
+    const navigates = step.signals.some((s) => s.name === 'navigation');
+    // A pick from a typeahead's list: Enter after typing, or a click on one
+    // of its options. Checked against the value meant (see typeahead.ts).
+    const pick = this.pickFor(step, found.locator, resolved);
+    if (pick?.kind === 'key') {
+      const list = await waitForList(found.locator, pick.intended, { activity: trackActivity(page), signal: this.signal });
+      if (this.closedOrStopped()) return this.stopped(step, started);
+      // No values here: only how the wait ended.
+      console.log(`[replay] ${this.run.id} ${step.stepKey}: typeahead list ${list.how} after ${list.waitedMs} ms`);
+      // A key that leaves the page can't be checked afterwards: the box is
+      // gone. So the list is checked before: what's highlighted is what the
+      // key will send.
+      if (navigates && list.active !== null && !offers(list.active, pick.intended)) {
+        return this.stop(step, started, 'needs_attention', pickMismatchBefore(pick, list.active, String(step.args.key ?? 'the key')), true);
+      }
+    }
     this.expectDialog = step.signals.some((s) => s.name === 'dialog');
     try {
       const problem = await this.perform(page, found.locator, step, resolved.value, what);
@@ -595,6 +640,18 @@ class Replay {
       return this.stop(step, started, 'needs_attention', `Found ${what}, but couldn't ${verbFor(step)} it: ${actionProblem(msg)}.`, true);
     }
 
+    if (pick && !navigates) {
+      // Never carry on past a pick that didn't take: a wrong state in a quote
+      // is the wrong jurisdiction, rates and forms, and nobody would notice.
+      const back = await readBack(pick.field, pick.intended);
+      if (this.closedOrStopped()) return this.stopped(step, started);
+      if (!back.ok) {
+        console.log(`[replay] ${this.run.id} ${step.stepKey}: typeahead pick didn't take`);
+        return this.stop(step, started, 'needs_attention', pickMismatchAfter(pick, back.shown), true);
+      }
+    }
+    await this.trackTypeahead(step, found.locator, resolved, pick !== undefined);
+
     if (step.signals.some((s) => s.name === 'navigation')) {
       await page.waitForURL((u) => u.href !== before, { timeout: 10_000 }).catch(() => {});
       await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
@@ -602,6 +659,54 @@ class Replay {
     this.expectDialog = false;
     this.record(step, 'ok', started, { resolvedBy: found.resolvedBy });
     return { ok: true };
+  }
+
+  // Whether this step picks from the typeahead the steps before it used, and
+  // the value it should end up showing:
+  //   - Enter or Tab in the box, right after typing into it: the text typed
+  //     (the recording typed the whole choice, e.g. "Texas");
+  //   - a click on an option after typing into or clicking the box: the
+  //     option's name (the run's value when the option is the value slot).
+  // Not a pick it can check: arrow keys pressed after the typing (the choice
+  // was "the 2nd suggestion", and nothing recorded which one that was).
+  private pickFor(step: WorkflowStep, el: Locator, resolved: ResolvedValue): Pick | undefined {
+    const box = this.typeahead;
+    if (!box || box.pageAlias !== step.pageAlias) return undefined;
+    if (step.action === 'press') {
+      const key = String(step.args.key ?? '');
+      const sameBox = !!step.locator && step.locator === box.locator;
+      if (!sameBox || (key !== 'Enter' && key !== 'Tab') || modifierKeys(step.args.modifiers).length) return undefined;
+      if (box.typed === undefined || box.typed === '' || box.moved) return undefined;
+      return { kind: 'key', field: el, fieldWhat: box.what, intended: box.typed, secret: box.secret };
+    }
+    if (step.action === 'click' && step.fingerprint.role === 'option') {
+      const intended = step.valueTarget === 'locator' ? resolved.value : step.fingerprint.name;
+      if (!intended?.trim() || intended.includes(WORKFLOW_VALUE_PLACEHOLDER)) return undefined;
+      return { kind: 'option', field: box.el, fieldWhat: box.what, intended, secret: resolved.shownOnPage };
+    }
+    return undefined;
+  }
+
+  // Remembers the typeahead box a step typed into or clicked; any step
+  // somewhere else (or a pick, which used it up) forgets it.
+  private async trackTypeahead(step: WorkflowStep, el: Locator, resolved: ResolvedValue, picked: boolean): Promise<void> {
+    const box = this.typeahead;
+    this.typeahead = undefined;
+    if (picked || !step.locator || !['fill', 'click', 'press'].includes(step.action)) return;
+    const same = box && box.locator === step.locator && box.pageAlias === step.pageAlias ? box : undefined;
+    if (!same && !(await isTypeahead(el))) return;
+    const next: TypeaheadBox = same ?? {
+      pageAlias: step.pageAlias, locator: step.locator, el, moved: false, secret: false,
+      what: this.describeTarget(step, resolved.value),
+    };
+    if (step.action === 'fill') {
+      next.typed = resolved.value;
+      next.moved = false;
+      next.secret = resolved.shownOnPage;
+    } else if (step.action === 'press') {
+      next.moved = true; // a key other than the pick: an arrow, Backspace…
+    }
+    this.typeahead = next;
   }
 
   // Returns a plain-words problem when the step can't be done as recorded,
@@ -902,6 +1007,25 @@ function verbPhrase(step: WorkflowStep, what: string): string {
     case 'press': return `presses ${String(step.args.key ?? 'a key')}`;
     default: return `clicks ${what}`;
   }
+}
+
+// The stop messages for a typeahead pick that didn't take (typeahead.ts).
+// Secret values are left out of the words altogether, not just redacted.
+function pickMismatchAfter(pick: Pick, shown: string | null): string {
+  const tail = ' The run stopped here rather than carry on with the wrong value.';
+  if (shown === null) {
+    return `NodeBrain couldn't read back what ${pick.fieldWhat} shows after choosing, so it can't tell whether the right choice went in.`
+      + ' The run stopped here rather than carry on unchecked.';
+  }
+  if (pick.secret) return `After choosing, ${pick.fieldWhat} doesn't show the value you gave.${tail}`;
+  const now = shown.trim() === '' ? "it's empty" : `it shows "${shown}"`;
+  return `After choosing "${pick.intended}" in ${pick.fieldWhat}, ${now}.${tail}`;
+}
+
+function pickMismatchBefore(pick: Pick, active: string, key: string): string {
+  const offered = pick.secret ? 'a different choice from the value you gave' : `"${active}", not "${pick.intended}"`;
+  return `The list under ${pick.fieldWhat} was offering ${offered}, so pressing ${key} would have sent the wrong choice.`
+    + ' The run stopped here before pressing it.';
 }
 
 // Playwright errors, in words a person can act on.
