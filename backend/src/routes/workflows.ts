@@ -4,6 +4,8 @@ import { buildRunForm } from '../workflows/runPlan';
 import { buildOverview } from '../workflows/workflowList';
 import { askAboutSite, SiteChatError } from '../workflows/siteChat';
 import { ICON_TYPES, siteIconsDir } from '../recorder/siteLook';
+import { deleteWorkflow, getRunsByWorkflow } from '../db/workflowRepository';
+import { isRunActive } from '../replay/replayEngine';
 
 // Saved workflows for the app: the list with its sites, the run form (inputs
 // plus the steps in plain words), and the sites' saved favicons. Starting a
@@ -36,6 +38,20 @@ workflowsRouter.get('/workflows/:id/run-form', (req: Request, res: Response) => 
     return;
   }
   res.json({ success: true, data: form });
+});
+
+// DELETE /api/workflows/:id → removes the workflow with its recording and run
+// history. Refused while one of its runs is still going.
+workflowsRouter.delete('/workflows/:id', (req: Request, res: Response) => {
+  if (getRunsByWorkflow(req.params.id).some((r) => isRunActive(r.id))) {
+    res.status(409).json({ success: false, error: 'Stop the run first, then delete the workflow.' });
+    return;
+  }
+  if (!deleteWorkflow(req.params.id)) {
+    res.status(404).json({ success: false, error: "That workflow doesn't exist anymore." });
+    return;
+  }
+  res.json({ success: true, data: { id: req.params.id } });
 });
 
 // POST /api/sites/:id/chat { messages: [{ role, content }], provider?, model? } → { reply }

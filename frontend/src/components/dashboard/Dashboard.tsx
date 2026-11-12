@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Circle, Loader2 } from 'lucide-react';
+import { Circle, Loader2, Trash2 } from 'lucide-react';
 import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
 import { api } from '../../utils/api';
@@ -121,6 +121,7 @@ export function Dashboard() {
             else setScreen({ name: 'form', workflowId, error: result.error });
           }}
           onOpenRun={(workflowId, runId) => setScreen({ name: 'run', workflowId, runId })}
+          onDeleted={load}
         />
       </div>
     </div>
@@ -152,7 +153,7 @@ async function runNow(workflowId: string): Promise<{ runId?: string; error?: str
   }
 }
 
-function WorkflowList({ overview, recordings, sites, current, error, onChoose, onRecordingStarted, onRun, onOpenForm, onOpenRun }: {
+function WorkflowList({ overview, recordings, sites, current, error, onChoose, onRecordingStarted, onRun, onOpenForm, onOpenRun, onDeleted }: {
   overview: WorkflowsOverview | null;
   recordings: RecordingStatus[];
   sites: PickerSite[];
@@ -163,6 +164,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   onRun: (workflowId: string) => Promise<void>;
   onOpenForm: (workflowId: string) => void;
   onOpenRun: (workflowId: string, runId: string) => void;
+  onDeleted: () => Promise<void>;
 }) {
   const [dialog, setDialog] = useState<{ address: string } | null>(null);
 
@@ -201,7 +203,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
             <Row key={w.id} row={w} site={current} onOpen={() => (w.state !== 'idle' && w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
               if (w.state === 'idle' || !w.runId) return onRun(w.id);
               onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
-            }} />
+            }} onDelete={async () => { await api.deleteWorkflow(w.id); await onDeleted(); }} />
           ))}
         </ul>
         {rows.length === 0 && !recording && (
@@ -264,11 +266,46 @@ const TONE: Record<WorkflowRow['state'], string> = {
 // the run form (to change the details first); its button does the verb.
 // Its icon is the site's favicon: every workflow on a site shares it, and the
 // name tells them apart.
-function Row({ row, site, onOpen, onAction }: {
-  row: WorkflowRow; site: PickerSite; onOpen: () => void; onAction: () => void | Promise<void>;
+// Delete asks first, in the row itself, since it removes the recording and
+// its run history. Not offered while a run is going or waiting on the person.
+function Row({ row, site, onOpen, onAction, onDelete }: {
+  row: WorkflowRow; site: PickerSite; onOpen: () => void; onAction: () => void | Promise<void>; onDelete: () => Promise<void>;
 }) {
   const [acting, setActing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const needsYou = row.state === 'paused' || row.state === 'stopped';
+  const canDelete = row.state === 'idle' || row.state === 'stopped';
+
+  if (confirming) {
+    return (
+      <li className="flex items-center gap-3 rounded-lg border border-brain-error/40 bg-brain-surface px-4 py-3">
+        <SiteIcon icon={site.icon} favicon={site.favicon} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-brain-text">Delete this workflow?</p>
+          <p className={`text-xs truncate ${deleteError ? 'text-brain-error' : 'text-brain-text-dim'}`} role={deleteError ? 'alert' : undefined}>
+            {deleteError ?? row.name}
+          </p>
+        </div>
+        <button type="button" disabled={deleting} autoFocus
+          onClick={async () => {
+            setDeleting(true);
+            setDeleteError(null);
+            try {
+              await onDelete();
+            } catch (err) {
+              setDeleteError(err instanceof Error && err.message !== 'backend unreachable' ? err.message : "Couldn't delete it. Try again.");
+              setDeleting(false);
+            }
+          }}
+          className="px-3 py-1.5 text-xs rounded-lg flex-shrink-0 min-w-[4.5rem] bg-brain-error hover:bg-brain-error/80 text-white disabled:opacity-50">
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
+        <ActionButton label="Cancel" strong={false} disabled={deleting} onClick={() => { setConfirming(false); setDeleteError(null); }} />
+      </li>
+    );
+  }
 
   return (
     <li onClick={onOpen}
@@ -282,7 +319,13 @@ function Row({ row, site, onOpen, onAction }: {
         </p>
         <p className={`text-xs truncate ${TONE[row.state]}`}>{row.stateText}</p>
       </div>
-      <span onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
+      <span onClick={(e) => e.stopPropagation()} className="flex-shrink-0 flex items-center gap-1.5">
+        {canDelete && (
+          <button type="button" aria-label={`Delete ${row.name}`} title="Delete" onClick={() => setConfirming(true)}
+            className="p-1.5 rounded-lg text-brain-text-muted hover:text-brain-error hover:bg-brain-error/10 transition-colors">
+            <Trash2 size={14} />
+          </button>
+        )}
         <ActionButton label={acting ? 'Starting…' : VERB[row.state]} strong={needsYou} disabled={acting} onClick={async () => {
           setActing(true);
           try { await onAction(); } finally { setActing(false); }
