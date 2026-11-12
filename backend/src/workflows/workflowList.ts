@@ -74,7 +74,10 @@ function rowState(last: WorkflowRun | undefined, runs: WorkflowRun[], pauseReaso
   if (last?.status === 'needs_attention' && repairStatus(last.id)?.canFix) {
     return { state: 'stopped', stateText: stoppedText(last, getStepsByVersion(last.versionId)), runId: last.id };
   }
-  return { state: 'idle', stateText: idleText(last, runs, now) };
+  // A last run that didn't finish keeps its id, so the row can open it and
+  // show why it stopped. Not once it's been fixed: that reason is old news.
+  const unfinished = last && (last.status === 'failed' || (last.status === 'needs_attention' && !repairStatus(last.id)?.fixed));
+  return { state: 'idle', stateText: idleText(last, runs, now), runId: unfinished ? last.id : undefined };
 }
 
 // "Needs you: type the code from your email". A handoff step says in its own

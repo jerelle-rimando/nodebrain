@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Circle, Loader2, Trash2 } from 'lucide-react';
 import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
@@ -167,6 +167,9 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   onDeleted: () => Promise<void>;
 }) {
   const [dialog, setDialog] = useState<{ address: string } | null>(null);
+  // Row order as first seen, so a row doesn't move under the cursor when a
+  // run starts or ends (the server sorts by state on every poll).
+  const order = useRef(new Map<string, number>());
 
   let body;
   if (!overview) {
@@ -190,7 +193,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
       </div>
     );
   } else {
-    const rows = overview.workflows.filter((w) => w.siteAgentId === current.id);
+    const rows = inFirstSeenOrder(overview.workflows.filter((w) => w.siteAgentId === current.id), order.current);
     const recording = recordings.find((r) => r.siteKey === current.siteKey);
     const others = sites.filter((s) => s.siteKey !== current.siteKey);
     const othersNeedingYou = others.filter((s) => s.attention);
@@ -200,7 +203,7 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
         <ul className="space-y-2">
           {recording && <RecordingRow status={recording} />}
           {rows.map((w) => (
-            <Row key={w.id} row={w} site={current} onOpen={() => (w.state !== 'idle' && w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
+            <Row key={w.id} row={w} site={current} onOpen={() => (w.runId ? onOpenRun(w.id, w.runId) : onOpenForm(w.id))} onAction={() => {
               if (w.state === 'idle' || !w.runId) return onRun(w.id);
               onOpenRun(w.id, w.runId); // Continue, Open and Fix all go to the run
             }} onDelete={async () => { await api.deleteWorkflow(w.id); await onDeleted(); }} />
@@ -255,6 +258,13 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   );
 }
 
+// The server's order the first time each row is seen (needs-you first, on
+// load), kept from then on; a workflow recorded later goes at the end.
+function inFirstSeenOrder(rows: WorkflowRow[], seen: Map<string, number>): WorkflowRow[] {
+  for (const r of rows) if (!seen.has(r.id)) seen.set(r.id, seen.size);
+  return [...rows].sort((a, b) => seen.get(a.id)! - seen.get(b.id)!);
+}
+
 // ── Rows ────────────────────────────────────────────────────────────────────
 
 const VERB: Record<WorkflowRow['state'], string> = { paused: 'Continue', running: 'Open', stopped: 'Fix', idle: 'Run' };
@@ -262,8 +272,9 @@ const TONE: Record<WorkflowRow['state'], string> = {
   paused: 'text-brain-warning', running: 'text-brain-accent', stopped: 'text-brain-warning', idle: 'text-brain-text-dim',
 };
 
-// The row itself opens its run while one is going (or waiting on you), else
-// the run form (to change the details first); its button does the verb.
+// The row itself opens its run while one is going (or waiting on you) or
+// when the last one didn't finish (to see why), else the run form (to change
+// the details first); its button does the verb.
 // Its icon is the site's favicon: every workflow on a site shares it, and the
 // name tells them apart.
 // Delete asks first, in the row itself, since it removes the recording and

@@ -417,7 +417,9 @@ export interface WorkflowRow {
   // No icon of its own: a row shows its site's favicon (SiteSummary.favicon).
   state: WorkflowRowState;
   stateText: string; // "Running now, step 4 of 9"
-  runId?: string; // the run Continue / Open / Fix goes to
+  // The run Continue / Open / Fix goes to; on an idle row, a last run that
+  // didn't finish, which the row opens to show why.
+  runId?: string;
 }
 
 // A site in the picker. attention replaces the domain when something there
