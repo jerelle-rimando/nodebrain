@@ -2,7 +2,6 @@ import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type RecordedValue, type RecordedValueKind, type WorkflowStepAction, type WorkflowStepFingerprint,
 } from '../../shared-types';
-import { topHeading } from './ariaSnapshot';
 
 // Pure helpers for the review screen: which recorded steps carry a value the
 // person chose, what each defaults to, and a name guess. No model involved:
@@ -159,20 +158,6 @@ export function valueRows(steps: DraftStep[]): RecordedValue[] {
   return rows;
 }
 
-// "Add Employee - OrangeHRM" → "Add Employee". Drops the parts of a title
-// that are just the site's name.
-export function cleanTitle(title: string | undefined, siteName: string, siteKey: string): string | undefined {
-  if (!title) return undefined;
-  const site = siteName.toLowerCase();
-  const domainWord = siteKey.split('.')[0].toLowerCase();
-  const parts = title.split(/\s+[|\-–—·:»]{1,2}\s+/).map((p) => p.trim()).filter(Boolean);
-  const kept = parts.filter((p) => {
-    const l = p.toLowerCase();
-    return !l.includes(site) && !l.replace(/\s+/g, '').includes(domainWord) && !l.includes(siteKey);
-  });
-  return kept[0];
-}
-
 function usable(name: string | undefined, siteName: string): string | undefined {
   const n = name?.replace(/\s+/g, ' ').trim();
   if (!n || n.length < 3 || n.toLowerCase() === siteName.toLowerCase()) return undefined;
@@ -181,25 +166,40 @@ function usable(name: string | undefined, siteName: string): string | undefined 
   return cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : 60).trim();
 }
 
-// The page the task is about is where the first value was entered (a form),
-// or, with no values, where the last action happened. Its main heading is
-// the guess, then its title, then the first page's. The caller supplies the
-// dated fallback.
-export function guessName(steps: DraftStep[], siteName: string, siteKey: string, fallback: string): string {
-  const elementSteps = steps.filter((s) => s.action !== 'navigate');
-  const anchor = steps.find((s) => valueKindOf(s)) ?? elementSteps[elementSteps.length - 1];
-  const first = steps.find((s) => s.snapshot || s.pageTitle);
-  const candidates = [
-    topHeading(anchor?.snapshot),
-    cleanTitle(anchor?.pageTitle, siteName, siteKey),
-    topHeading(first?.snapshot),
-    cleanTitle(first?.pageTitle, siteName, siteKey),
-  ];
-  for (const c of candidates) {
-    const n = usable(c, siteName);
-    if (n) return n;
+// Button and link names that move through a flow or dismiss something
+// rather than say what the task is.
+const GENERIC_ACTIONS = new Set([
+  'next', 'continue', 'back', 'previous', 'ok', 'okay', 'close', 'cancel', 'skip', 'yes', 'no', 'done',
+  'accept', 'accept all', 'accept all cookies', 'accept cookies', 'allow all', 'reject all', 'got it', 'dismiss',
+  'save and continue', 'continue to next step', 'go', 'menu', 'search', 'submit', 'sign in', 'log in', 'login',
+]);
+
+function actionName(step: DraftStep): string | undefined {
+  if (step.action !== 'click' || step.usesSavedLogin) return undefined;
+  const { role, name } = step.fingerprint;
+  if (role !== 'button' && role !== 'link') return undefined;
+  const n = name?.replace(/\s+/g, ' ').trim();
+  if (!n || n.length < 3 || n.length > 40 || !/[a-z]/i.test(n)) return undefined;
+  if (GENERIC_ACTIONS.has(n.toLowerCase().replace(/[^a-z ]/g, '').trim())) return undefined;
+  return n;
+}
+
+// "<Site> — <action>". The action is the first button or link the person
+// clicked whose name says what they set out to do ("Get a quote"), skipping
+// flow and dismiss buttons (Next, Continue, Accept cookies…). With no such
+// click, "Fill in form" when values were entered. Page headings and titles
+// are not used: on marketing sites they are slogans. The caller supplies
+// the dated fallback.
+export function guessName(steps: DraftStep[], siteName: string, _siteKey: string, fallback: string): string {
+  const site = siteName.replace(/\s+/g, ' ').trim();
+  let action: string | undefined;
+  for (const s of steps) {
+    action = actionName(s);
+    if (action) break;
   }
-  return fallback;
+  if (!action && steps.some((s) => valueKindOf(s))) action = 'Fill in form';
+  if (!action) return fallback;
+  return usable(site ? `${site} — ${action}` : action, siteName) ?? fallback;
 }
 
 // A field's input key: "Insured name" → "insured_name", unique per workflow.
