@@ -85,4 +85,4 @@ Remove-WithLogging "$env:LOCALAPPDATA\electron-builder" -Recurse
 
 Write-Host "Done. NodeBrain fully removed." -ForegroundColor Green
 Write-Host "Developers: run 'npm run dist' to rebuild." -ForegroundColor Cyan
-Write-Host "Users: download a fresh installer at nodebrain.app/download" -ForegroundColor Cyan
+Write-Host "Users: download a fresh installer at nodebrain.tech/download" -ForegroundColor Cyan
