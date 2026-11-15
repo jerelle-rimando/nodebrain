@@ -130,6 +130,7 @@ export async function launchBrowser(profileDir: string, startUrl: string, opts: 
 
   const { kind, exe } = findBrowser(profileDir);
   try { fs.writeFileSync(path.join(profileDir, MARKER), kind); } catch { /* next launch falls back to Last Browser */ }
+  markCleanExit(profileDir);
   const child = spawn(exe, [
     `--user-data-dir=${profileDir}`,
     '--remote-debugging-port=0',
@@ -183,7 +184,23 @@ export async function minimizeWindow(browser: Browser, context: BrowserContext, 
   }
 }
 
+// Asks the browser to close and waits for it to finish, as when the person
+// closes the window. Killing it instead leaves the profile marked as crashed,
+// and Chrome then shows "Restore pages?" on every later launch. Measured on
+// Chrome 157 (2026-11-15): Browser.close then kill ~100 ms later (as this did
+// before) → exit_type "Crashed" every time; Browser.close then waiting → the
+// process exits by itself in ~0.3 s with exit_type "Normal". The kill stays
+// as a last resort for a browser that hangs.
+const CLOSE_WAIT_MS = 10_000;
+
 export async function closeBrowser(launched: LaunchedBrowser): Promise<void> {
+  const child = launched.process;
+  const exited = child && child.exitCode === null && child.signalCode === null
+    ? new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), CLOSE_WAIT_MS);
+      child.once('exit', () => { clearTimeout(timer); resolve(true); });
+    })
+    : Promise.resolve(true);
   try {
     const session = await launched.browser.newBrowserCDPSession();
     await session.send('Browser.close');
@@ -191,5 +208,28 @@ export async function closeBrowser(launched: LaunchedBrowser): Promise<void> {
     // Already closed by the user.
   }
   await launched.browser.close().catch(() => {});
-  if (launched.process && launched.process.exitCode === null) launched.process.kill();
+  if (child && !(await exited)) {
+    console.warn('[browser] the browser did not close within 10 s; stopping it');
+    child.kill();
+  }
+}
+
+// A profile Chrome thinks crashed last time opens with "Restore pages?".
+// Once marked, it stays marked: measured on Chrome 157, a profile with
+// exit_type "Crashed" kept it through later clean exits (even plain Chrome,
+// nothing attached, closed from its window). NodeBrain opens each site at
+// its own start page, so there's never anything to restore: before opening
+// a profile, its last exit is recorded as normal. Only when NodeBrain is
+// about to start the browser itself, never while one is running on it.
+export function markCleanExit(profileDir: string): void {
+  const file = path.join(profileDir, 'Default', 'Preferences');
+  try {
+    const prefs = JSON.parse(fs.readFileSync(file, 'utf8')) as { profile?: { exit_type?: string; exited_cleanly?: boolean } };
+    if (!prefs.profile || (prefs.profile.exit_type === 'Normal' && prefs.profile.exited_cleanly !== false)) return;
+    prefs.profile.exit_type = 'Normal';
+    prefs.profile.exited_cleanly = true;
+    fs.writeFileSync(file, JSON.stringify(prefs));
+  } catch {
+    // No profile yet, or unreadable: Chrome makes or repairs its own.
+  }
 }
