@@ -21,7 +21,8 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { requestTakeControl } from '../browser/takeControl';
 import { findElement, SETTLED_MS } from './elementFinder';
 import { trackActivity } from './pageActivity';
-import { isTypeahead, offers, readBack, waitForList } from './typeahead';
+import { isTypeahead, offers, readBack, sameValue, waitForList } from './typeahead';
+import { describeErrors, lastingNewErrors, readPageErrors, type PageError } from './pageErrors';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -267,6 +268,7 @@ interface Pick {
   field: Locator; // the box to read back
   fieldWhat: string;
   intended: string; // may be secret: memory only, and kept out of messages
+  typed?: string; // option picks: what the box held before the click (may be secret)
   secret: boolean;
 }
 
@@ -285,6 +287,10 @@ class Replay {
   // The typeahead box the last step typed into or clicked, for the pick that
   // follows it (typeahead.ts). Cleared by any step elsewhere.
   private typeahead?: TypeaheadBox;
+  // The error messages showing before the last step acted, and what it did,
+  // for a message that shows up only after that step was recorded as done
+  // (checked before the next step acts, and at the end of the run).
+  private errorWatch?: { pageAlias: string; before: PageError[]; did: string };
 
   constructor(
     private run: WorkflowRun, private workflow: Workflow, private site: SiteAgent,
@@ -406,6 +412,10 @@ class Replay {
         // A repair brings a new version's steps; the same step runs again.
         const repaired = outcome.repairable ? await this.holdForRepair(step, outcome.error) : null;
         if (repaired) {
+          // The page was in the person's hands. What it shows now (a box
+          // marked invalid when focus left it for the Fix bar) isn't the
+          // previous step's doing.
+          this.errorWatch = undefined;
           this.steps = repaired.steps;
           blocks = signInBlocks(this.steps);
           if (repaired.then === 'skip') {
@@ -422,10 +432,24 @@ class Replay {
     }
     // The last step is often the submit. Give what it sent time to arrive
     // before the window closes, or the close could cut it off.
-    const last = this.pages.get(this.steps[this.steps.length - 1].pageAlias);
+    const lastStep = this.steps[this.steps.length - 1];
+    const last = this.pages.get(lastStep.pageAlias);
     if (last && !last.isClosed()) {
       await new Promise((r) => setTimeout(r, 1_000));
       await last.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+    }
+    // An error message that came up after the last step (a submit the site
+    // turned down) means the run didn't get where it was going.
+    const watch = this.errorWatch;
+    const watched = watch && this.pages.get(watch.pageAlias);
+    if (watch && watched && !watched.isClosed() && !this.closedOrStopped()) {
+      const appeared = await lastingNewErrors(watched, watch.before, this.signal);
+      if (appeared.length && !this.closedOrStopped()) {
+        const error = `After NodeBrain ${watch.did}, the page ${describeErrors(appeared)}. The run stopped here: the site didn't accept what it was given.`;
+        await this.stop(lastStep, Date.now(), 'needs_attention', error, true);
+        this.finish('needs_attention', { error, failedStepKey: lastStep.stepKey });
+        return;
+      }
     }
     this.finish('completed');
   }
@@ -542,6 +566,8 @@ class Replay {
         `The window this step happens in (${step.pageAlias === 'page' ? 'the main window' : 'a pop-up'}) isn't open.`);
     }
 
+    if (step.action === 'navigate' || step.action === 'handoff') this.errorWatch = undefined;
+
     if (step.action === 'navigate') {
       const url = String(step.args.url ?? '');
       try {
@@ -576,7 +602,12 @@ class Replay {
 
     // A key press with no element: sent to the page.
     if (step.action === 'press' && !step.locator && !step.fingerprint.role) {
+      const late = await this.lateErrors(page, step);
+      if (late) return this.stop(step, started, 'needs_attention', late, true);
+      const errorsBefore = await readPageErrors(page);
       await page.keyboard.press(keyCombo(step)).catch(() => {});
+      const appeared = await this.errorsAfter(page, step, errorsBefore, `pressed ${keyCombo(step)}`);
+      if (appeared) return this.stop(step, started, 'needs_attention', appeared, true);
       this.record(step, 'ok', started);
       return { ok: true };
     }
@@ -603,6 +634,11 @@ class Replay {
     if (found.resolvedBy === 'fallback') {
       console.log(`[replay] ${this.run.id} ${step.stepKey}: saved locator missed, found by ${found.how}`);
     }
+    // An error the page put up after the previous step was recorded as done.
+    // Nothing has been done at this step yet.
+    const late = await this.lateErrors(page, step);
+    if (this.closedOrStopped()) return this.stopped(step, started);
+    if (late) return this.stop(step, started, 'needs_attention', late, true);
 
     if (step.requiresConfirmation) {
       const outcome = await this.pause(step, page,
@@ -630,10 +666,21 @@ class Replay {
         return this.stop(step, started, 'needs_attention', pickMismatchBefore(pick, list.active, String(step.args.key ?? 'the key')), true);
       }
     }
+    // The clicked option's own words and attributes, read while it's there:
+    // what a box may show instead of the option's name (see below).
+    const optionSource = pick?.kind === 'option'
+      ? await found.locator.evaluate((el: any) => String(el.outerHTML ?? ''), undefined, { timeout: 500 }).catch(() => '')
+      : '';
+    const errorsBefore = await readPageErrors(page);
     this.expectDialog = step.signals.some((s) => s.name === 'dialog');
     try {
       const problem = await this.perform(page, found.locator, step, resolved.value, what);
       if (problem) return this.stop(step, started, 'needs_attention', problem, true);
+      if (step.action === 'fill') {
+        const wrong = await this.checkFill(found.locator, step, resolved, what);
+        if (this.closedOrStopped()) return this.stopped(step, started);
+        if (wrong) return this.stop(step, started, 'needs_attention', wrong, true);
+      }
     } catch (err) {
       if (this.closedOrStopped()) return this.stopped(step, started);
       const msg = err instanceof Error ? err.message : String(err);
@@ -643,7 +690,21 @@ class Replay {
     if (pick && !navigates) {
       // Never carry on past a pick that didn't take: a wrong state in a quote
       // is the wrong jurisdiction, rates and forms, and nobody would notice.
-      const back = await readBack(pick.field, pick.intended);
+      // Some boxes show something other than the clicked option's words:
+      // Pie's class-code box shows the code ("5551" for "Roofing - All Kinds
+      // - & Drivers"). That counts as taken when the box moved off the typed
+      // search text to something that is part of the clicked option itself
+      // (its text or an attribute such as data-code="5551"). A different
+      // option's name ("Alabama" for a click on Florida) isn't, and stops.
+      const source = optionSource.toLowerCase();
+      const fromOption = pick.kind === 'option' && source
+        ? (shown: string) => {
+          const s = shown.trim().toLowerCase();
+          return s.length >= 2 && (pick.typed === undefined || !sameValue(shown, pick.typed))
+            && (source.includes(s) || source.includes(escapeHtml(s)));
+        }
+        : undefined;
+      const back = await readBack(pick.field, pick.intended, 2_000, fromOption);
       if (this.closedOrStopped()) return this.stopped(step, started);
       if (!back.ok) {
         console.log(`[replay] ${this.run.id} ${step.stepKey}: typeahead pick didn't take`);
@@ -657,8 +718,77 @@ class Replay {
       await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
     }
     this.expectDialog = false;
+    if (step.action !== 'hover') {
+      const appeared = await this.errorsAfter(page, step, errorsBefore, didPhrase(step, what));
+      if (this.closedOrStopped()) return this.stopped(step, started);
+      if (appeared) return this.stop(step, started, 'needs_attention', appeared, true);
+    }
     this.record(step, 'ok', started, { resolvedBy: found.resolvedBy });
     return { ok: true };
+  }
+
+  // A step that worked as an action can still have been turned down by the
+  // page: an error message under the box it filled, or one Next put up.
+  // Returns the stop message when a new error message appeared (and stayed;
+  // see pageErrors.ts), else remembers what was showing for lateErrors.
+  private async errorsAfter(page: Page, step: WorkflowStep, before: PageError[], did: string): Promise<string | undefined> {
+    const appeared = await lastingNewErrors(page, before, this.signal);
+    if (appeared.length) {
+      console.log(`[replay] ${this.run.id} ${step.stepKey}: the page showed an error message after the step`);
+      this.errorWatch = undefined;
+      return `After NodeBrain ${did}, the page ${describeErrors(appeared)}. The run stopped here rather than carry on past it.`;
+    }
+    this.errorWatch = { pageAlias: step.pageAlias, before, did };
+    return undefined;
+  }
+
+  // An error message that came up only after the previous step was checked
+  // (a site that checks with its server first). Read before this step acts.
+  private async lateErrors(page: Page, step: WorkflowStep): Promise<string | undefined> {
+    const watch = this.errorWatch;
+    if (!watch || watch.pageAlias !== step.pageAlias) return undefined;
+    const appeared = await lastingNewErrors(page, watch.before, this.signal);
+    if (!appeared.length) return undefined;
+    console.log(`[replay] ${this.run.id} ${step.stepKey}: the page showed an error message after the previous step`);
+    this.errorWatch = undefined;
+    return `After NodeBrain ${watch.did} (the step before this one), the page ${describeErrors(appeared)}. The run stopped here, before going on.`;
+  }
+
+  // What a box shows after typing into it, compared with what was typed.
+  // Formatting the page adds doesn't count ("412000" showing as "412,000",
+  // "2145550142" as "(214) 555-0142"): only the letters and digits must be
+  // the same. A box that shows something else (a mask that only reacts to
+  // key presses, a length limit that cut the text off) is typed again key by
+  // key, as a person would; if it still doesn't show the value, the run
+  // stops. A box that can't be read back (not a text box) isn't checked.
+  private async checkFill(el: Locator, step: WorkflowStep, resolved: ResolvedValue, what: string): Promise<string | undefined> {
+    const value = resolved.value ?? '';
+    let ahead: boolean | undefined;
+    const read = async (): Promise<{ ok: boolean; shown: string | null }> => {
+      const deadline = Date.now() + 1_000;
+      for (;;) {
+        const shown = await el.inputValue({ timeout: 500 }).catch(() => null);
+        if (shown === null) return { ok: true, shown };
+        if (sameTyped(shown, value)) return { ok: true, shown };
+        // A typeahead may complete the word in the box ("Tex" → "Texas").
+        ahead ??= await isTypeahead(el);
+        if (ahead && offers(shown, value)) return { ok: true, shown };
+        if (Date.now() >= deadline || this.closedOrStopped()) return { ok: false, shown };
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    };
+    let r = await read();
+    if (r.ok) return undefined;
+    console.log(`[replay] ${this.run.id} ${step.stepKey}: the box didn't show what fill put in; typing it key by key`);
+    await el.fill('', { timeout: ACTION_TIMEOUT_MS });
+    await el.pressSequentially(value, { delay: 30, timeout: ACTION_TIMEOUT_MS + value.length * 100 });
+    r = await read();
+    if (r.ok) return undefined;
+    const secret = resolved.shownOnPage || step.valueSource === 'credential';
+    const tail = ' The run stopped here rather than carry on with the wrong value.';
+    if (secret) return `After typing into ${what}, it doesn't show the value you gave.${tail}`;
+    const now = r.shown === null || r.shown.trim() === '' ? "it's empty" : `it shows "${r.shown}"`;
+    return `After typing "${value}" into ${what}, ${now}.${tail}`;
   }
 
   // Whether this step picks from the typeahead the steps before it used, and
@@ -682,7 +812,7 @@ class Replay {
     if (step.action === 'click' && step.fingerprint.role === 'option') {
       const intended = step.valueTarget === 'locator' ? resolved.value : step.fingerprint.name;
       if (!intended?.trim() || intended.includes(WORKFLOW_VALUE_PLACEHOLDER)) return undefined;
-      return { kind: 'option', field: box.el, fieldWhat: box.what, intended, secret: resolved.shownOnPage };
+      return { kind: 'option', field: box.el, fieldWhat: box.what, intended, typed: box.typed, secret: resolved.shownOnPage || box.secret };
     }
     return undefined;
   }
@@ -967,13 +1097,18 @@ export function describeStepTarget(
   step: WorkflowStep, value: string | undefined, steps: WorkflowStep[], fieldsById: Map<string, WorkflowField>,
 ): string {
   const fp = step.fingerprint;
-  let name = fp.label || fp.name || fp.placeholder;
+  // The fingerprint can miss the name the locator has: a click on a <p>
+  // inside an option (Pie's class-code list) gets the option's locator and
+  // the paragraph's facts.
+  const fromLocator = locatorRoleName(step.locator);
+  let name = fp.label || fp.name || fp.placeholder || fromLocator?.name;
   if (name?.includes(WORKFLOW_VALUE_PLACEHOLDER)) {
     const secret = step.literalSecret || (step.fieldId ? fieldsById.get(step.fieldId)?.secret : false);
     if (secret || value === undefined) return 'the option you chose';
     name = name.split(WORKFLOW_VALUE_PLACEHOLDER).join(value);
   }
-  const word = fp.role ? ROLE_WORDS[fp.role] : undefined;
+  const word = (fromLocator && name === fromLocator.name ? ROLE_WORDS[fromLocator.role] : undefined)
+    ?? (fp.role ? ROLE_WORDS[fp.role] : undefined);
   if (name) return word ? `the "${name}" ${word}` : `"${name}"`;
   // No name: say what it showed when recorded (often a dropdown's current
   // choice, which is exactly what tends to change), and which list it opened.
@@ -983,6 +1118,22 @@ export function describeStepTarget(
     ? ` (the one that opens the ${next.fingerprint.container} list)` : '';
   if (shown && !shown.includes(WORKFLOW_VALUE_PLACEHOLDER)) return `the part of the page showing "${shown}"${opens}`;
   return word ? `the ${word}${opens}` : `the part of the page this step uses${opens}`;
+}
+
+// The last role=…[name="…"] in a saved locator: role "option", name
+// "Roofing - All Kinds - &".
+export function locatorRoleName(locator: string | undefined): { role: string; name: string } | undefined {
+  const all = [...(locator ?? '').matchAll(/internal:role=([a-z]+)\[name="((?:[^"\\]|\\.)*)"[is]?\]/g)];
+  const m = all[all.length - 1];
+  return m ? { role: m[1], name: m[2].replace(/\\(.)/g, '$1') } : undefined;
+}
+
+// A click that picks a choice from a list (a typeahead's suggestions, a
+// custom dropdown): its saved element is an option.
+export function picksOption(step: WorkflowStep): boolean {
+  return step.action === 'click'
+    && (step.fingerprint.role === 'option' || locatorRoleName(step.locator)?.role === 'option'
+        || /internal:role=option\b/.test(step.locator ?? ''));
 }
 
 export function verbFor(step: WorkflowStep): string {
@@ -1007,6 +1158,27 @@ function verbPhrase(step: WorkflowStep, what: string): string {
     case 'press': return `presses ${String(step.args.key ?? 'a key')}`;
     default: return `clicks ${what}`;
   }
+}
+
+// What a step did, for "After NodeBrain …, the page showed …".
+function didPhrase(step: WorkflowStep, what: string): string {
+  switch (step.action) {
+    case 'fill': return `typed into ${what}`;
+    case 'select': return `made a choice in ${what}`;
+    case 'check': return `ticked ${what}`;
+    case 'uncheck': return `unticked ${what}`;
+    case 'press': return `pressed ${keyCombo(step)} in ${what}`;
+    case 'upload': return `attached a file to ${what}`;
+    default: return `clicked ${what}`;
+  }
+}
+
+// A box shows what was typed, give or take the formatting the page adds:
+// the same letters and digits in the same order, ignoring case.
+export function sameTyped(shown: string, typed: string): boolean {
+  if (shown === typed) return true;
+  const core = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return core(shown) === core(typed) && (core(typed) !== '' || shown.trim() === typed.trim());
 }
 
 // The stop messages for a typeahead pick that didn't take (typeahead.ts).
@@ -1063,6 +1235,10 @@ function pathOf(url: string): string | undefined {
 
 function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return 'the page'; }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function capitalise(s: string): string {

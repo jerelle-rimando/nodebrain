@@ -21,7 +21,8 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { buildPhases } from '../workflows/runPlan';
 import { findElement } from './elementFinder';
 import {
-  getRepairHold, isRunActive, markRunBrowserShown, isMissError, describeStepTarget, verbFor, type RepairHold,
+  getRepairHold, isRunActive, markRunBrowserShown, isMissError, describeStepTarget, verbFor, picksOption,
+  locatorRoleName, type RepairHold,
 } from './replayEngine';
 
 // Repairing a workflow whose step can't find its element any more: the
@@ -488,7 +489,7 @@ class PickSession {
     if (!selector || selector.includes(PILL_HOST_ID)) return { problem: 'Click the thing on the page itself, not this bar.' };
     if ((await picked.count()) !== 1) return { problem: 'NodeBrain couldn’t tell exactly which one that was. Try clicking it again.' };
 
-    const facts = await picked.evaluate(pageFacts, this.step.action);
+    const facts = await picked.evaluate(pageFacts, picksOption(this.step) ? 'pick-option' : this.step.action);
     if (!facts.fits) return { problem: misfitProblem(this.step) };
     const aria = await this.ariaFacts(picked);
     let fingerprint = fingerprintFromFacts(aria, facts.fp);
@@ -551,8 +552,13 @@ class PickSession {
 // Runs in the page on the picked element: the recorder's element facts
 // (retargeted for clicks, as the recorder does), and whether it's the kind
 // of element this step acts on.
-const PAGE_FACTS_FN = `(picked, action) => {
+// 'pick-option' is a click that chooses from a list: it only fits an option
+// in a list (a typeahead's suggestion, a custom dropdown's choice), never the
+// page's Next button. Accepting a button there let a run "complete" on
+// Pie with no class code chosen (2026-11-15).
+const PAGE_FACTS_FN = `(picked, kind) => {
 ${ELEMENT_FACTS_SOURCE}
+  const action = kind === 'pick-option' ? 'click' : kind;
   const el = (action === 'click' || action === 'hover') ? interactive(picked) : picked;
   const tag = el.tagName.toLowerCase();
   const type = tag === 'input' ? (el.type || 'text').toLowerCase() : '';
@@ -569,6 +575,13 @@ ${ELEMENT_FACTS_SOURCE}
   } else if (action === 'upload') {
     fits = tag === 'input' && type === 'file';
   }
+  if (kind === 'pick-option') {
+    const LIST = '[role=option],[role=listbox],[role=menuitem],[role=menuitemradio],[role=radio],[role=treeitem],[role=gridcell],option,datalist';
+    const inList = !!(picked.closest(LIST) || el.closest(LIST));
+    // A text box is the list's opener, not a choice in it (Pie's class-code
+    // box is an <input role=listbox>).
+    fits = inList && !picked.matches('input,textarea,select') && !el.matches('input,textarea,select');
+  }
   return { fp: fingerprint(el), fits };
 }`;
 
@@ -577,6 +590,9 @@ ${ELEMENT_FACTS_SOURCE}
 const pageFacts = new Function(`return ${PAGE_FACTS_FN}`)() as (el: unknown, action: string) => { fp: PageElementFacts; fits: boolean };
 
 function misfitProblem(step: WorkflowStep): string {
+  if (picksOption(step)) {
+    return 'That isn’t a choice from a list. Press “I need to open something first”, open the list (type in the box if it needs that), then point at the choice itself.';
+  }
   switch (step.action) {
     case 'fill': return 'That isn’t a box you can type into. Click the box itself.';
     case 'select': return 'That isn’t a dropdown list. Click the dropdown itself.';
@@ -596,6 +612,10 @@ function wantedPhrase(step: WorkflowStep, value: string | undefined, steps: Work
     return secret || value === undefined ? undefined : s.split(WORKFLOW_VALUE_PLACEHOLDER).join(value);
   };
   const label = fill(fp.label) ?? fill(fp.name) ?? fill(fp.placeholder);
+  if (picksOption(step) && step.valueTarget !== 'locator') {
+    const choice = label ?? fill(locatorRoleName(step.locator)?.name);
+    return choice ? `Click the choice “${choice}” in its list` : 'Click the choice in the list NodeBrain should pick';
+  }
   switch (step.action) {
     case 'fill': return label ? `Click the box for “${label}”` : 'Click the box NodeBrain should type into';
     case 'select': return label ? `Click the dropdown for “${label}”` : 'Click the dropdown NodeBrain should choose from';

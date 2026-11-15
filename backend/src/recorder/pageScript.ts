@@ -158,9 +158,37 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     } catch {}
   }
 
+  // ── What a box shows once the page has formatted it ──────────────────
+  // Playwright's recorder reads a box's value on the input event, at the
+  // window, before the page's own listener runs. A page that formats as you
+  // type ("285000" → "285,000") rewrites the value after that read, and no
+  // further input event follows, so the recorder keeps the raw value with
+  // the last keystroke added to the previous formatting: "28,500" + "0" =
+  // "28,5000". So shortly after each keystroke, and when the box loses focus,
+  // the value is read again and sent when the page changed it. Never for a
+  // password box.
+  const rawSeen = new WeakMap();
+  function settledValue(el, raw) {
+    const now = el.value;
+    if (typeof now === 'string' && now !== raw) {
+      try { send({ type: 'settled', docId, elementId: idOf(el), raw, value: now }); } catch {}
+    }
+  }
+  function watchValue(e) {
+    const el = targetOf(e);
+    if (!el || typeof el.value !== 'string' || (el.type || '').toLowerCase() === 'password') return;
+    const raw = el.value;
+    rawSeen.set(el, raw);
+    setTimeout(() => { if (rawSeen.get(el) === raw) settledValue(el, raw); }, 60);
+  }
+
   window.addEventListener('click', (e) => capture('click', e), true);
-  window.addEventListener('input', (e) => capture('input', e), true);
+  window.addEventListener('input', (e) => { capture('input', e); watchValue(e); }, true);
   window.addEventListener('change', (e) => capture('change', e), true);
+  window.addEventListener('focusout', (e) => {
+    const el = targetOf(e);
+    if (el && rawSeen.has(el)) settledValue(el, rawSeen.get(el));
+  }, true);
   window.addEventListener('keydown', (e) => {
     if (e.key && (e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) capture('keydown', e);
   }, true);

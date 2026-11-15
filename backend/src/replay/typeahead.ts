@@ -65,13 +65,19 @@ const LIST_STATE = (el: any): { value: string | null; active: string | null; lis
 // A text box that offers a list to pick from.
 const IS_TYPEAHEAD = (el: any): boolean => {
   if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return false;
-  return el.getAttribute('role') === 'combobox'
+  // role=listbox on the text box itself isn't by the book, but it's what
+  // Pie's class-code box uses (quote.pieinsurance.com, 2026-11-15).
+  return el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox'
     || /^(list|both)$/i.test(el.getAttribute('aria-autocomplete') ?? '')
     || el.getAttribute('aria-haspopup') === 'listbox';
 };
 
 export async function isTypeahead(el: Locator): Promise<boolean> {
-  return el.evaluate(IS_TYPEAHEAD).catch(() => false);
+  // Asked after the step too, when the element may be gone: an option that
+  // closed its list, a Next that swapped the panel. Without a timeout that
+  // waited Playwright's default 30 s (Pie's run, 2026-11-15: 30,045 ms on a
+  // Next click).
+  return el.evaluate(IS_TYPEAHEAD, undefined, { timeout: 500 }).catch(() => false);
 }
 
 // Same choice: case and runs of spaces don't count ("florida" picks Florida).
@@ -141,12 +147,15 @@ export type ReadBack = { ok: true; shown: string } | { ok: false; shown: string 
 // often write the choice into the box a moment after the key or click, so a
 // match is waited for briefly; anything else at the end is a mismatch.
 // shown is null when the box couldn't be read (gone from the page).
-export async function readBack(el: Locator, intended: string, timeoutMs = 2_000): Promise<ReadBack> {
+// `alsoOk` widens what counts as taking (see the option pick in replayEngine).
+export async function readBack(
+  el: Locator, intended: string, timeoutMs = 2_000, alsoOk?: (shown: string) => boolean,
+): Promise<ReadBack> {
   const deadline = Date.now() + timeoutMs;
   let shown: string | null = null;
   for (;;) {
     shown = await el.inputValue({ timeout: 500 }).catch(() => null);
-    if (shown !== null && sameValue(shown, intended)) return { ok: true, shown };
+    if (shown !== null && (sameValue(shown, intended) || alsoOk?.(shown))) return { ok: true, shown };
     if (Date.now() >= deadline) return { ok: false, shown };
     await sleep(100);
   }

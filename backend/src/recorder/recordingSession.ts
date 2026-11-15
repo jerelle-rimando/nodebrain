@@ -87,6 +87,7 @@ interface CapturedStep {
   origin?: string;
   args: Record<string, unknown>;
   value?: string; // plaintext recorded value; never a password or saved username
+  typed?: string; // a fill's value as Playwright read it, before the page formatted it
   usesSavedLogin?: 'username' | 'password';
   record?: PageRecord;
   signals: WorkflowSignal[];
@@ -207,6 +208,9 @@ class RecordingSession {
   private launched?: LaunchedBrowser;
   private steps: CapturedStep[] = [];
   private records: PageRecord[] = [];
+  // What a box showed once the page had formatted it, keyed by element
+  // (pageScript.ts watchValue): the raw value Playwright read → the shown one.
+  private settled = new Map<string, { page: Page; raw: string; value: string }>();
   private aliases = new Map<Page, string>();
   private queue: Promise<void> = Promise.resolve();
   private finishing?: Promise<void>;
@@ -367,6 +371,9 @@ class RecordingSession {
         return undefined;
       case 'pick':
         if (this.accepting()) this.enqueue(() => this.onPick(page, m));
+        return undefined;
+      case 'settled':
+        if (this.accepting()) this.enqueue(async () => this.onSettled(page, m));
         return undefined;
       case 'event': {
         if (!this.accepting()) return undefined;
@@ -672,17 +679,42 @@ class RecordingSession {
     }
   }
 
+  // The page formatted a box after Playwright read it. The fill step for
+  // that box keeps what the box showed ("285,000"), which is what the person
+  // saw and meant, not the half-formatted text Playwright read ("28,5000").
+  // Arrives over a different channel from Playwright's fill, before or after
+  // it, so it's also kept for applyFillValue.
+  private onSettled(page: Page, m: Record<string, unknown>): void {
+    const { docId, elementId, raw, value } = m;
+    if (typeof docId !== 'string' || typeof elementId !== 'number' || typeof raw !== 'string' || typeof value !== 'string') return;
+    this.settled.set(`${docId}:${elementId}`, { page, raw, value });
+    if (this.settled.size > 200) this.settled.delete(this.settled.keys().next().value!);
+    const step = [...this.steps].reverse().find((s) => s.action === 'fill' && s.record?.page === page
+      && s.record.docId === docId && s.record.elementId === elementId);
+    if (!step || step.typed !== raw || step.usesSavedLogin === 'password') return;
+    if (step.usesSavedLogin === 'username') this.username = value;
+    else step.value = value;
+  }
+
+  private shownValue(step: CapturedStep, typed: string): string {
+    const r = step.record;
+    const s = r ? this.settled.get(`${r.docId}:${r.elementId}`) : undefined;
+    return s && r && s.page === r.page && s.raw === typed ? s.value : typed;
+  }
+
   private async applyFillValue(step: CapturedStep, page: Page, action: RecorderAction): Promise<void> {
-    const text = action.text ?? '';
+    const typed = action.text ?? '';
+    step.typed = typed;
     if (step.usesSavedLogin === 'password' || (await this.isPasswordField(step, page, action))) {
       step.usesSavedLogin = 'password';
       step.value = undefined;
-      this.password = text;
+      this.password = typed;
       if (action.ref) this.secretRefs.add(action.ref);
       if (step.ref) this.secretRefs.add(step.ref);
       this.markUsername(step);
       return;
     }
+    const text = this.shownValue(step, typed);
     if (step.usesSavedLogin === 'username') {
       this.username = text;
       return;
