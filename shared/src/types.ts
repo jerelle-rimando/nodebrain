@@ -355,12 +355,15 @@ export interface RecordingDraft {
   usesSavedLogin: boolean; // a sign-in was typed; it's saved to the Vault, not listed
 }
 
-export type RecordedValueKind = 'text' | 'option' | 'option-click';
+// 'typeahead': typing into a box, then clicking one of the choices it
+// offered, shown and saved as one value (the choice).
+export type RecordedValueKind = 'text' | 'option' | 'option-click' | 'typeahead';
 export type RecordedValueMode = 'changes' | 'fixed';
 
 export interface RecordedValue {
-  stepKey: string;
-  kind: RecordedValueKind; // typed text, a dropdown choice, or a clicked option in a list
+  stepKey: string; // for 'typeahead', the typing step; pickStepKey is the click
+  pickStepKey?: string;
+  kind: RecordedValueKind; // typed text, a dropdown choice, a clicked option in a list, or a typeahead pick
   value: string;
   label: string; // the field's label from the page
   defaultMode: RecordedValueMode; // typed text: changes; choices: fixed

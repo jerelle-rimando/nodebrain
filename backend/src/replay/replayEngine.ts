@@ -21,7 +21,7 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { requestTakeControl } from '../browser/takeControl';
 import { findElement, SETTLED_MS } from './elementFinder';
 import { trackActivity } from './pageActivity';
-import { isTypeahead, offers, readBack, sameValue, waitForList } from './typeahead';
+import { isTypeahead, offers, readBack, sameValue, waitForList, LIST_STILL_MS } from './typeahead';
 import { describeErrors, lastingNewErrors, readPageErrors, type PageError } from './pageErrors';
 
 // Replays a saved workflow in the person's browser, step by step, with no
@@ -598,7 +598,19 @@ class Replay {
       resolved = { error: "A saved value for this step can't be unlocked, probably because NodeBrain's vault key changed since it was recorded. Record the workflow again." };
     }
     if ('error' in resolved) return this.stop(step, started, 'failed', resolved.error);
+    // The typing of a typeahead pick (reviewDraft.ts typeaheadPairs): the
+    // value is the choice. For the recorded choice, the search text typed
+    // when recording goes in instead, so that run goes exactly as recorded.
+    const search = step.args.searchText;
+    if (step.action === 'fill' && step.args.typeahead && typeof search === 'string' && search
+        && resolved.value !== undefined && resolved.recordedValue !== undefined && sameValue(resolved.value, resolved.recordedValue)) {
+      resolved = { ...resolved, value: search };
+    }
     const what = this.describeTarget(step, resolved.value);
+
+    if (step.args.picksTyped && step.action === 'click') {
+      return this.pickTyped(page, step, resolved, box, started);
+    }
 
     // A key press with no element: sent to the page.
     if (step.action === 'press' && !step.locator && !step.fingerprint.role) {
@@ -742,6 +754,88 @@ class Replay {
     return undefined;
   }
 
+  // The click of a typeahead pick: the choice the run asks for, from the
+  // list the typing just opened. Saved without a fixed option, so a run can
+  // type "plumbing" where the recording typed "roofing".
+  //   - Waits for the list to show the choice by its exact name (case and
+  //     spacing aside), or to stop changing for LIST_STILL_MS.
+  //   - Exact name: picked. Otherwise, exactly one choice containing the
+  //     value: picked ("Plumbing - Commercial" for "commercial").
+  //   - Several: stops and names them; it never picks one of them.
+  //   - None: stops and says what the list offered.
+  // Then the box is read back as for any option pick: it must show the
+  // choice, or text that's part of the clicked choice itself (a code).
+  // These stops aren't fixed by pointing: pointing at a choice would just
+  // make the choice for the person.
+  private async pickTyped(page: Page, step: WorkflowStep, resolved: ResolvedValue, box: TypeaheadBox | undefined,
+                          started: number): Promise<StepOutcome> {
+    const wanted = resolved.value ?? '';
+    const secret = resolved.shownOnPage || !!box?.secret;
+    // Pie's box is itself called a list ("the "Class Code" list").
+    const listWhat = !box ? 'the list' : / list$/.test(box.what) ? box.what : `the list under ${box.what}`;
+    const late = await this.lateErrors(page, step);
+    if (this.closedOrStopped()) return this.stopped(step, started);
+    if (late) return this.stop(step, started, 'needs_attention', late, true);
+
+    const options = page.getByRole('option');
+    const want = normChoice(wanted);
+    const deadline = Date.now() + 8_000;
+    let texts: string[] = [];
+    let last = '';
+    let stillSince = Date.now();
+    for (;;) {
+      texts = (await options.allInnerTexts().catch(() => [] as string[])).map((t) => t.replace(/\s+/g, ' ').trim());
+      if (texts.some((t) => normChoice(t) === want)) break;
+      const sig = texts.join('\u0001');
+      if (sig !== last) { last = sig; stillSince = Date.now(); }
+      if (Date.now() - stillSince >= LIST_STILL_MS || Date.now() >= deadline || this.closedOrStopped()) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    if (this.closedOrStopped()) return this.stopped(step, started);
+
+    const exact = texts.flatMap((t, i) => (normChoice(t) === want ? [i] : []));
+    const partial = texts.flatMap((t, i) => (want && normChoice(t).includes(want) ? [i] : []));
+    const hits = exact.length ? exact : partial;
+    const listed = (ix: number[]) => ix.slice(0, 5).map((i) => `"${texts[i]}"`).join(', ') + (ix.length > 5 ? `, and ${ix.length - 5} more` : '');
+    const asked = secret ? 'The value you gave' : `"${wanted}"`;
+    if (hits.length !== 1) {
+      const error = hits.length > 1
+        ? `${asked} matches ${hits.length} choices in ${listWhat}: ${listed(hits)}. The run stopped here rather than pick one. Give the choice as the list shows it.`
+        : `${asked} isn't one of the choices in ${listWhat}. ${texts.length ? `It offered ${listed(texts.map((_, i) => i))}.` : 'It offered nothing.'} The run stopped here rather than guess.`;
+      console.log(`[replay] ${this.run.id} ${step.stepKey}: typeahead pick found ${hits.length} matching choices of ${texts.length}`);
+      return this.stop(step, started, 'needs_attention', error, true);
+    }
+    const option = options.nth(hits[0]);
+    const chosen = texts[hits[0]];
+    const optionSource = (await option.evaluate((el: any) => String(el.outerHTML ?? ''), undefined, { timeout: 500 }).catch(() => '')).toLowerCase();
+    const errorsBefore = await readPageErrors(page);
+    try {
+      await option.click({ timeout: ACTION_TIMEOUT_MS });
+    } catch (err) {
+      if (this.closedOrStopped()) return this.stopped(step, started);
+      const msg = err instanceof Error ? err.message : String(err);
+      return this.stop(step, started, 'needs_attention', `Found the choice in ${listWhat}, but couldn't click it: ${actionProblem(msg)}.`, true);
+    }
+    this.typeahead = undefined;
+    if (box) {
+      const back = await readBack(box.el, chosen, 2_000, (shown) => {
+        const s = shown.trim().toLowerCase();
+        return s.length >= 2 && (box.typed === undefined || !sameValue(shown, box.typed))
+          && (optionSource.includes(s) || optionSource.includes(escapeHtml(s)));
+      });
+      if (this.closedOrStopped()) return this.stopped(step, started);
+      if (!back.ok) {
+        const pick: Pick = { kind: 'option', field: box.el, fieldWhat: box.what, intended: chosen, secret };
+        return this.stop(step, started, 'needs_attention', pickMismatchAfter(pick, back.shown), true);
+      }
+    }
+    const appeared = await this.errorsAfter(page, step, errorsBefore, `picked ${secret ? 'the choice' : `"${chosen}"`} in ${listWhat}`);
+    if (this.closedOrStopped()) return this.stopped(step, started);
+    if (appeared) return this.stop(step, started, 'needs_attention', appeared, true);
+    this.record(step, 'ok', started);
+    return { ok: true };
+  }
+
   // An error message that came up only after the previous step was checked
   // (a site that checks with its server first). Read before this step acts.
   private async lateErrors(page: Page, step: WorkflowStep): Promise<string | undefined> {
@@ -824,7 +918,7 @@ class Replay {
     this.typeahead = undefined;
     if (picked || !step.locator || !['fill', 'click', 'press'].includes(step.action)) return;
     const same = box && box.locator === step.locator && box.pageAlias === step.pageAlias ? box : undefined;
-    if (!same && !(await isTypeahead(el))) return;
+    if (!same && !step.args.typeahead && !(await isTypeahead(el))) return;
     const next: TypeaheadBox = same ?? {
       pageAlias: step.pageAlias, locator: step.locator, el, moved: false, secret: false,
       what: this.describeTarget(step, resolved.value),
@@ -1243,4 +1337,9 @@ function escapeHtml(s: string): string {
 
 function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// A choice's name, compared without case or runs of spaces.
+function normChoice(s: string): string {
+  return s.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 }

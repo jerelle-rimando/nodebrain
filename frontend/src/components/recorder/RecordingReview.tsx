@@ -214,7 +214,11 @@ function ValueRow({ value, choice, onChange }: {
         ) : (
           <p className="text-sm text-brain-text truncate" title={shown}>{shown}</p>
         )}
-        <p className="text-xs text-brain-text-dim truncate" title={value.label}>{value.label}</p>
+        <p className="text-xs text-brain-text-dim truncate" title={value.label}>
+          {value.label}
+          {/* Typing, then clicking a choice the box offered: one value, the choice. */}
+          {value.kind === 'typeahead' && <span className="text-brain-text-muted"> · typed, then picked from its list</span>}
+        </p>
       </div>
 
       <div role="radiogroup" aria-label={`${value.label}: does it change each run?`}

@@ -18,6 +18,9 @@ export interface DraftStep {
   pageAlias: string;
   pageTitle?: string;
   snapshot?: string;
+  // A click's element text as the page gave it, in full (the locator's name
+  // can be cut short: Playwright stopped Pie's option name at "&").
+  optionText?: string;
 }
 
 // Clicking one of these picks a value ("Texas" in a list, "LLC" among
@@ -140,9 +143,64 @@ export function templateFingerprint(fp: WorkflowStepFingerprint, value: string):
   return out;
 }
 
+const norm = (s: string) => s.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+
+// A click on a choice in a list (a typeahead's suggestion).
+export function clicksOption(step: DraftStep): boolean {
+  return step.action === 'click'
+    && (step.fingerprint.role === 'option' || /(^|>> )internal:role=option\[/.test(step.locator ?? ''));
+}
+
+// The choice a click picked, in full: the page's own text for it, else its
+// accessible name.
+export function choiceText(step: DraftStep): string | undefined {
+  const t = (step.optionText ?? step.fingerprint.name)?.replace(/\s+/g, ' ').trim();
+  return t || undefined;
+}
+
+// Typing into a box, then clicking one of the choices it offered, is one
+// thing the person did: picking a choice. They belong together when
+//   - the click is on an option, on the same page, after the typing;
+//   - nothing came between them but clicks or keys in that same box
+//     (refocusing it, arrow keys);
+//   - the option's text contains what was typed ("roofing" is in "Roofing -
+//     All Kinds - & Drivers"). That is what shows the click landed in the
+//     list the typing filtered; a list matched on synonyms or codes isn't
+//     paired, and stays two rows.
+// Returns the typing step's index → the click's index.
+export function typeaheadPairs(steps: DraftStep[]): Map<number, number> {
+  const pairs = new Map<number, number>();
+  steps.forEach((step, i) => {
+    if (step.action !== 'fill' || step.usesSavedLogin || !step.locator || !step.value?.trim()) return;
+    for (let j = i + 1; j < steps.length; j++) {
+      const next = steps[j];
+      if (next.pageAlias !== step.pageAlias) return;
+      if (clicksOption(next)) {
+        const text = choiceText(next);
+        if (text && norm(text).includes(norm(step.value))) pairs.set(i, j);
+        return;
+      }
+      if ((next.action === 'click' || next.action === 'press') && next.locator === step.locator) continue;
+      return;
+    }
+  });
+  return pairs;
+}
+
 export function valueRows(steps: DraftStep[]): RecordedValue[] {
   const rows: RecordedValue[] = [];
+  const pairs = typeaheadPairs(steps);
+  const picks = new Set(pairs.values());
   steps.forEach((step, i) => {
+    if (picks.has(i)) return; // shown with its typing
+    const pick = pairs.get(i);
+    if (pick !== undefined) {
+      rows.push({
+        stepKey: step.stepKey, pickStepKey: steps[pick].stepKey, kind: 'typeahead',
+        value: choiceText(steps[pick])!, label: labelFor(steps, i), defaultMode: 'changes', canChange: true,
+      });
+      return;
+    }
     const kind = valueKindOf(step);
     if (!kind) return;
     const value = kind === 'option-click' ? step.fingerprint.name!.trim() : (step.value ?? '');

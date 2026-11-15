@@ -4,7 +4,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type { BrowserContext, Page } from 'playwright-core';
 import {
-  SITE_LOGIN_PROVIDER,
+  SITE_LOGIN_PROVIDER, WORKFLOW_VALUE_PLACEHOLDER,
   type RecordingState, type RecordingStatus, type RecordingResult, type RecordingDraft,
   type RecordedValueChoice, type SaveRecordingRequest,
   type WorkflowStepAction, type WorkflowStepFingerprint, type WorkflowSignal,
@@ -935,6 +935,8 @@ class RecordingSession {
       pageAlias: s.pageAlias,
       pageTitle: s.record?.fp.title,
       snapshot: s.snapshot,
+      // The clicked element's own text, last in the page record's names.
+      optionText: s.action === 'click' ? s.record?.fp.names?.[s.record.fp.names.length - 1] : undefined,
     }));
   }
 
@@ -1070,6 +1072,9 @@ class RecordingSession {
           fieldIds.set(row.stepKey, field.id);
         }
 
+        // A typeahead row's click, keyed by the click's step.
+        const pickRows = new Map(draft.values.filter((v) => v.pickStepKey).map((v) => [v.pickStepKey!, v]));
+
         const inputs: StepInput[] = this.steps.map((s, i) => {
           const key = dsteps[i].stepKey;
           const input: StepInput = {
@@ -1090,6 +1095,24 @@ class RecordingSession {
             input.credentialPart = s.usesSavedLogin;
             return input;
           }
+          const paired = pickRows.get(key);
+          if (paired) {
+            // The click of a typeahead pick: it picks whatever choice the run
+            // asks for, matched in the list the typing opened (replayEngine
+            // pickTyped). "Always this" keeps it exactly as recorded.
+            const choice = choiceFor(paired.stepKey);
+            const fieldId = fieldIds.get(paired.stepKey);
+            if (!fieldId && !choice.secret) return input;
+            const fp = { ...s.fingerprint, role: 'option', name: paired.value };
+            return {
+              ...input,
+              ...(fieldId ? { valueSource: 'field' as const, fieldId }
+                : { valueSource: 'literal' as const, literalValue: paired.value, literalSecret: true }),
+              valueTarget: 'locator', locator: `internal:role=option[name="${WORKFLOW_VALUE_PLACEHOLDER}"s]`,
+              fingerprint: templateFingerprint(fp, paired.value),
+              args: { ...s.args, picksTyped: true },
+            };
+          }
           const row = rows.get(key);
           if (!row) return input; // a click or navigation: nothing to vary
           const choice = choiceFor(key);
@@ -1098,6 +1121,16 @@ class RecordingSession {
             ? { valueSource: 'field', fieldId }
             : { valueSource: 'literal', literalValue: row.value, literalSecret: choice.secret };
 
+          if (row.kind === 'typeahead') {
+            // The typing of a typeahead pick. "Always this" types what was
+            // typed when recording. Otherwise it types the run's choice; the
+            // search text typed when recording is kept (unless secret) to
+            // type instead when the run's choice is the recorded one, so
+            // that run goes exactly as recorded.
+            if (!fieldId && !choice.secret) return { ...input, valueSource: 'literal', literalValue: s.value, valueTarget: 'text' };
+            const args = choice.secret ? { ...s.args, typeahead: true } : { ...s.args, typeahead: true, searchText: s.value };
+            return { ...input, ...source, valueTarget: 'text', args };
+          }
           if (row.kind === 'option-click') {
             // A clicked option carries its value in the locator. Plain
             // "Always this" keeps the click exactly as recorded; otherwise
@@ -1193,8 +1226,15 @@ function describe(s: CapturedStep): string {
       const url = String(s.args.url ?? '');
       return s.opening ? `Opened ${shortUrl(url)}` : `Went to ${shortUrl(url)}`;
     }
-    case 'click':
-      return s.fingerprint.name ? `Clicked "${s.fingerprint.name}"${kind ? ` ${kind}` : ''}` : 'Clicked on the page';
+    case 'click': {
+      // A choice in a list whose name didn't reach the fingerprint (a <p>
+      // inside the option was clicked): its text from the page record.
+      const optionText = s.fingerprint.role === 'option' || /internal:role=option\[/.test(s.locator ?? '')
+        ? s.record?.fp.names?.[s.record.fp.names.length - 1] : undefined;
+      const name = s.fingerprint.name || optionText;
+      const word = kind ?? (optionText ? 'option' : undefined);
+      return name ? `Clicked "${name}"${word ? ` ${word}` : ''}` : 'Clicked on the page';
+    }
     case 'fill':
       if (s.usesSavedLogin === 'password') return `Typed your password into ${what}`;
       if (s.usesSavedLogin === 'username') return `Typed your saved sign-in name into ${what}`;
