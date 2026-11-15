@@ -31,6 +31,7 @@ export function buildRunForm(workflowId: string): RunForm | null {
     key: f.key, label: f.label, kind: f.kind, secret: f.secret, required: f.required,
     // Secret values are never stored with a run, and the recorded one stays encrypted.
     previousValue: f.secret ? undefined : (last ? last.inputs[f.key] : undefined) ?? f.recordedValue,
+    ...(f.choices && !f.secret ? { choices: f.choices } : {}),
   }));
 
   return {

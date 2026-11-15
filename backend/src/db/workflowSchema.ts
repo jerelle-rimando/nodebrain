@@ -140,6 +140,9 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
 
   // Installs from before optional steps. Fresh ones have it from CREATE TABLE.
   addColumn(db, 'workflow_steps', 'optional', 'INTEGER NOT NULL DEFAULT 0');
+  // The choices a question offered when recorded (Yes / No), as JSON, for
+  // the run form. NULL for typed values.
+  addColumn(db, 'workflow_fields', 'choices', 'TEXT');
 }
 
 // Same guard as database.ts's own column migrations: an unguarded ADD COLUMN

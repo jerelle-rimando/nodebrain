@@ -260,6 +260,7 @@ export interface WorkflowField {
   required: boolean;
   position: number;
   createdAt: string;
+  choices?: string[]; // a question's choices when recorded (Yes / No): the run form offers these
 }
 
 export type WorkflowRunTrigger = 'manual' | 'schedule' | 'chat';
@@ -353,6 +354,17 @@ export interface RecordingDraft {
   values: RecordedValue[]; // steps carrying a value the person chose; never sign-in steps
   steps: RecordedStepSummary[]; // every step, including the opening page load
   usesSavedLogin: boolean; // a sign-in was typed; it's saved to the Vault, not listed
+  maybeOptional: MaybeOptionalStep[]; // clicks that put away a pop-up or banner nobody asked for
+}
+
+// A click that dismissed a layer which appeared on its own (a cookie banner,
+// a "what's new" box). Such a layer may not appear on the next run, so the
+// step can be marked "doesn't always appear" before the first run.
+export interface MaybeOptionalStep {
+  stepKey: string;
+  description: string; // 'Clicked "Close Layer"'
+  reason: string; // 'looks like a cookie or privacy banner'
+  preMarked: boolean; // starts ticked: cookie / consent wording or a known consent tool
 }
 
 // 'typeahead': typing into a box, then clicking one of the choices it
@@ -368,6 +380,7 @@ export interface RecordedValue {
   label: string; // the field's label from the page
   defaultMode: RecordedValueMode; // typed text: changes; choices: fixed
   canChange: boolean; // false when the step can't take a different value at run time
+  choices?: string[]; // a question's buttons (Yes / No): what else it could be
 }
 
 export interface RecordedValueChoice {
@@ -379,6 +392,8 @@ export interface RecordedValueChoice {
 export interface SaveRecordingRequest {
   name: string;
   values: RecordedValueChoice[]; // rows left out keep their default, not secret
+  // Steps marked "doesn't always appear". Left out: the pre-marked ones.
+  optional?: string[];
 }
 
 // One captured step, as the review screen shows it.
@@ -453,6 +468,7 @@ export interface RunFormField {
   // The previous run's value, else the value used while recording. Never
   // set for secret fields: those are never stored or sent back.
   previousValue?: string;
+  choices?: string[]; // a question's buttons when recorded (Yes / No)
 }
 
 // A step sentence: plain text, with the run's value dropped in where a

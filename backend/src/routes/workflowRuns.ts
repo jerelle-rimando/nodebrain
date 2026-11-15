@@ -25,6 +25,7 @@ workflowRunsRouter.get('/workflows/:id/inputs', (req: Request, res: Response) =>
   const fields = getFieldsByWorkflow(req.params.id).map((f) => ({
     key: f.key, label: f.label, kind: f.kind, secret: f.secret, required: f.required,
     recordedValue: f.secret ? undefined : f.recordedValue,
+    ...(f.choices && !f.secret ? { choices: f.choices } : {}),
   }));
   res.json({ success: true, data: fields });
 });

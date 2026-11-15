@@ -29,6 +29,10 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
   const [choices, setChoices] = useState<Record<string, RowChoice>>(() =>
     Object.fromEntries(draft.values.map((v) => [v.stepKey, { mode: v.canChange ? v.defaultMode : 'fixed', secret: false }])),
   );
+  // Steps ticked "doesn't always appear": the pre-marked ones to begin with.
+  const [optional, setOptional] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries((draft.maybeOptional ?? []).map((m) => [m.stepKey, m.preMarked])),
+  );
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState<'save' | 'discard' | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -48,6 +52,7 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
       const saved = await api.saveRecording(status.id, {
         name: trimmedName,
         values: draft.values.map((v) => ({ stepKey: v.stepKey, ...choices[v.stepKey] })),
+        optional: Object.keys(optional).filter((k) => optional[k]),
       });
       const asks = saved.result?.fieldCount ?? 0;
       toast.success(asks
@@ -139,6 +144,34 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
             )}
           </div>
 
+          {(draft.maybeOptional ?? []).length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-brain-text-dim uppercase tracking-wider mb-1">Might not show up every time</p>
+              <p className="text-xs text-brain-text-muted mb-2">
+                Pop-ups and banners you closed. Ticked ones are skipped when they don't appear; unticked ones stop the run if they're missing.
+              </p>
+              <ul className="space-y-2">
+                {draft.maybeOptional.map((m) => (
+                  <li key={m.stepKey} className="flex items-center gap-3 rounded-lg border border-brain-border bg-brain-bg px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-brain-text truncate" title={m.description}>{m.description}</p>
+                      <p className="text-xs text-brain-text-dim truncate">{m.reason.charAt(0).toUpperCase() + m.reason.slice(1)}</p>
+                    </div>
+                    <label className="flex flex-shrink-0 items-center gap-1.5 text-xs text-brain-text-dim cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!optional[m.stepKey]}
+                        onChange={(e) => setOptional((o) => ({ ...o, [m.stepKey]: e.target.checked }))}
+                        className="accent-brain-accent"
+                      />
+                      Doesn't always appear
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div>
             <button
               type="button"
@@ -218,6 +251,10 @@ function ValueRow({ value, choice, onChange }: {
           {value.label}
           {/* Typing, then clicking a choice the box offered: one value, the choice. */}
           {value.kind === 'typeahead' && <span className="text-brain-text-muted"> · typed, then picked from its list</span>}
+          {/* A question's buttons: say what else it could be, so Changes reads as a real option. */}
+          {value.choices && value.choices.length > 1 && (
+            <span className="text-brain-text-muted"> · could also be {value.choices.filter((c) => c !== value.value).map((c) => `"${c}"`).join(' or ')}</span>
+          )}
         </p>
       </div>
 

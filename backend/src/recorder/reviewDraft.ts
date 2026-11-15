@@ -1,6 +1,6 @@
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
-  type RecordedValue, type RecordedValueKind, type WorkflowStepAction, type WorkflowStepFingerprint,
+  type MaybeOptionalStep, type RecordedValue, type RecordedValueKind, type WorkflowStepAction, type WorkflowStepFingerprint,
 } from '../../shared-types';
 
 // Pure helpers for the review screen: which recorded steps carry a value the
@@ -21,6 +21,12 @@ export interface DraftStep {
   // A click's element text as the page gave it, in full (the locator's name
   // can be cut short: Playwright stopped Pie's option name at "&").
   optionText?: string;
+  // A button answering a question: the question and every button's name.
+  choiceGroup?: { question: string; options: string[] };
+  // The click was inside a pop-up or banner (pageScript.ts layerOf).
+  layer?: { unasked: boolean; consent: boolean; vendor: boolean; promo: boolean; dismissWord: boolean; gone: boolean };
+  navigates?: boolean; // the click opened another page or a pop-up window
+  description?: string; // 'Clicked "Close Layer"'
 }
 
 // Clicking one of these picks a value ("Texas" in a list, "LLC" among
@@ -41,6 +47,8 @@ export function valueKindOf(step: DraftStep): RecordedValueKind | null {
       && step.fingerprint.role && CHOICE_ROLES.has(step.fingerprint.role) && step.fingerprint.name?.trim()) {
     return 'option-click';
   }
+  // A button answering a question (Yes / No).
+  if (step.action === 'click' && step.choiceGroup && step.fingerprint.name?.trim() && !step.navigates) return 'option-click';
   return null;
 }
 
@@ -87,6 +95,7 @@ export function labelFor(steps: DraftStep[], index: number): string {
     if (own && !isUselessLabel(own)) return own;
     return positionLabel(fp) ?? own ?? (fp.role && UNNAMED[fp.role]) ?? 'A field';
   }
+  if (step.choiceGroup) return step.choiceGroup.question;
   if (fp.container) return fp.container;
   for (let i = index - 1; i >= Math.max(0, index - 3); i--) {
     const prev = steps[i];
@@ -211,6 +220,7 @@ export function valueRows(steps: DraftStep[]): RecordedValue[] {
       label: labelFor(steps, i),
       defaultMode: kind === 'text' ? 'changes' : 'fixed',
       canChange: kind !== 'option-click' || templateLocator(step.locator, step.fingerprint.name!) !== null,
+      ...(step.choiceGroup ? { choices: step.choiceGroup.options } : {}),
     });
   });
   return rows;
@@ -267,4 +277,36 @@ export function fieldKeyFor(label: string, used: Set<string>): string {
   for (let n = 2; used.has(key); n++) key = `${base}_${n}`;
   used.add(key);
   return key;
+}
+
+// Clicks that put away a pop-up or banner which showed up on its own. Such
+// a layer is often gone on the next run (the browser profile remembers the
+// cookie choice), and the step then fails. All four must hold:
+//   1. the click was inside a dialog, or a box fixed or stuck to the screen;
+//   2. nobody asked for it: it appeared with no click or key press of the
+//      person's just before (a confirm dialog after "Delete" is asked for);
+//   3. the click put it away, and the page stayed where it was;
+//   4. something says what it is: cookie / consent / privacy wording or a
+//      known consent tool (pre-marked); a promotion or announcement, or a
+//      button worded as a dismissal (listed, not pre-marked).
+// Never a step that types or chooses a value, or one that opened a page.
+export function maybeOptional(steps: DraftStep[]): MaybeOptionalStep[] {
+  const out: MaybeOptionalStep[] = [];
+  for (const step of steps) {
+    const l = step.layer;
+    if (step.action !== 'click' || !l || step.navigates || step.usesSavedLogin || step.value !== undefined) continue;
+    if (valueKindOf(step)) continue;
+    if (!l.unasked || !l.gone) continue;
+    const consent = l.consent || l.vendor;
+    if (!consent && !l.promo && !l.dismissWord) continue;
+    out.push({
+      stepKey: step.stepKey,
+      description: step.description ?? 'A click',
+      reason: consent ? 'looks like a cookie or privacy banner'
+        : l.promo ? 'looks like a pop-up offer or announcement'
+          : 'closed a pop-up that appeared on its own',
+      preMarked: consent,
+    });
+  }
+  return out;
 }

@@ -76,7 +76,7 @@ interface StepRow {
 interface FieldRow {
   id: string; workflow_id: string; key: string; label: string; kind: string; secret: number;
   recorded_value: string | null; recorded_value_enc: string | null; required: number;
-  position: number; created_at: string;
+  position: number; created_at: string; choices?: string | null;
 }
 
 interface RunRow {
@@ -145,7 +145,15 @@ function rowToField(row: FieldRow): WorkflowField {
     // recorded_value is NULL for secret fields.
     recordedValue: row.recorded_value ?? undefined,
     required: row.required === 1, position: row.position, createdAt: row.created_at,
+    ...(row.choices ? { choices: parseChoices(row.choices) } : {}),
   };
+}
+
+function parseChoices(raw: string): string[] | undefined {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) && v.every((c) => typeof c === 'string') ? v as string[] : undefined;
+  } catch { return undefined; }
 }
 
 function rowToRun(row: RunRow): WorkflowRun {
@@ -318,6 +326,7 @@ export interface FieldInput {
   recordedValue?: string; // plaintext in; encrypted on write when secret
   required?: boolean;
   position: number;
+  choices?: string[]; // what the question offered (not for secret fields)
 }
 
 export function getFieldsByWorkflow(workflowId: string): WorkflowField[] {
@@ -350,10 +359,11 @@ export function createField(workflowId: string, input: FieldInput): WorkflowFiel
   const id = uuidv4();
   const createdAt = now();
   dbRun(
-    `INSERT INTO workflow_fields (id, workflow_id, key, label, kind, secret, recorded_value, recorded_value_enc, required, position, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workflow_fields (id, workflow_id, key, label, kind, secret, recorded_value, recorded_value_enc, required, position, created_at, choices)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, workflowId, input.key, input.label, kind, secret ? 1 : 0, plain, enc,
-     (input.required ?? true) ? 1 : 0, input.position, createdAt],
+     (input.required ?? true) ? 1 : 0, input.position, createdAt,
+     input.choices?.length && !secret ? JSON.stringify(input.choices) : null],
   );
   return getFieldById(id)!;
 }

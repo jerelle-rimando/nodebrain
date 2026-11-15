@@ -22,7 +22,7 @@ import { factsForRef, factsForSelector, fieldRefInside, redactSnapshot, roleAndN
 import { escapeForSelector } from '../replay/elementFinder';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
 import { captureSiteLook, isDefaultSiteName, siteIconUrl } from './siteLook';
-import { guessName, valueRows, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
+import { guessName, valueRows, maybeOptional, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
 
 // One recording: the user does a task in a real browser window while
 // Playwright's recorder reports each action. No model is involved.
@@ -70,12 +70,19 @@ interface PageRecord {
     label?: string; placeholder?: string; urlPath?: string; origin?: string; framePath?: string[]; title?: string;
     names?: string[]; optionLabels?: string[]; fieldIndex?: number;
     wrapped?: boolean; // a click on a plain box around this field, re-aimed at the field
+    choiceGroup?: ChoiceGroup; // a button answering a question (pageScript.ts choiceGroupOf)
+    layer?: LayerFacts; // the click was inside a pop-up or banner (pageScript.ts layerOf)
   };
+  // Set a moment after a click inside a layer: whether it put the layer away.
+  layerGone?: boolean;
   page: Page;
   consumed: boolean;
   // Effects (navigation, dialog, popup) seen before the action arrived.
   pendingSignals?: WorkflowSignal[];
 }
+
+export interface ChoiceGroup { question: string; options: string[] }
+export interface LayerFacts { unasked: boolean; consent: boolean; vendor: boolean; promo: boolean; dismissWord: boolean }
 
 interface CapturedStep {
   action: WorkflowStepAction;
@@ -210,6 +217,8 @@ class RecordingSession {
   private records: PageRecord[] = [];
   // What a box showed once the page had formatted it, keyed by element
   // (pageScript.ts watchValue): the raw value Playwright read → the shown one.
+  // Steps marked "doesn't always appear" on the review screen.
+  private optionalKeys = new Set<string>();
   private settled = new Map<string, { page: Page; raw: string; value: string }>();
   private aliases = new Map<Page, string>();
   private queue: Promise<void> = Promise.resolve();
@@ -372,6 +381,13 @@ class RecordingSession {
       case 'pick':
         if (this.accepting()) this.enqueue(() => this.onPick(page, m));
         return undefined;
+      case 'layerDone': {
+        const docId = m.docId;
+        const elementId = m.elementId;
+        const rec = [...this.records].reverse().find((r) => r.kind === 'click' && r.page === page && r.docId === docId && r.elementId === elementId);
+        if (rec) rec.layerGone = m.gone === true;
+        return undefined;
+      }
       case 'settled':
         if (this.accepting()) this.enqueue(async () => this.onSettled(page, m));
         return undefined;
@@ -937,6 +953,10 @@ class RecordingSession {
       snapshot: s.snapshot,
       // The clicked element's own text, last in the page record's names.
       optionText: s.action === 'click' ? s.record?.fp.names?.[s.record.fp.names.length - 1] : undefined,
+      choiceGroup: s.action === 'click' ? s.record?.fp.choiceGroup : undefined,
+      layer: s.action === 'click' && s.record?.fp.layer ? { ...s.record.fp.layer, gone: s.record.layerGone === true } : undefined,
+      navigates: s.signals.some((g) => g.name === 'navigation' || g.name === 'popup'),
+      description: describe(s),
     }));
   }
 
@@ -947,6 +967,7 @@ class RecordingSession {
       stepCount: this.stepCount(),
       suggestedName: guessName(steps, this.siteName, this.siteKey, fallbackName()),
       values: valueRows(steps),
+      maybeOptional: maybeOptional(steps),
       steps: this.steps.map((s, i) => ({
         stepKey: steps[i].stepKey,
         position: i,
@@ -980,6 +1001,12 @@ class RecordingSession {
       }
       choices.set(c.stepKey, c);
     }
+    const listed = new Set(this.draft.maybeOptional.map((m) => m.stepKey));
+    for (const key of req.optional ?? []) {
+      if (!listed.has(key)) throw new RecordingError(`Step ${key} can't be marked as not always appearing here.`);
+    }
+    // Left out: the pre-marked ones.
+    this.optionalKeys = new Set(req.optional ?? this.draft.maybeOptional.filter((m) => m.preMarked).map((m) => m.stepKey));
     const name = req.name.replace(/\s+/g, ' ').trim() || this.draft.suggestedName;
     this.state = 'saving';
     try {
@@ -1068,6 +1095,7 @@ class RecordingSession {
             recordedValue: row.value,
             required: true,
             position: fieldIds.size,
+            choices: row.choices,
           });
           fieldIds.set(row.stepKey, field.id);
         }
@@ -1088,6 +1116,7 @@ class RecordingSession {
             args: s.args,
             signals: s.signals,
             snapshotPath: snapshotPaths[i],
+            optional: this.optionalKeys.has(key),
           };
           if (s.usesSavedLogin) {
             input.valueSource = 'credential';

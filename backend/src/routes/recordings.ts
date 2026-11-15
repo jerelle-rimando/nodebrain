@@ -71,6 +71,7 @@ const saveSchema = z.object({
     mode: z.enum(['changes', 'fixed']),
     secret: z.boolean(),
   })).max(500),
+  optional: z.array(z.string().min(1).max(20)).max(500).optional(),
 });
 
 // POST /api/recordings/:id/save { name, values } → creates the site agent,

@@ -193,9 +193,18 @@ function FieldRow({ field, value, onChange, onFocus, onBlur, inputRef }: {
         onChange={(e) => onChange(e.target.value)}
         onFocus={onFocus}
         onBlur={onBlur}
-        placeholder={field.secret ? 'Kept secret — type it each time' : field.kind === 'option' ? 'The choice exactly as the site shows it' : undefined}
+        list={field.choices?.length ? `${id}-choices` : undefined}
+        placeholder={field.secret ? 'Kept secret — type it each time'
+          : field.choices?.length ? `One of: ${field.choices.join(', ')}`
+            : field.kind === 'option' ? 'The choice exactly as the site shows it' : undefined}
         className="w-full bg-brain-bg border border-brain-border rounded-lg px-3 py-2 text-sm text-brain-text placeholder-brain-text-muted focus:outline-none focus:border-brain-accent transition-colors"
       />
+      {/* A question's buttons, offered as you type (the value must be one of them). */}
+      {field.choices?.length ? (
+        <datalist id={`${id}-choices`}>
+          {field.choices.map((c) => <option key={c} value={c} />)}
+        </datalist>
+      ) : null}
     </div>
   );
 }

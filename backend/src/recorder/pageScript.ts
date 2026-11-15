@@ -142,6 +142,143 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     } catch { return null; }
   }
 
+  // ── Pop-ups and banners: when each appeared ───────────────────────────
+  // A cookie banner or "what's new" box shows up on its own; a confirm
+  // dialog shows up because the person just clicked something. Which one a
+  // clicked layer was decides whether its step may be marked "doesn't always
+  // appear" (reviewDraft.ts maybeOptional). So: the times of the person's
+  // own mouse-downs and key presses, and the first time each candidate layer
+  // was seen showing (checked every 250 ms). Candidates: the page's
+  // top-level boxes (where banners are put) and anything marked as a dialog.
+  const actTimes = [];
+  const seenAt = new WeakMap();
+  const noteAct = (e) => {
+    if (!e.isTrusted || !targetOf(e)) return;
+    actTimes.push(Date.now());
+    if (actTimes.length > 50) actTimes.shift();
+  };
+  window.addEventListener('mousedown', noteAct, true);
+  window.addEventListener('keydown', noteAct, true);
+  const up = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  const styleOf = (n) => { try { return getComputedStyle(n); } catch { return null; } };
+  function showing(n) {
+    const r = n.getBoundingClientRect();
+    if (r.width * r.height <= 0) return false;
+    const s = styleOf(n);
+    return !!s && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05;
+  }
+  // The box or something inside it: a banner's host is often empty itself,
+  // with its content fixed to the screen (or in a shadow root).
+  function showingDeep(n) {
+    if (showing(n)) return true;
+    const queue = [n];
+    let looked = 0;
+    while (queue.length && looked < 80) {
+      const x = queue.shift();
+      looked++;
+      const kids = [...(x.children || []), ...(x.shadowRoot ? x.shadowRoot.children : [])];
+      for (const k of kids) { if (showing(k)) return true; queue.push(k); }
+    }
+    return false;
+  }
+  function scanLayers() {
+    const now = Date.now();
+    const candidates = [...(document.body ? document.body.children : [])];
+    for (const n of document.querySelectorAll('dialog,[role=dialog],[role=alertdialog],[aria-modal=true]')) candidates.push(n);
+    for (const n of candidates) {
+      if (seenAt.has(n)) continue;
+      try { if (showingDeep(n)) seenAt.set(n, now); } catch {}
+    }
+  }
+  setInterval(scanLayers, 250);
+
+  const DIALOG = 'dialog,[role=dialog],[role=alertdialog],[aria-modal=true]';
+  const CONSENT = /cookie|consent|privacy (settings|preferences|choices|center|centre)|tracking technolog|personal data|gdpr|ccpa|do not sell/i;
+  const VENDOR = /onetrust|usercentrics|cookiebot|didomi|trustarc|truste|quantcast|cookieyes|osano|termly|iubenda|cookielaw|(^|[^a-z])uc-|(^|[^a-z])cmp([^a-z]|$)/i;
+  const PROMO = /newsletter|subscribe|what'?s new|special offer|\\d+ ?% off|discount|limited time|new feature|sign up for (our|email)/i;
+  const DISMISS = /^(accept( all)?( cookies)?|allow( all)?( cookies)?|agree|i agree|ok(ay)?|got it|close|close layer|dismiss|no,? thanks|not now|maybe later|reject( all)?|deny|decline|skip|continue without accepting|×|✕|x)$/i;
+
+  // The layer a clicked element sits in: the nearest dialog, or the nearest
+  // box fixed or stuck to the screen. Undefined for ordinary page content.
+  function layerOf(el) {
+    let layer = null;
+    let top = null;
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = up(n)) {
+      const s = styleOf(n);
+      if (!layer && (n.matches(DIALOG) || (s && (s.position === 'fixed' || s.position === 'sticky')))) layer = n;
+      top = n;
+    }
+    if (!layer) return undefined;
+    // When it appeared: the layer's own time, else its top-level box's,
+    // but only a box that is a layer itself (fixed, or with no size of its
+    // own around fixed content), not the page's main container.
+    let appeared = seenAt.get(layer);
+    if (appeared === undefined && top && top !== layer) {
+      const s = styleOf(top);
+      const r = top.getBoundingClientRect();
+      if (s && (s.position === 'fixed' || s.position === 'absolute' || r.width * r.height <= 0)) appeared = seenAt.get(top);
+    }
+    // Asked for: one of the person's own actions in the 1.75 s before it
+    // was first seen (the scan runs every 250 ms). Not known: not counted
+    // as unasked.
+    const unasked = appeared !== undefined && !actTimes.some((t) => t <= appeared && t >= appeared - 1750);
+    const words = String(layer.innerText || layer.textContent || '').slice(0, 4000);
+    const marks = [];
+    for (let n = layer; n && n !== document.documentElement; n = up(n)) {
+      marks.push(n.id || '', typeof n.className === 'string' ? n.className : '', n.getAttribute('data-testid') || '', n.tagName.toLowerCase());
+    }
+    for (let n = el; n && n !== layer; n = up(n)) marks.push(n.id || '', n.getAttribute('data-testid') || '');
+    const name = clean(el.getAttribute('aria-label') || el.innerText || el.textContent || el.value, 60) || '';
+    return {
+      node: layer,
+      facts: {
+        unasked,
+        consent: CONSENT.test(words),
+        vendor: VENDOR.test(marks.join(' ')) || /usercentrics|onetrust|cookiebot|didomi|trustarc/i.test(words),
+        promo: PROMO.test(words),
+        dismissWord: DISMISS.test(name),
+      },
+    };
+  }
+
+  // ── Buttons that answer a question ────────────────────────────────────
+  // Yes / No under "Does your business currently have workers' comp?" is a
+  // choice, like picking from a list. A clicked button counts when it sits
+  // in a group of 2–6 buttons with no boxes to fill, none of which moves
+  // the form along (Next, Back, Submit…), under a question: a heading or
+  // label ending in "?", or a fieldset / radio group's own label.
+  const MOVER = /^(next|continue|back|previous|prev|submit|save|cancel|close|skip|done|finish|get (a|my) quote|sign ?in|log ?in|sign ?up|search|go|apply|ok|okay|start|start over|edit|delete|remove|add|more|less|show more|learn more)$/i;
+  const BUTTONS = 'button,[role=button],input[type=button],input[type=submit]';
+  const buttonName = (n) => clean(n.getAttribute('aria-label') || n.innerText || n.textContent || n.value, 80);
+  function questionFor(box) {
+    for (let n = box, d = 0; n && d < 4; n = n.parentElement, d++) {
+      if (n.matches('fieldset')) { const lg = n.querySelector('legend'); if (lg && textOf(lg)) return textOf(lg); }
+      if (n.matches('[role=radiogroup],[role=group]')) { const l = n.getAttribute('aria-label'); if (l) return clean(l); }
+      let p = n.previousElementSibling;
+      for (let i = 0; p && i < 3; i++, p = p.previousElementSibling) {
+        if (p.matches('h1,h2,h3,h4,h5,h6,[role=heading],legend,label,p,span,div') && !p.querySelector(BUTTONS + ',input,select,textarea')) {
+          const t = textOf(p);
+          if (t && t.length <= 200 && /\\?\\s*$/.test(t)) return t;
+        }
+      }
+    }
+    return undefined;
+  }
+  function choiceGroupOf(el) {
+    if (!el.matches(BUTTONS)) return undefined;
+    let box = el.parentElement;
+    for (let d = 0; d < 3 && box && box !== document.body; d++, box = box.parentElement) {
+      const buttons = Array.from(box.querySelectorAll(BUTTONS)).filter((b) => showing(b));
+      if (buttons.length < 2) continue;
+      if (buttons.length > 6 || box.querySelector('input:not([type=button]):not([type=submit]):not([type=hidden]):not([type=radio]):not([type=checkbox]),select,textarea')) return undefined;
+      const names = buttons.map(buttonName);
+      if (names.some((n) => !n || MOVER.test(n)) || new Set(names).size !== names.length) return undefined;
+      const question = questionFor(box);
+      return question ? { question, options: names } : undefined;
+    }
+    return undefined;
+  }
+
   function capture(kind, e) {
     const raw = targetOf(e);
     if (!raw) return;
@@ -154,7 +291,24 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     try {
       const fp = fingerprint(el);
       if (wrapped) fp.wrapped = true;
-      send({ type: 'event', kind, key: e.key, detail: e.detail, docId, elementId: idOf(el), ts: Date.now(), fp });
+      let layer;
+      if (kind === 'click') {
+        try { fp.choiceGroup = choiceGroupOf(el); } catch {}
+        try { layer = layerOf(el); } catch {}
+        if (layer) fp.layer = layer.facts;
+      }
+      const elementId = idOf(el);
+      send({ type: 'event', kind, key: e.key, detail: e.detail, docId, elementId, ts: Date.now(), fp });
+      // Did the click put the layer away, with the page staying where it
+      // was? Checked a moment later; a page that navigated never answers.
+      if (layer) {
+        const href = location.href;
+        setTimeout(() => {
+          let gone = false;
+          try { gone = location.href === href && (!layer.node.isConnected || !showingDeep(layer.node)); } catch {}
+          try { send({ type: 'layerDone', docId, elementId, gone }); } catch {}
+        }, 900);
+      }
     } catch {}
   }
 
