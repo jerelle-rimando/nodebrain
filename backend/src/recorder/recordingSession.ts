@@ -82,7 +82,11 @@ interface PageRecord {
 }
 
 export interface ChoiceGroup { question: string; options: string[] }
-export interface LayerFacts { unasked: boolean; consent: boolean; vendor: boolean; promo: boolean; dismissWord: boolean }
+export interface LayerFacts {
+  unasked: boolean; consent: boolean; vendor: boolean; promo: boolean; dismissWord: boolean;
+  // Page-clock times of the person's actions that made it look asked for.
+  askedAt?: number[];
+}
 
 interface CapturedStep {
   action: WorkflowStepAction;
@@ -285,14 +289,19 @@ class RecordingSession {
       signalAdded: () => {},
     });
 
+    // Brought forward before the site opens, not after it finishes loading.
+    // Some sites take a minute to fire "load" (pieinsurance.com: 45–70 s);
+    // raising the tab then pulled the person back to it from a quote form
+    // they had opened in a second tab. Waiting only for the address to
+    // commit also lets the recording start answer in a second or two.
     const page = context.pages()[0] ?? (await context.newPage());
+    await page.bringToFront().catch(() => {});
     this.markNextNavigateAsOpening = true;
-    await page.goto(this.startUrl, { timeout: 60_000 }).catch(() => {
+    await page.goto(this.startUrl, { waitUntil: 'commit', timeout: 60_000 }).catch(() => {
       // A slow site still opens; the user can wait or reload. The recorder
       // keeps listening either way.
     });
-    await page.bringToFront().catch(() => {});
-    void this.captureLook(page);
+    void page.waitForLoadState('domcontentloaded', { timeout: 60_000 }).then(() => this.captureLook(page)).catch(() => {});
   }
 
   private markNextNavigateAsOpening = false;
@@ -939,6 +948,30 @@ class RecordingSession {
     this.records = [];
   }
 
+  // A layer counts as asked for when one of the person's actions came just
+  // before it (pageScript.ts layerOf). An action that opened another tab or
+  // went to another page asked for that instead, so it doesn't count: on
+  // pieinsurance.com the cookie banner came up 0.7 s after "Get a quote",
+  // which opened the quote form in a new tab. A confirm dialog's click
+  // stays on the page and still counts. An action with no record found
+  // still counts.
+  private layerFacts(rec: PageRecord): NonNullable<DraftStep['layer']> {
+    const { askedAt, ...l } = rec.fp.layer!;
+    let unasked = l.unasked;
+    if (!unasked && askedAt?.length) {
+      const known = [...this.steps.map((s) => s.record), ...this.records]
+        .filter((r): r is PageRecord => !!r && r.page === rec.page && r !== rec && (r.kind === 'click' || r.kind === 'keydown'));
+      unasked = askedAt.every((t) => {
+        // The click record comes a moment after its mouse-down.
+        const by = known.filter((r) => r.pageTs >= t && r.pageTs <= t + 1_500).sort((a, b) => a.pageTs - b.pageTs)[0];
+        if (!by) return false;
+        const signals = this.steps.find((s) => s.record === by)?.signals ?? by.pendingSignals ?? [];
+        return signals.some((g) => g.name === 'popup' || g.name === 'navigation');
+      });
+    }
+    return { ...l, unasked, gone: rec.layerGone === true };
+  }
+
   private draftSteps(): DraftStep[] {
     return this.steps.map((s, i) => ({
       stepKey: `s${i + 1}`,
@@ -954,7 +987,7 @@ class RecordingSession {
       // The clicked element's own text, last in the page record's names.
       optionText: s.action === 'click' ? s.record?.fp.names?.[s.record.fp.names.length - 1] : undefined,
       choiceGroup: s.action === 'click' ? s.record?.fp.choiceGroup : undefined,
-      layer: s.action === 'click' && s.record?.fp.layer ? { ...s.record.fp.layer, gone: s.record.layerGone === true } : undefined,
+      layer: s.action === 'click' && s.record?.fp.layer ? this.layerFacts(s.record) : undefined,
       navigates: s.signals.some((g) => g.name === 'navigation' || g.name === 'popup'),
       description: describe(s),
     }));

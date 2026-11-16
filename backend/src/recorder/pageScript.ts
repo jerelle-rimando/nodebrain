@@ -220,8 +220,11 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
     }
     // Asked for: one of the person's own actions in the 1.75 s before it
     // was first seen (the scan runs every 250 ms). Not known: not counted
-    // as unasked.
-    const unasked = appeared !== undefined && !actTimes.some((t) => t <= appeared && t >= appeared - 1750);
+    // as unasked. The times of those actions go along: NodeBrain excuses
+    // one that opened another tab or went to another page, since that
+    // action asked for something else (recordingSession.ts layerFacts).
+    const askedAt = appeared === undefined ? [] : actTimes.filter((t) => t <= appeared && t >= appeared - 1750);
+    const unasked = appeared !== undefined && !askedAt.length;
     const words = String(layer.innerText || layer.textContent || '').slice(0, 4000);
     const marks = [];
     for (let n = layer; n && n !== document.documentElement; n = up(n)) {
@@ -233,6 +236,7 @@ ${ELEMENT_FACTS_SOURCE}  function targetOf(e) {
       node: layer,
       facts: {
         unasked,
+        askedAt,
         consent: CONSENT.test(words),
         vendor: VENDOR.test(marks.join(' ')) || /usercentrics|onetrust|cookiebot|didomi|trustarc/i.test(words),
         promo: PROMO.test(words),
