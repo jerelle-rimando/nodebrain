@@ -38,6 +38,9 @@ interface AppState {
   // A finished recording waiting on the review screen. Nothing is saved
   // until the person presses Save workflow there.
   recordingReview: RecordingStatus | null;
+  // Bumped when a workflow is saved, so the Dashboard reloads its list at
+  // once instead of on its next poll.
+  workflowsChangedAt: number;
   // Text handed to the site chat's composer from elsewhere in the app (a stopped
   // workflow's "Ask the agent"). The composer takes it once and clears it;
   // the person reads it and sends it themselves.
@@ -68,6 +71,7 @@ interface AppState {
   removePendingTakeControl: (requestId: string) => void;
   setBackendConnected: (connected: boolean) => void;
   setRecordingReview: (status: RecordingStatus | null) => void;
+  noteWorkflowsChanged: () => void;
   setChatDraft: (draft: string | null) => void;
 }
 
@@ -82,6 +86,7 @@ export const useStore = create<AppState>((set) => ({
   pendingTakeControls: [],
   backendConnected: true,
   recordingReview: null,
+  workflowsChangedAt: 0,
   chatDraft: null,
 
   setAvailableModels: (availableModels) => set({ availableModels }),
@@ -111,5 +116,6 @@ export const useStore = create<AppState>((set) => ({
     ? s : { pendingTakeControls: [...s.pendingTakeControls, req] })),
   removePendingTakeControl: (requestId) => set((s) => ({ pendingTakeControls: s.pendingTakeControls.filter((r) => r.requestId !== requestId) })),
   setRecordingReview: (recordingReview) => set({ recordingReview }),
+  noteWorkflowsChanged: () => set({ workflowsChangedAt: Date.now() }),
   setChatDraft: (chatDraft) => set({ chatDraft }),
 }));

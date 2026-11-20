@@ -18,6 +18,10 @@ type Screen =
   | { name: 'run'; workflowId: string; runId: string };
 
 const SITE_KEY = 'nb_workflows_site';
+// Recordings the list shows: open ones, and one done but not yet saved, so
+// a first recording doesn't drop back to "Record your first workflow" while
+// its review screen is up. A saved one shows as its workflow's row.
+const LISTED_STATES = new Set([...OPEN_STATES, 'review', 'saving']);
 
 export function Dashboard() {
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
@@ -39,14 +43,22 @@ export function Dashboard() {
   }, []);
 
   // Rows and the picker carry live state (running, paused, stopped), so the
-  // page follows it.
+  // page follows it. Loads overlap (the poll, a save), and an answer that
+  // left before a newer one landed is dropped: a poll sent just before Save
+  // could otherwise come back after it and put "Record your first workflow"
+  // back up.
+  const sent = useRef(0);
+  const shown = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++sent.current;
     const [o, r] = await Promise.all([
       api.getWorkflows().catch(() => null),
       api.getRecordings().catch(() => null),
     ]);
+    if (mine < shown.current) return;
+    shown.current = mine;
     if (o) { setOverview(o); setError(null); } else setError("Couldn't load your workflows. Trying again…");
-    if (r) setRecordings(r.filter((x) => OPEN_STATES.has(x.state)));
+    if (r) setRecordings(r.filter((x) => LISTED_STATES.has(x.state)));
   }, []);
 
   useEffect(() => {
@@ -55,6 +67,12 @@ export function Dashboard() {
     return () => clearInterval(timer);
   }, [load]);
 
+  // A workflow was just saved: show it now, not on the next poll.
+  const workflowsChangedAt = useStore((s) => s.workflowsChangedAt);
+  useEffect(() => {
+    if (workflowsChangedAt) void load();
+  }, [workflowsChangedAt, load]);
+
   // Sites: those with saved workflows, plus a new site that only has a
   // recording open so far.
   const sites: PickerSite[] = [...(overview?.sites ?? [])];
@@ -62,7 +80,7 @@ export function Dashboard() {
     if (!sites.some((s) => s.siteKey === rec.siteKey)) {
       sites.push({
         id: `recording:${rec.id}`, siteKey: rec.siteKey, name: rec.siteName, icon: deriveAgentEmoji(rec.siteName), favicon: rec.siteIcon,
-        startUrl: rec.startUrl, workflowCount: 0, attention: 'Recording now', recordingOnly: true,
+        startUrl: rec.startUrl, workflowCount: 0, attention: OPEN_STATES.has(rec.state) ? 'Recording now' : 'Waiting to be saved', recordingOnly: true,
       });
     }
   }
@@ -350,8 +368,11 @@ function Row({ row, site, onOpen, onAction, onDelete }: {
 function RecordingRow({ status }: { status: RecordingStatus }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const finishing = status.state === 'finishing';
-  const text = finishing ? 'Finishing the recording…'
+  // Done already pressed: nothing left to press here.
+  const finishing = status.state === 'finishing' || status.state === 'review' || status.state === 'saving';
+  const text = status.state === 'finishing' ? 'Finishing the recording…'
+    : status.state === 'review' ? 'Recorded. Save it in the window that opened to keep it.'
+    : status.state === 'saving' ? 'Saving…'
     : status.state === 'browser_closed' ? 'The browser window was closed. Press Done to keep what you did.'
     : `Recording now, ${status.stepCount} ${status.stepCount === 1 ? 'step' : 'steps'} so far`;
 

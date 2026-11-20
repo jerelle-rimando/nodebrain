@@ -25,6 +25,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 function ReviewDialog({ status }: { status: RecordingStatus }) {
   const draft = status.draft!;
   const setRecordingReview = useStore((s) => s.setRecordingReview);
+  const noteWorkflowsChanged = useStore((s) => s.noteWorkflowsChanged);
   const [name, setName] = useState(draft.suggestedName);
   const [choices, setChoices] = useState<Record<string, RowChoice>>(() =>
     Object.fromEntries(draft.values.map((v) => [v.stepKey, { mode: v.canChange ? v.defaultMode : 'fixed', secret: false }])),
@@ -59,6 +60,8 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
         ? `Saved "${trimmedName}". Each time it runs, it will ask you for ${plural(asks, 'thing', 'things')}.`
         : `Saved "${trimmedName}".`);
       setRecordingReview(null);
+      // The list behind this dialog shows the new workflow right away.
+      noteWorkflowsChanged();
     } catch (err) {
       setError(err instanceof Error && err.message !== 'backend unreachable'
         ? err.message

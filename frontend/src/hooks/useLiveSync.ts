@@ -110,7 +110,10 @@ export function useLiveSync() {
         const { id } = JSON.parse((e as MessageEvent).data) as RecordingStatus;
         if (useStore.getState().recordingReview?.id === id) useStore.getState().setRecordingReview(null);
       };
-      es.addEventListener('recording:saved', clearReview);
+      es.addEventListener('recording:saved', (e) => {
+        clearReview(e);
+        useStore.getState().noteWorkflowsChanged();
+      });
       es.addEventListener('recording:discarded', (e) => {
         clearReview(e);
         bringAppForward();
