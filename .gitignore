@@ -138,6 +138,8 @@ vite.config.ts.timestamp-*
 
 # NodeBrain specific
 data/
+# Source code, not runtime data: the frontend's bundled template list.
+!frontend/src/data/
 *.db
 *.db-wal
 *.db-shm
