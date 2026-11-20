@@ -74,6 +74,7 @@ These are known security considerations that are accepted in the current release
 - No rate limiting on the local API
 - The filesystem integration path is user-controlled — misconfiguration can expose sensitive directories
 - MCP server packages are third party and their security is not audited by NodeBrain maintainers
+- Workflow runs save pictures of the web page (the page when the run ended, and a step where the run stopped) under `%APPDATA%\NodeBrain\data\workflow-runs`. They are unencrypted PNG files that any program running as your user can read, and they can show details you entered on the site, such as names, addresses or policy numbers. Passwords appear only as blank boxes or dots. No picture is taken once a saved secret has been shown on the page, and no copy of the page is ever written to disk after a saved sign-in was used. The pictures stay until you delete the workflow or reset all data.
 
 ---
 

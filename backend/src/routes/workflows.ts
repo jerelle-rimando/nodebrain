@@ -4,7 +4,10 @@ import { buildRunForm } from '../workflows/runPlan';
 import { buildOverview } from '../workflows/workflowList';
 import { askAboutSite, SiteChatError } from '../workflows/siteChat';
 import { ICON_TYPES, siteIconsDir } from '../recorder/siteLook';
-import { deleteWorkflow, getRunsByWorkflow } from '../db/workflowRepository';
+import fs from 'fs';
+import path from 'path';
+import { getDataDir } from '../db/database';
+import { deleteWorkflow, getRunIdsByWorkflow, getRunsByWorkflow } from '../db/workflowRepository';
 import { isRunActive } from '../replay/replayEngine';
 
 // Saved workflows for the app: the list with its sites, the run form (inputs
@@ -47,9 +50,15 @@ workflowsRouter.delete('/workflows/:id', (req: Request, res: Response) => {
     res.status(409).json({ success: false, error: 'Stop the run first, then delete the workflow.' });
     return;
   }
+  const runIds = getRunIdsByWorkflow(req.params.id);
   if (!deleteWorkflow(req.params.id)) {
     res.status(404).json({ success: false, error: "That workflow doesn't exist anymore." });
     return;
+  }
+  // Its runs' pictures go with it: they can show client details.
+  const root = path.join(getDataDir(), 'workflow-runs');
+  for (const id of runIds) {
+    try { fs.rmSync(path.join(root, id), { recursive: true, force: true }); } catch { /* left for uninstall */ }
   }
   res.json({ success: true, data: { id: req.params.id } });
 });

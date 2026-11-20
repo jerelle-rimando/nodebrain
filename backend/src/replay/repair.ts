@@ -10,6 +10,7 @@ import { getDataDir } from '../db/database';
 import {
   getRunById, getRunSteps, getWorkflowById, getSiteAgentById, getStepsByVersion, getFieldsByWorkflow,
   getVersionsByWorkflow, getStepLiteralValue, deriveVersion,
+  getRunFinalScreenshot,
 } from '../db/workflowRepository';
 import { ELEMENT_FACTS_SOURCE } from '../recorder/pageScript';
 import { factsForRef, type SnapshotFacts } from '../recorder/ariaSnapshot';
@@ -157,9 +158,20 @@ export function stoppedScreenshot(runId: string): string | undefined {
 }
 
 function screenshotFile(row: WorkflowRunStep | undefined): string | undefined {
-  if (!row?.screenshotPath) return undefined;
+  return runPictureFile(row?.screenshotPath);
+}
+
+// The picture of the page when the run ended (finalPicture.ts).
+export function finalScreenshot(runId: string): string | undefined {
+  return runPictureFile(getRunFinalScreenshot(runId));
+}
+
+// A stored picture path, only if it's still on disk and inside the run
+// pictures folder.
+function runPictureFile(stored: string | undefined): string | undefined {
+  if (!stored) return undefined;
   const root = path.resolve(getDataDir(), 'workflow-runs');
-  const file = path.resolve(row.screenshotPath);
+  const file = path.resolve(stored);
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) return undefined;
   return file;
 }

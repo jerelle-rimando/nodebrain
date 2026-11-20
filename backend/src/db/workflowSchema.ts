@@ -143,6 +143,9 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
   // The choices a question offered when recorded (Yes / No), as JSON, for
   // the run form. NULL for typed values.
   addColumn(db, 'workflow_fields', 'choices', 'TEXT');
+  // The picture of the page when the run ended (replay/finalPicture.ts),
+  // under <data>/workflow-runs/<run id>/. NULL when none was taken.
+  addColumn(db, 'workflow_runs', 'final_screenshot_path', 'TEXT');
 }
 
 // Same guard as database.ts's own column migrations: an unguarded ADD COLUMN

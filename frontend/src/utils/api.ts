@@ -105,6 +105,7 @@ export const api = {
   cancelRepair: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/repair/cancel`, { method: 'POST' }),
   releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
   runScreenshotUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/screenshot`,
+  runFinalPictureUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/final-picture`,
   raiseRunBrowser: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/raise`, { method: 'POST' }),
   // The Dashboard's site chat: questions about one site's workflows
   askAboutSite: (siteId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, provider: string, model: string) =>

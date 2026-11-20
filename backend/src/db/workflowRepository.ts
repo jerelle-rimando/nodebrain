@@ -82,7 +82,7 @@ interface FieldRow {
 interface RunRow {
   id: string; workflow_id: string; version_id: string; site_agent_id: string; trigger: string;
   status: string; inputs: string; failed_step_key: string | null; error: string | null;
-  started_at: string; finished_at: string | null;
+  started_at: string; finished_at: string | null; final_screenshot_path?: string | null;
 }
 
 interface RunStepRow {
@@ -164,6 +164,7 @@ function rowToRun(row: RunRow): WorkflowRun {
     inputs: JSON.parse(row.inputs) as Record<string, string>,
     failedStepKey: row.failed_step_key ?? undefined, error: row.error ?? undefined,
     startedAt: row.started_at, finishedAt: row.finished_at ?? undefined,
+    ...(row.final_screenshot_path ? { finalPicture: true } : {}),
   };
 }
 
@@ -782,6 +783,21 @@ export function addRunStep(runId: string, input: RunStepInput): WorkflowRunStep 
 
 // A picture taken after the step row was written (the Fix screen's "Show the
 // page", for a run that stopped in its minimized window).
+export function setRunFinalScreenshot(runId: string, screenshotPath: string): void {
+  dbRun('UPDATE workflow_runs SET final_screenshot_path = ? WHERE id = ?', [screenshotPath, runId]);
+}
+
+export function getRunFinalScreenshot(runId: string): string | undefined {
+  return dbGet<{ final_screenshot_path: string | null }>(
+    'SELECT final_screenshot_path FROM workflow_runs WHERE id = ?', [runId],
+  )?.final_screenshot_path ?? undefined;
+}
+
+// Every run of a workflow, for removing their pictures with it.
+export function getRunIdsByWorkflow(workflowId: string): string[] {
+  return dbAll<{ id: string }>('SELECT id FROM workflow_runs WHERE workflow_id = ?', [workflowId]).map((r) => r.id);
+}
+
 export function setRunStepScreenshot(runStepId: string, screenshotPath: string): void {
   dbRun('UPDATE workflow_run_steps SET screenshot_path = ? WHERE id = ?', [screenshotPath, runStepId]);
 }

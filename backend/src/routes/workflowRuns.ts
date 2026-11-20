@@ -4,7 +4,7 @@ import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow, getRunById, ge
 import { startRun, cancelRun, getRunDetail, isRunActive, markRunBrowserShown, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
 import { raiseSiteWindow } from '../browser/raiseWindow';
-import { repairStatus, stoppedScreenshot, startRepair, cancelRepair, releaseRun, markOptional, takeStoppedPicture, RepairError } from '../replay/repair';
+import { repairStatus, stoppedScreenshot, finalScreenshot, startRepair, cancelRepair, releaseRun, markOptional, takeStoppedPicture, RepairError } from '../replay/repair';
 
 // Replaying saved workflows. A run starts here and goes on in the
 // background; progress arrives on /api/events as run:started, run:step and
@@ -67,6 +67,16 @@ workflowRunsRouter.get('/workflow-runs/:id', (req: Request, res: Response) => {
 // The picture taken where the run stopped.
 workflowRunsRouter.get('/workflow-runs/:id/screenshot', (req: Request, res: Response) => {
   const file = stoppedScreenshot(req.params.id);
+  if (!file) {
+    res.status(404).json({ success: false, error: 'There is no picture for this run.' });
+    return;
+  }
+  res.sendFile(file);
+});
+
+// The picture of the page as it stood when the run ended.
+workflowRunsRouter.get('/workflow-runs/:id/final-picture', (req: Request, res: Response) => {
+  const file = finalScreenshot(req.params.id);
   if (!file) {
     res.status(404).json({ success: false, error: 'There is no picture for this run.' });
     return;

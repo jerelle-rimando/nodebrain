@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import cors from 'cors';
-import { initDb } from './db/database';
+import { initDb, getDataDir } from './db/database';
 import { reconcileOrphanedTasks } from './db/taskRepository';
 import { reconcileOrphanedAgents, repairInvalidAgentModels } from './db/agentRepository';
 import { startScheduler } from './scheduler/scheduler';
@@ -30,6 +30,7 @@ import recordingsRouter from './routes/recordings';
 import { workflowRunsRouter } from './routes/workflowRuns';
 import { workflowsRouter } from './routes/workflows';
 import { reconcileOrphanedRuns } from './db/workflowRepository';
+import { removeLeftoverCopies } from './replay/finalPicture';
 import { registerTelemetrySubscribers } from './telemetry/subscribers';
 import { emitUsageSnapshot } from './telemetry/usageSnapshot';
 
@@ -204,6 +205,9 @@ async function main() {
     const orphanedAgents = reconcileOrphanedAgents();
     const orphanedRuns = reconcileOrphanedRuns();
     if (orphanedRuns > 0) console.log(`♻️  Marked ${orphanedRuns} workflow run(s) interrupted by the last shutdown`);
+    // Page copies for final pictures that a shutdown left on disk.
+    const leftoverCopies = removeLeftoverCopies(path.join(getDataDir(), 'workflow-runs'));
+    if (leftoverCopies > 0) console.log(`🧹 Deleted ${leftoverCopies} leftover page cop${leftoverCopies === 1 ? 'y' : 'ies'} from workflow runs`);
     if (orphanedTasks > 0 || orphanedAgents > 0) {
       console.log(`♻️  Reconciled ${orphanedTasks} orphaned task(s) and ${orphanedAgents} orphaned agent(s) left running from a previous shutdown`);
     } else {

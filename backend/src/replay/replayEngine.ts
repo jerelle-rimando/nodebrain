@@ -10,7 +10,7 @@ import {
 import { getDataDir } from '../db/database';
 import {
   getWorkflowById, getSiteAgentById, updateSiteAgent, getFieldsByWorkflow, getStepsByVersion, getStepLiteralValue,
-  getFieldRecordedValue, createRun, updateRunStatus, addRunStep, getRunById, getRunSteps, setRunStepScreenshot,
+  getFieldRecordedValue, createRun, updateRunStatus, addRunStep, getRunById, getRunSteps, setRunStepScreenshot, setRunFinalScreenshot,
 } from '../db/workflowRepository';
 import { getCredentialValue } from '../vault/credentialVault';
 import { launchBrowser, closeBrowser, minimizeWindow, BrowserNotFoundError, type LaunchedBrowser } from '../recorder/browserLauncher';
@@ -23,6 +23,7 @@ import { findElement, SETTLED_MS } from './elementFinder';
 import { trackActivity } from './pageActivity';
 import { isTypeahead, offers, readBack, sameValue, waitForList, LIST_STILL_MS } from './typeahead';
 import { describeErrors, lastingNewErrors, readPageErrors, type PageError } from './pageErrors';
+import { takeFinalPicture } from './finalPicture';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -53,6 +54,15 @@ const SIGN_IN_CHECK_MS = 15_000;
 // that never goes quiet, where an ordinary step would wait the full 18 s.
 const OPTIONAL_PRIMARY_TIMEOUT_MS = 6_000;
 const OPTIONAL_FALLBACK_TIMEOUT_MS = 1_000;
+// After the last step, before the run counts as done: at least the minimum,
+// then until the page has been quiet (no requests going, nothing added or
+// removed) for FINAL_QUIET_MS, but never more than the maximum. A site that
+// checks the last step with its server answers after its request returns;
+// a fixed 1 s missed Pie's "A valid class code is required" (2026-11-16 run:
+// marked done 1.0 s after its last step).
+const FINAL_MIN_WAIT_MS = 1_000;
+const FINAL_QUIET_MS = 1_500;
+const FINAL_MAX_WAIT_MS = 10_000;
 // What the run view says under an optional step that was skipped.
 const OPTIONAL_SKIPPED_TEXT = "Wasn't on the page this time. It doesn't always appear, so NodeBrain carried on.";
 const OPTIONAL_MARKED_TEXT = "You said this doesn't always appear, so NodeBrain skipped it and carried on.";
@@ -279,6 +289,10 @@ class Replay {
   private browserGone = false;
   private expectDialog = false;
   private secretShown = false; // a secret other than a password is visible on the page
+  // A saved sign-in value was put in at some point. The page may then carry
+  // it in its markup (some sites write a password box's value into the
+  // attribute), so no copy of the page is made for the final picture.
+  private credentialFilled = false;
   private login?: { username?: string; password?: string };
   private steps: WorkflowStep[];
   private fieldsById: Map<string, WorkflowField>;
@@ -430,28 +444,65 @@ class Replay {
         return;
       }
     }
-    // The last step is often the submit. Give what it sent time to arrive
-    // before the window closes, or the close could cut it off.
+    // The last step is often the submit. Give the site time to answer it
+    // (and what it sent time to arrive before the window closes).
+    // waitForLoadState('networkidle') isn't used: on a single-page site the
+    // state was reached at the first load, so it returns at once.
     const lastStep = this.steps[this.steps.length - 1];
     const last = this.pages.get(lastStep.pageAlias);
-    if (last && !last.isClosed()) {
-      await new Promise((r) => setTimeout(r, 1_000));
-      await last.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-    }
+    if (last && !last.isClosed()) await this.settleAfterLastStep(last);
     // An error message that came up after the last step (a submit the site
-    // turned down) means the run didn't get where it was going.
+    // turned down) means the run didn't get where it was going. Only a new
+    // message that stays counts (pageErrors.ts): a last step that changes
+    // nothing visible (a checkbox, a save that only shows a toast) is fine.
     const watch = this.errorWatch;
     const watched = watch && this.pages.get(watch.pageAlias);
     if (watch && watched && !watched.isClosed() && !this.closedOrStopped()) {
       const appeared = await lastingNewErrors(watched, watch.before, this.signal);
       if (appeared.length && !this.closedOrStopped()) {
-        const error = `After NodeBrain ${watch.did}, the page ${describeErrors(appeared)}. The run stopped here: the site didn't accept what it was given.`;
-        await this.stop(lastStep, Date.now(), 'needs_attention', error, true);
+        console.log(`[replay] ${this.run.id} ${lastStep.stepKey}: the page showed an error message after the last step`);
+        const error = `The site didn't accept the last step. After NodeBrain ${watch.did}, the page ${describeErrors(appeared)}.`;
+        const picture = await this.finalPicture(watched);
+        this.record(lastStep, 'failed', Date.now(), { error, screenshotPath: picture });
         this.finish('needs_attention', { error, failedStepKey: lastStep.stepKey });
         return;
       }
     }
+    if (last && !last.isClosed() && !this.closedOrStopped()) await this.finalPicture(last);
     this.finish('completed');
+  }
+
+  private async settleAfterLastStep(page: Page): Promise<void> {
+    const activity = trackActivity(page);
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, FINAL_MIN_WAIT_MS));
+    while (Date.now() - started < FINAL_MAX_WAIT_MS && !page.isClosed() && !this.closedOrStopped()) {
+      if ((await activity.quietMs()) >= FINAL_QUIET_MS) return;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  // The page as it stood when the run ended, kept with the run
+  // (finalPicture.ts). Same rule as the stopped-step picture: none once a
+  // secret other than a masked password is showing. After a saved sign-in
+  // value went in, only a real screenshot (window showing) is taken, never
+  // the page copy; a minimized run then has no final picture.
+  private async finalPicture(page: Page): Promise<string | undefined> {
+    if (this.secretShown || page.isClosed() || !this.context) return undefined;
+    const dir = path.join(getDataDir(), 'workflow-runs', this.run.id);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      return undefined;
+    }
+    const file = path.join(dir, 'final.png');
+    const ok = await takeFinalPicture(page, this.context, file, !!this.entry.shown, !this.credentialFilled).catch(() => false);
+    if (!ok) {
+      console.log(`[replay] ${this.run.id}: no final picture (window ${this.entry.shown ? 'showing' : 'minimized'}${this.credentialFilled ? ', saved sign-in used: no page copy' : ''})`);
+      return undefined;
+    }
+    setRunFinalScreenshot(this.run.id, file);
+    return file;
   }
 
   private watchDialogs(page: Page): void {
@@ -598,6 +649,7 @@ class Replay {
       resolved = { error: "A saved value for this step can't be unlocked, probably because NodeBrain's vault key changed since it was recorded. Record the workflow again." };
     }
     if ('error' in resolved) return this.stop(step, started, 'failed', resolved.error);
+    if (step.valueSource === 'credential') this.credentialFilled = true;
     // The typing of a typeahead pick (reviewDraft.ts typeaheadPairs): the
     // value is the choice. For the recorded choice, the search text typed
     // when recording goes in instead, so that run goes exactly as recorded.

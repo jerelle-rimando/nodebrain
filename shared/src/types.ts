@@ -280,6 +280,7 @@ export interface WorkflowRun {
   startedAt: string;
   finishedAt?: string;
   browserShown?: boolean; // run:finished only: its window came forward during the run
+  finalPicture?: boolean; // a picture of the page when the run ended is kept (GET /workflow-runs/:id/final-picture)
 }
 
 // A run that stopped because a step's element couldn't be found, and what

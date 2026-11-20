@@ -153,6 +153,9 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
               Every step went through.{steps.some((s) => s.status === 'repaired') ? ' The step you fixed is saved, so the next run will use it too.' : ''}
             </p>
           )}
+          {finished && run?.finalPicture && !(repair && status === 'needs_attention') && (
+            <FinalPicture key={runId} runId={runId} openAtFirst={status !== 'completed'} />
+          )}
 
           <ol className="space-y-3">
             {form?.phases.map((p, i) => (
@@ -196,6 +199,24 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
             <Square size={12} /> {stopping ? 'Stopping…' : 'Stop the run'}
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// The page as it was when the run ended, so the person can check what the
+// site actually showed. Open at first when the run didn't finish cleanly.
+function FinalPicture({ runId, openAtFirst }: { runId: string; openAtFirst: boolean }) {
+  const [open, setOpen] = useState(openAtFirst);
+  return (
+    <div className="mb-4">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        className="text-xs text-brain-accent hover:underline underline-offset-2">
+        {open ? 'Hide' : 'Show'} the page as it was when the run finished
+      </button>
+      {open && (
+        <img src={api.runFinalPictureUrl(runId)} alt="The page when the run finished"
+          className="mt-2 w-full rounded-lg border border-brain-border" />
       )}
     </div>
   );

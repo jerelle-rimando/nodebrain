@@ -1,6 +1,6 @@
 # Privacy
 
-NodeBrain runs on your machine. Your agents, credentials, task history, RAG memory, and the SQLite database are stored locally and are never sent to NodeBrain.
+NodeBrain runs on your machine. Your agents, credentials, task history, RAG memory, the SQLite database, and the pictures of web pages that workflow runs save are stored locally and are never sent to NodeBrain.
 
 NodeBrain has optional, anonymous usage telemetry. It is **off by default**. Nothing is sent unless you turn it on.
 
@@ -41,6 +41,7 @@ Each event contains:
 - API keys, tokens, or anything stored in the credential vault
 - Integration configuration
 - RAG memory or anything from the SQLite database
+- Pictures of web pages saved by workflow runs
 
 ### How this is enforced
 
