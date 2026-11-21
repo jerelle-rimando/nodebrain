@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bringToFront: () => ipcRenderer.invoke('window-bring-to-front'),
   isOnboardingComplete: () => ipcRenderer.invoke('is_onboarding_complete'),
   completeOnboarding: () => ipcRenderer.invoke('complete_onboarding'),
+  getAiMode: () => ipcRenderer.invoke('get-ai-mode'),
+  setAiMode: (mode: 'assistant' | 'none') => ipcRenderer.invoke('set-ai-mode', mode),
   getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
   setBackendUrl: (url: string) => ipcRenderer.invoke('set-backend-url', url),
   startLocalSetup: () => ipcRenderer.invoke('start-local-setup'),

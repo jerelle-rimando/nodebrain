@@ -19,6 +19,7 @@ import { toast } from './components/shared/Toast';
 import TitleBar from './components/shared/TitleBar';
 import { ConnectionBanner } from './components/shared/ConnectionBanner';
 import { OnboardingScreen } from './components/onboarding/OnboardingScreen';
+import { loadAiMode } from './utils/aiSetup';
 
 // Nav order follows the arc of a user's journey through the app:
 //   work surfaces first  — Dashboard (workflows + site chat, the home screen),
@@ -49,7 +50,9 @@ export default function App() {
   useEffect(() => {
     const electronAPI = (window as any).electronAPI;
     if (electronAPI) {
-      electronAPI.isOnboardingComplete().then((complete: boolean) => {
+      // The AI choice is read first so the Dashboard opens the right way
+      // round (chat folded or open) instead of switching after a moment.
+      Promise.all([electronAPI.isOnboardingComplete(), loadAiMode()]).then(([complete]: [boolean, void]) => {
         setOnboardingComplete(complete);
       }).catch(() => setOnboardingComplete(true));
     } else {

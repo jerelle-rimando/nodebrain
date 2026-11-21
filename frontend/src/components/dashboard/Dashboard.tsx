@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Circle, Loader2, Trash2 } from 'lucide-react';
+import { ChevronRight, Circle, Loader2, Trash2 } from 'lucide-react';
 import type { RecordingStatus, WorkflowRow, WorkflowsOverview } from '@shared/types';
 import { deriveAgentEmoji } from '@shared/emoji';
 import { api } from '../../utils/api';
@@ -7,7 +7,8 @@ import { useStore } from '../../stores/appStore';
 import { RunFormScreen } from '../workflows/RunFormScreen';
 import { RunView } from '../workflows/RunView';
 import { OPEN_STATES, RecordButton, StartRecordingDialog } from '../workflows/RecordControls';
-import { SiteChatPanel, SiteIcon, type PickerSite } from '../workflows/SiteChatPanel';
+import { SiteChatPanel, SiteIcon, SitePicker, type PickerSite } from '../workflows/SiteChatPanel';
+import { useAiSetup } from '../../utils/aiSetup';
 
 // The Dashboard, the app's home: on the left a chat about one site, whose
 // header holds the site picker, or in its place a workflow's run form or run
@@ -18,6 +19,20 @@ type Screen =
   | { name: 'run'; workflowId: string; runId: string };
 
 const SITE_KEY = 'nb_workflows_site';
+// The site chat open ('1') or folded to a strip ('0'), once the person has
+// toggled it. Before that it follows their choice in the first-run wizard:
+// folded for "Just record and replay", open for AI (and for installs set up
+// before that choice existed).
+const CHAT_OPEN_KEY = 'nb_site_chat_open';
+
+function readChatOpen(): boolean | null {
+  try {
+    const v = localStorage.getItem(CHAT_OPEN_KEY);
+    return v === '1' ? true : v === '0' ? false : null;
+  } catch {
+    return null;
+  }
+}
 // Recordings the list shows: open ones, and one done but not yet saved, so
 // a first recording doesn't drop back to "Record your first workflow" while
 // its review screen is up. A saved one shows as its workflow's row.
@@ -30,12 +45,37 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SITE_KEY));
 
+  const aiMode = useAiSetup((s) => s.aiMode);
+  const [chatOpenPref, setChatOpenPref] = useState<boolean | null>(readChatOpen);
+  const chatOpen = chatOpenPref ?? aiMode !== 'none';
+  // The row's width, so the left column's content can keep its open width
+  // while the column slides.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [rowWidth, setRowWidth] = useState(0);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => setRowWidth(entry.contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const setChatOpen = useCallback((open: boolean) => {
+    setChatOpenPref(open);
+    try { localStorage.setItem(CHAT_OPEN_KEY, open ? '1' : '0'); } catch { /* remembered for this session only */ }
+  }, []);
+
   // A stopped run's "ask the agent" puts its question in the chat's composer,
-  // so the chat comes back in place of the run view.
+  // so the chat comes back in place of the run view, opened if it was folded.
+  // With no AI set up, that's where it says so.
   const chatDraft = useStore((s) => s.chatDraft);
   useEffect(() => {
-    if (chatDraft) setScreen({ name: 'list' });
-  }, [chatDraft]);
+    if (chatDraft) {
+      setScreen({ name: 'list' });
+      setChatOpen(true);
+    }
+  }, [chatDraft, setChatOpen]);
 
   const choose = useCallback((siteKey: string) => {
     setChosen(siteKey);
@@ -113,18 +153,39 @@ export function Dashboard() {
     );
   }
 
+  // A run form or run view always gets the left column; only the chat folds.
+  const folded = !chatOpen && !runScreen;
+
+  // Keyboard focus stays out of the chat while it's folded out of view.
+  useEffect(() => { panelRef.current?.toggleAttribute('inert', folded); }, [folded]);
+
   return (
-    <div className="h-full flex">
-      <div className="basis-[55%] min-w-0 border-r border-brain-border">
-        {runScreen}
-        {/* Stays mounted behind a run so each site's conversation survives it. */}
-        <div className={runScreen ? 'hidden' : 'h-full'}>
-          <SiteChatPanel sites={sites} current={current} onChoose={choose} />
+    <div ref={rowRef} className="h-full flex">
+      {/* The left column slides between the folded strip and 55%. Its content
+          keeps the open width the whole time, so it slides behind the edge
+          instead of squashing and rewrapping while the column moves. */}
+      <div className="relative flex-shrink-0 overflow-hidden border-r border-brain-border transition-[flex-basis] duration-300 ease-in-out motion-reduce:transition-none"
+        style={{ flexBasis: folded ? '2.75rem' : '55%' }}>
+        <div ref={panelRef} aria-hidden={folded || undefined}
+          className={`h-full transition-opacity duration-300 ease-in-out motion-reduce:transition-none ${folded ? 'opacity-0' : 'opacity-100'}`}
+          style={{ width: rowWidth ? rowWidth * 0.55 : '100%' }}>
+          {runScreen}
+          {/* Stays mounted behind a run, and while folded, so each site's conversation survives. */}
+          <div className={runScreen ? 'hidden' : 'h-full'}>
+            <SiteChatPanel sites={sites} current={current} onChoose={choose} onCollapse={() => setChatOpen(false)} />
+          </div>
         </div>
+        <button type="button" onClick={() => setChatOpen(true)} aria-label="Ask about this site" title="Ask about this site"
+          tabIndex={folded ? 0 : -1} aria-hidden={!folded || undefined}
+          className={`absolute inset-y-0 left-0 w-11 flex flex-col items-center gap-3 pt-[22px] bg-brain-surface text-brain-text-dim hover:text-brain-text hover:bg-brain-border/40 transition-[opacity,color,background-color] duration-200 ease-in-out motion-reduce:transition-none ${folded ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <ChevronRight size={16} />
+          <span className="text-xs tracking-wide [writing-mode:vertical-rl] rotate-180 select-none">Ask about this site</span>
+        </button>
       </div>
-      <div className="basis-[45%] min-w-0">
+      <div className="flex-1 min-w-0">
         <WorkflowList
           overview={overview} recordings={recordings} sites={sites} current={current} error={error}
+          showSitePicker={folded}
           onChoose={choose}
           onRecordingStarted={(status) => {
             choose(status.siteKey);
@@ -171,12 +232,15 @@ async function runNow(workflowId: string): Promise<{ runId?: string; error?: str
   }
 }
 
-function WorkflowList({ overview, recordings, sites, current, error, onChoose, onRecordingStarted, onRun, onOpenForm, onOpenRun, onDeleted }: {
+function WorkflowList({ overview, recordings, sites, current, error, showSitePicker, onChoose, onRecordingStarted, onRun, onOpenForm, onOpenRun, onDeleted }: {
   overview: WorkflowsOverview | null;
   recordings: RecordingStatus[];
   sites: PickerSite[];
   current: PickerSite | null;
   error: string | null;
+  // The chat (and the site picker in its header) is folded away, so the
+  // picker moves here.
+  showSitePicker: boolean;
   onChoose: (siteKey: string) => void;
   onRecordingStarted: (status: RecordingStatus) => void;
   onRun: (workflowId: string) => Promise<void>;
@@ -260,7 +324,11 @@ function WorkflowList({ overview, recordings, sites, current, error, onChoose, o
   return (
     <section aria-label="Your Workflows" className="h-full flex flex-col">
       <div className="h-[72px] flex items-center gap-3 px-[22px] flex-shrink-0">
-        <h1 className="text-[15px] font-medium text-brain-text">Your Workflows</h1>
+        {showSitePicker && current && sites.length > 1 ? (
+          <div className="min-w-0 max-w-[320px] flex-1"><SitePicker sites={sites} current={current} onChoose={onChoose} /></div>
+        ) : (
+          <h1 className="text-[15px] font-medium text-brain-text">Your Workflows</h1>
+        )}
         <div className="ml-auto">
           <RecordButton onClick={() => setDialog({ address: current?.startUrl ?? '' })} />
         </div>

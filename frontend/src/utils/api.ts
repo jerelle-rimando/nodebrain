@@ -187,6 +187,7 @@ export const api = {
       modelPresent: boolean;
       provider: string;
       model: string;
+      ownModel?: string;
     }>('/models/local'),
 
   getAnalytics: () =>

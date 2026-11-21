@@ -35,6 +35,21 @@ interface StoreSchema {
   // Set once the upgrade consent prompt has been shown, whatever the answer,
   // so it is never shown again (see promptUpgraderForTelemetryConsent).
   telemetryConsentPrompted?: boolean;
+  // What the person chose in the first-run wizard: 'assistant' (use AI) or
+  // 'none' (just record and replay). Lets the app tell "chose no AI" from
+  // "AI is broken". Unset on installs that finished setup before the choice
+  // existed — treat those as AI users, which is how they were set up.
+  aiMode?: AiMode;
+}
+
+type AiMode = 'assistant' | 'none';
+
+// Whether AI is in use for the backend's boot-time work (embedding model,
+// web-search tool). A first run hasn't chosen yet, so it's off until chosen.
+function aiInUse(): boolean {
+  const mode = store.get('aiMode');
+  if (mode) return mode === 'assistant';
+  return !!store.get('setupComplete');
 }
 
 const store = new Store<StoreSchema>({ name: 'nodebrain-store' });
@@ -720,6 +735,7 @@ async function startBackend(): Promise<void> {
       ELECTRON_RUN: 'true',
       ...(telemetryListenerPort && { NODEBRAIN_TELEMETRY_PORT: String(telemetryListenerPort) }),
       NODEBRAIN_FIRST_LAUNCH_AT: telemetryIdentity.firstLaunchAt,
+      NODEBRAIN_AI_IN_USE: aiInUse() ? '1' : '0',
       ...(!isDev && { NODEBRAIN_DATA_DIR: path.join(app.getPath('userData'), 'data') }),
       ...(hasBundledNpm && { NODEBRAIN_NPX_CLI: npxCli, NODEBRAIN_NODE_SHIM_DIR: nodeShimDir }),
     },
@@ -1581,6 +1597,26 @@ function registerIpcHandlers(): void {
     mainWindow.setAlwaysOnTop(true);
     mainWindow.focus();
     mainWindow.setAlwaysOnTop(false);
+  });
+
+  ipcMain.handle('get-ai-mode', () => store.get('aiMode') ?? null);
+
+  // Records the choice and tells the running backend, so turning AI on
+  // starts its background downloads now rather than at the next launch.
+  ipcMain.handle('set-ai-mode', async (_event: Electron.IpcMainInvokeEvent, mode: unknown) => {
+    if (mode !== 'assistant' && mode !== 'none') return { success: false };
+    store.set('aiMode', mode);
+    log(`AI mode set to ${mode}`);
+    try {
+      await fetch(`http://localhost:${BACKEND_PORT}/api/ai-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+    } catch (err) {
+      log(`set-ai-mode: backend not told (${err}); it picks the mode up at next launch`);
+    }
+    return { success: true };
   });
 
   ipcMain.handle('is_onboarding_complete', () => store.get('onboardingComplete') ?? false);

@@ -85,10 +85,9 @@
       display: block;
     }
 
-    #screen-choose-model.active,
     #screen-api-key.active,
-    #screen-local-setup.active,
-    #screen-consent.active {
+    #screen-consent.active,
+    .screen.v2.active {
       display: flex;
     }
 
@@ -130,7 +129,7 @@
     /* Terms of Service link — bottom left of the "By continuing..." line */
     #btn-tos {
       position: absolute;
-      left: 50.7%;
+      left: 50.5%;
       top: 91%;
       width: 12%;
       height: 4%;
@@ -270,165 +269,312 @@
       to { transform: rotate(360deg); }
     }
 
-    /* ── Screen: Choose Model ── */
-    #screen-choose-model {
-      background: #060608;
+    /* ── Screens 2 and 3: "How do you want to use NodeBrain?" and AI setup ──
+       Their own look (Inter, bundled under fonts/ so the wizard makes no
+       network request). The other wizard screens keep theirs. */
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: block; src: url('fonts/inter-latin-400-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: block; src: url('fonts/inter-latin-500-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: block; src: url('fonts/inter-latin-600-normal.woff2') format('woff2'); }
+    @font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: block; src: url('fonts/inter-latin-700-normal.woff2') format('woff2'); }
+
+    .screen.v2 {
+      --v2-bg: #0B0E14;
+      --v2-card: #141A24;
+      --v2-card-border: #3A4860;
+      --v2-card2: #10151E;
+      --v2-card2-border: #222C3C;
+      --v2-heading: #F5F7FA;
+      --v2-body: #B9C3D1;
+      --v2-muted: #8E9BAE;
+      --v2-dim: #5A6678;
+      --v2-accent: #4A9EFF;
+      --v2-on-accent: #0B0E14;
+      --v2-divider: #1A2230;
+      --v2-error: #FF7A7A;
+      background: var(--v2-bg);
+      color: var(--v2-body);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      padding: 56px 64px;
       overflow-y: auto;
-      padding: 40px 24px;
     }
 
-    .cm-header {
-      text-align: center;
-      max-width: 560px;
-      margin-bottom: 32px;
+    @media (max-height: 700px), (max-width: 1040px) {
+      .screen.v2 { padding: 32px 40px; }
     }
 
-    .cm-heading {
-      font-size: 24px;
+    .v2-main {
+      flex: 1 0 auto;
+      width: 100%;
+      max-width: 880px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-bottom: 32px;
+    }
+
+    .v2-main-narrow { max-width: 600px; }
+
+    .v2-h1 {
+      font-size: 34px;
       font-weight: 600;
-      color: #e2e8f0;
-      letter-spacing: 0.01em;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      color: var(--v2-heading);
     }
 
-    .cm-subheading {
+    .v2-sub {
+      margin-top: 10px;
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--v2-muted);
+    }
+
+    .v2-cards {
+      margin-top: 36px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .v2-card {
+      border-radius: 16px;
+      padding: 28px 26px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .v2-card-primary { background: var(--v2-card); border: 1px solid var(--v2-card-border); }
+    .v2-card-secondary { background: var(--v2-card2); border: 1px solid var(--v2-card2-border); }
+
+    .v2-card-title {
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.3;
+      color: var(--v2-heading);
+    }
+
+    .v2-body {
+      margin-top: 10px;
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--v2-body);
+    }
+
+    .v2-secondary {
       margin-top: 8px;
       font-size: 14px;
-      color: #94a3b8;
       line-height: 1.5;
+      color: var(--v2-muted);
     }
 
-    .cm-cards {
-      display: flex;
-      gap: 20px;
-      flex-wrap: wrap;
-      justify-content: center;
-      max-width: 720px;
-    }
+    .v2-grow { flex: 1; min-height: 24px; }
 
-    .cm-card {
-      display: flex;
-      flex-direction: column;
-      width: 320px;
-      background: #12121a;
-      border: 0.5px solid #2a2a3a;
-      border-radius: 12px;
-      padding: 24px;
-      position: relative;
-    }
-
-    .cm-card-recommended {
-      border: 2px solid #6366f1;
-    }
-
-    .cm-pill {
-      align-self: flex-start;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      color: #94a3b8;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 999px;
-      padding: 3px 10px;
-      margin-bottom: 14px;
-    }
-
-    .cm-pill-accent {
-      color: #6366f1;
-      background: rgba(99, 102, 241, 0.15);
-    }
-
-    .cm-card-icon {
-      color: #6366f1;
-      margin-bottom: 12px;
-    }
-
-    .cm-card-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: #e2e8f0;
-      margin-bottom: 8px;
-    }
-
-    .cm-card-body {
-      font-size: 13px;
-      color: #94a3b8;
-      line-height: 1.5;
-      margin-bottom: 14px;
-    }
-
-    .cm-card-details {
-      list-style: none;
-      margin-bottom: 20px;
-      flex: 1;
-    }
-
-    .cm-card-details li {
-      position: relative;
-      font-family: 'Fira Code', 'Courier New', monospace;
-      font-size: 11.5px;
-      color: #94a3b8;
-      padding-left: 14px;
-      margin-bottom: 6px;
-      line-height: 1.4;
-    }
-
-    .cm-card-details li::before {
-      content: '›';
-      position: absolute;
-      left: 0;
-      color: #6366f1;
-    }
-
-    .cm-btn {
+    .v2-btn {
       width: 100%;
-      padding: 10px 16px;
-      border-radius: 8px;
-      font-size: 13px;
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      transition: filter 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
     }
 
-    .cm-btn-primary {
-      background: #6366f1;
-      border: none;
-      color: #fff;
+    .v2-btn-primary { background: var(--v2-accent); color: var(--v2-on-accent); border: none; }
+    .v2-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .v2-btn-outline { background: transparent; color: var(--v2-heading); border: 1px solid var(--v2-card-border); }
+    .v2-btn-outline:hover:not(:disabled) { border-color: var(--v2-accent); color: var(--v2-accent); }
+    .v2-btn:disabled { opacity: 0.6; cursor: default; }
+
+    .v2-btn:focus-visible,
+    .v2-link:focus-visible {
+      outline: 2px solid var(--v2-accent);
+      outline-offset: 2px;
     }
 
-    .cm-btn-primary:hover {
-      background: #5457e5;
-    }
-
-    .cm-btn-secondary {
-      background: transparent;
-      border: 0.5px solid #2a2a3a;
-      color: #e2e8f0;
-    }
-
-    .cm-btn-secondary:hover {
-      border-color: #6366f1;
-      color: #6366f1;
-    }
-
-    .cm-skip {
-      margin-top: 24px;
-      font-size: 12px;
-      color: #94a3b8;
-      text-align: center;
-    }
-
-    .cm-skip-link {
-      color: #6366f1;
+    .v2-link {
+      color: var(--v2-accent);
       text-decoration: none;
       cursor: pointer;
+      background: none;
+      border: none;
+      font: inherit;
+      padding: 0;
     }
 
-    .cm-skip-link:hover {
-      text-decoration: underline;
+    .v2-link:hover { text-decoration: underline; }
+
+    .v2-footer {
+      flex-shrink: 0;
+      width: 100%;
+      max-width: 880px;
+      margin: 0 auto;
+      padding-top: 18px;
+      border-top: 1px solid var(--v2-divider);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      font-size: 13px;
+      color: var(--v2-muted);
     }
+
+    .v2-footer-back {
+      color: var(--v2-muted);
+      background: none;
+      border: none;
+      font: inherit;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    .v2-footer-back:hover { color: var(--v2-heading); }
+    .v2-footer-note { color: var(--v2-muted); text-align: right; }
+    .v2-footer-note .v2-link { color: var(--v2-muted); text-decoration: underline; }
+    .v2-footer-note .v2-link:hover { color: var(--v2-heading); }
+
+    /* AI setup card */
+    .ls-card { margin-top: 32px; }
+
+    .ls-card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .ls-card-size {
+      flex-shrink: 0;
+      font-size: 14px;
+      color: var(--v2-muted);
+    }
+
+    .ls-checklist {
+      list-style: none;
+      margin: 20px 0 24px;
+    }
+
+    .ls-step {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: center;
+      column-gap: 12px;
+      padding: 12px 0;
+      border-top: 1px solid var(--v2-divider);
+    }
+
+    .ls-step:last-child { border-bottom: 1px solid var(--v2-divider); }
+
+    .ls-step-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid var(--v2-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--v2-on-accent);
+    }
+
+    .ls-step-icon svg { display: none; }
+    .ls-step.in-progress .ls-step-icon {
+      border-color: rgba(74, 158, 255, 0.3);
+      border-top-color: var(--v2-accent);
+      animation: spin 0.9s linear infinite;
+    }
+    .ls-step.complete .ls-step-icon { background: var(--v2-accent); border-color: var(--v2-accent); }
+    .ls-step.complete .ls-step-icon svg { display: block; }
+    .ls-step.failed .ls-step-icon { border-color: var(--v2-error); }
+
+    .ls-step-label {
+      font-size: 15px;
+      color: var(--v2-heading);
+    }
+
+    .ls-step-status {
+      font-size: 14px;
+      color: var(--v2-muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .ls-step-progress {
+      display: none;
+      grid-column: 2 / 4;
+      margin-top: 8px;
+    }
+
+    .ls-step.in-progress .ls-step-progress { display: block; }
+
+    .ls-step-bar {
+      width: 100%;
+      height: 4px;
+      background: var(--v2-divider);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .ls-step-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--v2-accent);
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .ls-step-error {
+      display: none;
+      grid-column: 2 / 4;
+      margin-top: 6px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--v2-error);
+    }
+
+    .ls-step-error.visible { display: block; }
+
+    .ls-alt {
+      margin-top: 20px;
+      font-size: 14px;
+      color: var(--v2-body);
+    }
+
+    .ls-alt-note {
+      margin-top: 4px;
+      font-size: 13px;
+      color: var(--v2-muted);
+    }
+
+    .ls-existing {
+      margin-top: 14px;
+      font-size: 13px;
+      text-align: center;
+      color: var(--v2-muted);
+    }
+
+    .ls-existing .v2-link { color: var(--v2-muted); text-decoration: underline; }
+    .ls-existing .v2-link:hover { color: var(--v2-heading); }
+
+    .ls-existing-msg {
+      display: none;
+      margin-top: 6px;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: center;
+      color: var(--v2-error);
+    }
+
+    .ls-existing-msg.visible { display: block; }
+
+    #screen-local-setup.running .ls-existing,
+    #screen-local-setup.done .ls-existing,
+    #screen-local-setup.running .ls-alt,
+    #screen-local-setup.running .ls-alt-note,
+    #screen-local-setup.done .ls-alt,
+    #screen-local-setup.done .ls-alt-note { visibility: hidden; }
 
     /* ── Screen: API Key Setup ── */
     #screen-api-key {
@@ -698,293 +844,6 @@
       color: #e2e8f0;
     }
 
-    /* ── Screen: Local AI Setup ── */
-    #screen-local-setup {
-      background: #060608;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      padding: 20px 24px;
-    }
-
-    .ls-container {
-      position: relative;
-      width: 100%;
-      max-width: 400px;
-      padding-top: 30px;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-    }
-
-    /* Soft radial glow behind the header — clipped by the container's top edge */
-    .ls-glow {
-      position: absolute;
-      top: -40px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 340px;
-      height: 190px;
-      background: radial-gradient(ellipse at center,
-        rgba(59, 130, 246, 0.16) 0%,
-        rgba(59, 130, 246, 0) 70%);
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    .ls-content {
-      position: relative;
-      z-index: 1;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }
-
-    .ls-icon-badge {
-      width: 52px;
-      height: 52px;
-      border-radius: 14px;
-      background: #12121a;
-      border: 0.5px solid #3b82f6;
-      box-shadow: 0 0 28px rgba(59, 130, 246, 0.22);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #3b82f6;
-      margin-bottom: 16px;
-    }
-
-    .ls-heading {
-      font-size: 22px;
-      font-weight: 500;
-      color: #f1f5f9;
-      letter-spacing: -0.01em;
-    }
-
-    .ls-subheading {
-      margin-top: 8px;
-      max-width: 340px;
-      font-size: 14px;
-      color: #94a3b8;
-      line-height: 1.6;
-    }
-
-    .ls-steps {
-      width: 100%;
-      margin: 22px 0 4px;
-      text-align: left;
-    }
-
-    .ls-step {
-      display: flex;
-      gap: 12px;
-    }
-
-    /* Left rail: badge on top, gradient connector line stretching to fill the row */
-    .ls-step-rail {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .ls-step-badge {
-      position: relative;
-      width: 39px;
-      height: 39px;
-      border-radius: 10px;
-      background: #0f0f18;
-      border: 0.5px solid #2a2a3a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #94a3b8;
-      z-index: 1;
-    }
-
-    .ls-step-badge-icon,
-    .ls-step-check {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .ls-step-check {
-      position: absolute;
-      inset: 0;
-      color: #3b82f6;
-      opacity: 0;
-    }
-
-    .ls-step.complete .ls-step-badge-icon { opacity: 0; }
-    .ls-step.complete .ls-step-check { opacity: 1; }
-    .ls-step.complete .ls-step-badge { border-color: #1f3a5f; }
-
-    .ls-step-rail-line {
-      width: 1px;
-      flex: 1;
-      min-height: 14px;
-      margin: 4px 0;
-      background: linear-gradient(#2a2a3a, #1a1a24);
-    }
-
-    .ls-step:last-child .ls-step-rail-line { display: none; }
-
-    .ls-step-body {
-      flex: 1;
-      min-width: 0;
-      padding-bottom: 18px;
-    }
-
-    .ls-step:last-child .ls-step-body { padding-bottom: 0; }
-
-    .ls-step-title {
-      font-size: 14px;
-      color: #e2e8f0;
-      line-height: 1.3;
-    }
-
-    .ls-step.complete .ls-step-title { color: #64748b; }
-
-    .ls-step-size {
-      margin-top: 2px;
-      font-family: 'Fira Code', 'Courier New', monospace;
-      font-size: 12px;
-      color: #64748b;
-    }
-
-    /* Progress bar + status line: revealed once a download is running */
-    .ls-step-progress {
-      display: none;
-      margin-top: 8px;
-    }
-
-    .ls-step.in-progress .ls-step-progress,
-    .ls-step.complete .ls-step-progress {
-      display: block;
-    }
-
-    .ls-step-bar {
-      width: 100%;
-      height: 4px;
-      background: #1a1a24;
-      border-radius: 999px;
-      overflow: hidden;
-    }
-
-    .ls-step-bar-fill {
-      height: 100%;
-      width: 0%;
-      background: #3b82f6;
-      border-radius: 999px;
-      transition: width 0.3s ease;
-    }
-
-    .ls-step.complete .ls-step-bar-fill { background: #1f3a5f; }
-
-    .ls-step-status {
-      margin-top: 4px;
-      font-family: 'Fira Code', 'Courier New', monospace;
-      font-size: 11px;
-      color: #64748b;
-    }
-
-    .ls-step-error {
-      display: none;
-      margin-top: 6px;
-      font-size: 12px;
-      color: #f87171;
-      line-height: 1.4;
-    }
-
-    .ls-step-error.visible { display: block; }
-
-    .ls-start-btn {
-      width: 100%;
-      margin-top: 18px;
-      padding: 13px;
-      border: none;
-      border-radius: 10px;
-      background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
-      box-shadow: 0 4px 18px rgba(59, 130, 246, 0.28);
-      color: #fff;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: filter 0.15s, opacity 0.15s;
-    }
-
-    .ls-start-btn:hover:not(:disabled) { filter: brightness(1.06); }
-
-    .ls-start-btn:disabled {
-      opacity: 0.65;
-      cursor: default;
-    }
-
-    .ls-eta {
-      margin-top: 10px;
-      font-family: 'Fira Code', 'Courier New', monospace;
-      font-size: 12px;
-      color: #475569;
-    }
-
-    .ls-divider {
-      width: 100%;
-      border-top: 0.5px solid #16161f;
-      margin: 16px 0;
-    }
-
-    .ls-existing {
-      font-size: 12px;
-      color: #94a3b8;
-    }
-
-    .ls-existing-link {
-      color: #3b82f6;
-      text-decoration: none;
-      cursor: pointer;
-    }
-
-    .ls-existing-link:hover { text-decoration: underline; }
-
-    .ls-existing-msg {
-      margin-top: 8px;
-      font-size: 12px;
-      color: #f87171;
-      display: none;
-    }
-
-    .ls-existing-msg.visible {
-      display: block;
-    }
-
-    /* ── Local AI Setup: completion state ── */
-    #screen-local-setup.done .ls-eta,
-    #screen-local-setup.done .ls-divider,
-    #screen-local-setup.done .ls-existing,
-    #screen-local-setup.done .ls-existing-msg {
-      display: none;
-    }
-
-    #screen-local-setup.done .ls-start-btn {
-      opacity: 1;
-      cursor: pointer;
-    }
-
-    /* Header glow brightens briefly as the setup resolves, then settles */
-    #screen-local-setup.done #ls-glow {
-      animation: lsGlowResolve 1.6s ease-out;
-    }
-
-    @keyframes lsGlowResolve {
-      0%   { filter: brightness(1);   transform: translateX(-50%) scale(0.96); }
-      30%  { filter: brightness(2.1); transform: translateX(-50%) scale(1.06); }
-      100% { filter: brightness(1);   transform: translateX(-50%) scale(1); }
-    }
-
     @keyframes fadeIn {
       from { opacity: 0; }
       to { opacity: 1; }
@@ -1025,52 +884,35 @@
     <button id="btn-pp" onclick="openLink('https://nodebrain.tech/legal/privacy')" title="Privacy Policy"></button>
   </div>
 
-  <!-- ── Screen 2: Choose Model ── -->
-  <div id="screen-choose-model" class="screen">
-    <div class="cm-header">
-      <h1 class="cm-heading">How should NodeBrain think?</h1>
-      <p class="cm-subheading">Your agents need an AI to run on. Pick one — you can change this later.</p>
-    </div>
+  <!-- ── Screen 2: How do you want to use NodeBrain? ── -->
+  <div id="screen-choose-model" class="screen v2">
+    <div class="v2-main">
+      <h1 class="v2-h1">How do you want to use NodeBrain?</h1>
+      <p class="v2-sub">You can add the AI assistant later from “Ask about this site” on the Dashboard.</p>
 
-    <div class="cm-cards">
-      <!-- Local model card -->
-      <div class="cm-card cm-card-recommended">
-        <span class="cm-pill cm-pill-accent">Recommended</span>
-        <div class="cm-card-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="2" y="4" width="20" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/>
-            <line x1="8" y1="21" x2="16" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
+      <div class="v2-cards">
+        <div class="v2-card v2-card-primary">
+          <h2 class="v2-card-title">Just record and replay</h2>
+          <p class="v2-body">Record a task in your browser once, then run it whenever you want.</p>
+          <p class="v2-secondary">Nothing to download. Nothing to connect.</p>
+          <div class="v2-grow"></div>
+          <button class="v2-btn v2-btn-primary" id="btn-choose-no-ai" onclick="chooseNoAi()">Start recording</button>
         </div>
-        <h2 class="cm-card-title">Run it on this computer</h2>
-        <p class="cm-card-body">Free forever. No account, no card. Nothing you do leaves your computer.</p>
-        <ul class="cm-card-details">
-          <li>One-time 2.5 GB download</li>
-          <li>Runs on your hardware, so replies take a bit longer</li>
-        </ul>
-        <button class="cm-btn cm-btn-primary" onclick="setupLocalModel()">Set it up</button>
-      </div>
 
-      <!-- Online API card -->
-      <div class="cm-card">
-        <span class="cm-pill">Faster</span>
-        <div class="cm-card-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M7 18a4.5 4.5 0 0 1-.4-8.98A5.5 5.5 0 0 1 17.2 8.02 4 4 0 0 1 17 16H7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-          </svg>
+        <div class="v2-card v2-card-secondary">
+          <h2 class="v2-card-title">Add an AI assistant</h2>
+          <p class="v2-body">Also ask questions about a site you're working on.</p>
+          <p class="v2-secondary">Needs a 2.5 GB download, or an API key you already have.</p>
+          <div class="v2-grow"></div>
+          <button class="v2-btn v2-btn-outline" onclick="chooseAi()">Set up AI</button>
         </div>
-        <h2 class="cm-card-title">Use an online AI service</h2>
-        <p class="cm-card-body">Quick to set up and much faster. Free to start with Groq, within usage limits.</p>
-        <ul class="cm-card-details">
-          <li>Needs a free signup</li>
-          <li>Your tasks go to their servers</li>
-        </ul>
-        <button class="cm-btn cm-btn-secondary" style="font-weight:400" onclick="setupApiKey()">Walk me through it</button>
       </div>
     </div>
 
-    <p class="cm-skip">Already have an API key? <a href="#" class="cm-skip-link" onclick="skipModelSetup(); return false;">Skip this</a></p>
+    <div class="v2-footer">
+      <button class="v2-footer-back" onclick="showScreen('screen-welcome')">Back</button>
+      <span class="v2-footer-note">Recording and running workflows never use AI.</span>
+    </div>
   </div>
 
   <!-- ── Screen 3: API Key Setup ── -->
@@ -1114,96 +956,52 @@
 
       <button class="ak-btn-primary" id="ak-connect-btn" disabled onclick="connectApiKey()">Connect</button>
 
-      <p class="ak-back"><a href="#" class="ak-back-link" onclick="showScreen('screen-choose-model'); return false;">Back</a></p>
+      <p class="ak-back"><a href="#" class="ak-back-link" onclick="useLocalSetupInstead(); return false;">Back</a></p>
     </div>
   </div>
 
-  <!-- ── Screen: Local AI Setup ── -->
-  <div id="screen-local-setup" class="screen">
-    <div class="ls-container">
-      <div class="ls-glow" id="ls-glow" aria-hidden="true"></div>
+  <!-- ── Screen: AI setup ── -->
+  <div id="screen-local-setup" class="screen v2">
+    <div class="v2-main v2-main-narrow">
+      <h1 class="v2-h1">Set up the AI assistant</h1>
+      <p class="v2-sub">This runs on your machine. Nothing you ask it leaves your computer.</p>
 
-      <div class="ls-content">
-        <div class="ls-icon-badge">
-          <!-- CPU / chip -->
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="4.5" y="4.5" width="15" height="15" rx="3" stroke="currentColor" stroke-width="1.5"/>
-            <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M9 1.75v2.75M15 1.75v2.75M9 19.5v2.75M15 19.5v2.75M1.75 9H4.5M1.75 15H4.5M19.5 9h2.75M19.5 15h2.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
+      <div class="v2-card v2-card-primary ls-card">
+        <div class="ls-card-head">
+          <h2 class="v2-card-title" id="ls-heading">Download the local AI</h2>
+          <span class="ls-card-size" id="ls-card-size">2.5 GB · about 10 minutes</span>
         </div>
+        <p class="v2-body" id="ls-body">It's two files: an engine that runs it, and the model itself. Once they're on this computer, it works with no internet connection.</p>
 
-        <h1 class="ls-heading" id="ls-heading">Bring the AI to your machine</h1>
-        <p class="ls-subheading" id="ls-subheading">Two downloads and it's yours. No account, no monthly bill, nothing leaving this computer.</p>
+        <ul class="ls-checklist">
+            <li class="ls-step" id="ls-step-engine">
+              <span class="ls-step-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="ls-step-label">Engine · 26 MB</span>
+              <span class="ls-step-status">Waiting</span>
+              <div class="ls-step-progress"><div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div></div>
+              <div class="ls-step-error" role="alert"></div>
+            </li>
+            <li class="ls-step" id="ls-step-model">
+              <span class="ls-step-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="ls-step-label">Model · 2.5 GB</span>
+              <span class="ls-step-status">Waiting</span>
+              <div class="ls-step-progress"><div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div></div>
+              <div class="ls-step-error" role="alert"></div>
+            </li>
+        </ul>
 
-        <div class="ls-steps">
-          <!-- Step 1: the engine -->
-          <div class="ls-step" id="ls-step-engine">
-            <div class="ls-step-rail">
-              <div class="ls-step-badge">
-                <span class="ls-step-badge-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4.5 20.5h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </span>
-                <span class="ls-step-check">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </span>
-              </div>
-              <div class="ls-step-rail-line"></div>
-            </div>
-            <div class="ls-step-body">
-              <div class="ls-step-title">The engine that runs it</div>
-              <div class="ls-step-size">26 MB</div>
-              <div class="ls-step-progress">
-                <div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div>
-                <div class="ls-step-status"></div>
-              </div>
-              <div class="ls-step-error"></div>
-            </div>
-          </div>
-
-          <!-- Step 2: the model -->
-          <div class="ls-step" id="ls-step-model">
-            <div class="ls-step-rail">
-              <div class="ls-step-badge">
-                <span class="ls-step-badge-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 3l1.9 5.1 5.1 1.9-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-                    <path d="M18 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-                  </svg>
-                </span>
-                <span class="ls-step-check">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </span>
-              </div>
-              <div class="ls-step-rail-line"></div>
-            </div>
-            <div class="ls-step-body">
-              <div class="ls-step-title">The AI itself</div>
-              <div class="ls-step-size">2.5 GB &middot; Qwen 3 4B</div>
-              <div class="ls-step-progress">
-                <div class="ls-step-bar"><div class="ls-step-bar-fill"></div></div>
-                <div class="ls-step-status"></div>
-              </div>
-              <div class="ls-step-error"></div>
-            </div>
-          </div>
-        </div>
-
-        <button class="ls-start-btn" id="ls-start-btn" onclick="startLocalSetup()">Start setup</button>
-        <p class="ls-eta">~10 min on average home internet</p>
-
-        <div class="ls-divider"></div>
-        <p class="ls-existing">Already have Ollama running? <a href="#" class="ls-existing-link" onclick="useExistingOllama(); return false;">Use what's installed</a></p>
-        <p class="ls-existing-msg" id="ls-existing-msg"></p>
-
-        <p class="ak-back"><a href="#" class="ak-back-link" onclick="showScreen('screen-choose-model'); return false;">Back</a></p>
+        <button class="v2-btn v2-btn-primary" id="ls-start-btn" onclick="startLocalSetup()">Download and continue</button>
+        <p class="ls-existing">Already running Ollama? <a href="#" class="v2-link" onclick="useExistingOllama(); return false;">Use what's installed</a></p>
+        <p class="ls-existing-msg" id="ls-existing-msg" role="alert"></p>
       </div>
+
+      <p class="ls-alt">Already have an API key? <a href="#" class="v2-link" onclick="useApiKeyInstead(); return false;">Use that instead</a></p>
+      <p class="ls-alt-note">Your prompts go to that provider rather than staying on your machine.</p>
+    </div>
+
+    <div class="v2-footer">
+      <button class="v2-footer-back" onclick="leaveLocalSetup()">Back</button>
+      <span class="v2-footer-note">You can <a href="#" class="v2-link" onclick="skipAiSetup(); return false;">skip this</a> and add it later from “Ask about this site” on the Dashboard.</span>
     </div>
   </div>
 
@@ -1303,23 +1101,51 @@
       document.getElementById('loading-bar').style.width = progress + '%';
     }
 
-    // ── Choose Model screen actions ──────────────────────────────────────────
-    // Show the local AI setup screen (engine + model downloads live there)
-    function setupLocalModel() {
-      resetLocalSetupScreen();
+    // ── "How do you want to use NodeBrain?" ─────────────────────────────────
+    // The choice is stored (aiMode) so the app can tell "chose no AI" from
+    // "AI is broken". Choosing AI is only stored once it's actually set up.
+    async function setAiMode(mode) {
+      try {
+        if (window.electronAPI && window.electronAPI.setAiMode) await window.electronAPI.setAiMode(mode);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // "Start recording": no download, no key — straight on.
+    async function chooseNoAi() {
+      const btn = document.getElementById('btn-choose-no-ai');
+      btn.disabled = true;
+      await setAiMode('none');
+      btn.disabled = false;
+      showConsentScreen();
+    }
+
+    // "Set up AI": the local download first, with an API key as the alternative.
+    function chooseAi() {
+      if (!lsSetupRunning) resetLocalSetupScreen();
       showScreen('screen-local-setup');
     }
 
-    // Open the guided flow for creating/entering a free API key (e.g. Groq)
-    function setupApiKey() {
+    // "You can skip this": same as not choosing AI.
+    function skipAiSetup() {
+      lsClearAutoAdvance();
+      chooseNoAi();
+    }
+
+    function leaveLocalSetup() {
+      lsClearAutoAdvance();
+      showScreen('screen-choose-model');
+    }
+
+    function useApiKeyInstead() {
       resetApiKeyScreen();
       showScreen('screen-api-key');
     }
 
-    // Skip straight to the same API key screen for users who already have a key
-    function skipModelSetup() {
-      resetApiKeyScreen();
-      showScreen('screen-api-key');
+    function useLocalSetupInstead() {
+      if (!lsSetupRunning) resetLocalSetupScreen();
+      showScreen('screen-local-setup');
     }
 
     // ── API Key Setup screen actions ─────────────────────────────────────────
@@ -1383,6 +1209,7 @@
         });
 
         if (result && result.success) {
+          await setAiMode('assistant');
           showConsentScreen();
           return;
         }
@@ -1399,11 +1226,15 @@
       connectBtn.textContent = originalLabel;
     }
 
-    // ── Local AI Setup screen ───────────────────────────────────────────────
+    // ── AI setup screen ─────────────────────────────────────────────────────
+    // The main process downloads the engine, then the model, and reports
+    // through 'local-setup-event', which calls setStepProgress /
+    // setStepComplete / setSetupFailed / setSetupComplete below.
     const LS_STEPS = ['engine', 'model'];
-    const LS_HEADING_DEFAULT = 'Bring the AI to your machine';
-    const LS_SUBHEADING_DEFAULT =
-      "Two downloads and it's yours. No account, no monthly bill, nothing leaving this computer.";
+    const LS_HEADING_DEFAULT = 'Download the local AI';
+    const LS_BODY_DEFAULT =
+      "It's two files: an engine that runs it, and the model itself. Once they're on this computer, it works with no internet connection.";
+    const LS_SIZE_DEFAULT = '2.5 GB · about 10 minutes';
     let lsSetupRunning = false;
     let lsAutoAdvanceTimer = null;
 
@@ -1422,215 +1253,182 @@
       return Math.round(bytes) + ' B';
     }
 
-    function lsFormatSpeed(bytesPerSec) {
-      if (!bytesPerSec || bytesPerSec <= 0) return '--';
-      if (bytesPerSec >= 1e6) return (bytesPerSec / 1e6).toFixed(1) + ' MB/s';
-      if (bytesPerSec >= 1e3) return Math.round(bytesPerSec / 1e3) + ' KB/s';
-      return Math.round(bytesPerSec) + ' B/s';
-    }
-
     function lsStepRow(step) {
       return document.getElementById('ls-step-' + step);
+    }
+
+    function lsSetText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    function lsSetButton(label, disabled, onclick) {
+      const btn = document.getElementById('ls-start-btn');
+      if (!btn) return;
+      btn.textContent = label;
+      btn.disabled = disabled;
+      btn.onclick = onclick;
     }
 
     // Put the screen back to its pristine, pre-download state.
     function resetLocalSetupScreen() {
       lsSetupRunning = false;
       lsClearAutoAdvance();
-
       const screen = document.getElementById('screen-local-setup');
-      if (screen) screen.classList.remove('done');
-
-      const heading = document.getElementById('ls-heading');
-      if (heading) heading.textContent = LS_HEADING_DEFAULT;
-      const sub = document.getElementById('ls-subheading');
-      if (sub) sub.textContent = LS_SUBHEADING_DEFAULT;
-
-      const btn = document.getElementById('ls-start-btn');
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Start setup';
-        btn.onclick = startLocalSetup;
-      }
-      const existingMsg = document.getElementById('ls-existing-msg');
-      if (existingMsg) { existingMsg.textContent = ''; existingMsg.classList.remove('visible'); }
+      screen.classList.remove('done', 'running');
+      lsSetText('ls-heading', LS_HEADING_DEFAULT);
+      lsSetText('ls-body', LS_BODY_DEFAULT);
+      lsSetText('ls-card-size', LS_SIZE_DEFAULT);
+      lsSetButton('Download and continue', false, startLocalSetup);
+      lsExistingMessage('');
       LS_STEPS.forEach(step => {
         const row = lsStepRow(step);
-        if (!row) return;
         row.classList.remove('in-progress', 'complete', 'failed');
-        const fill = row.querySelector('.ls-step-bar-fill');
-        if (fill) fill.style.width = '0%';
-        const status = row.querySelector('.ls-step-status');
-        if (status) status.textContent = '';
+        row.querySelector('.ls-step-bar-fill').style.width = '0%';
+        row.querySelector('.ls-step-status').textContent = 'Waiting';
         const err = row.querySelector('.ls-step-error');
-        if (err) { err.textContent = ''; err.classList.remove('visible'); }
+        err.textContent = '';
+        err.classList.remove('visible');
       });
     }
 
-    // Called by the download layer as bytes arrive.
-    // step: 'engine' | 'model'
-    function setStepProgress(step, receivedBytes, totalBytes, bytesPerSec) {
+    // Called as bytes arrive. step: 'engine' | 'model'
+    function setStepProgress(step, receivedBytes, totalBytes) {
       const row = lsStepRow(step);
       if (!row) return;
       row.classList.add('in-progress');
       row.classList.remove('failed');
-      const fill = row.querySelector('.ls-step-bar-fill');
-      const status = row.querySelector('.ls-step-status');
-      const pct = totalBytes > 0
-        ? Math.max(0, Math.min(100, (receivedBytes / totalBytes) * 100))
-        : 0;
-      if (fill) fill.style.width = pct.toFixed(1) + '%';
-      if (status) {
-        status.textContent =
-          lsFormatBytes(receivedBytes) + ' of ' + lsFormatBytes(totalBytes) +
-          ' · ' + lsFormatSpeed(bytesPerSec);
-      }
+      const pct = totalBytes > 0 ? Math.max(0, Math.min(100, (receivedBytes / totalBytes) * 100)) : 0;
+      row.querySelector('.ls-step-bar-fill').style.width = pct.toFixed(1) + '%';
+      row.querySelector('.ls-step-status').textContent =
+        totalBytes > 0 ? lsFormatBytes(receivedBytes) + ' of ' + lsFormatBytes(totalBytes) : 'Starting…';
     }
 
-    // Called by the download layer when an item finishes.
     function setStepComplete(step) {
       const row = lsStepRow(step);
       if (!row) return;
       row.classList.remove('in-progress', 'failed');
       row.classList.add('complete');
-      const fill = row.querySelector('.ls-step-bar-fill');
-      if (fill) fill.style.width = '100%';
-      const status = row.querySelector('.ls-step-status');
-      if (status) status.textContent = 'Done';
+      row.querySelector('.ls-step-bar-fill').style.width = '100%';
+      row.querySelector('.ls-step-status').textContent = 'Done';
       const err = row.querySelector('.ls-step-error');
-      if (err) { err.textContent = ''; err.classList.remove('visible'); }
+      err.textContent = '';
+      err.classList.remove('visible');
     }
 
-    // Called by the download layer on failure — shows an inline error under the
-    // row and re-enables the button so the user can retry.
+    // Shows the problem under its row and lets the person try again.
     function setSetupFailed(step, message) {
       const row = lsStepRow(step);
       if (row) {
         row.classList.remove('in-progress', 'complete');
         row.classList.add('failed');
+        row.querySelector('.ls-step-status').textContent = "Didn't finish";
         const err = row.querySelector('.ls-step-error');
-        if (err) {
-          err.textContent = message || 'Something went wrong. Please try again.';
-          err.classList.add('visible');
+        err.textContent = message || 'Something went wrong. Please try again.';
+        err.classList.add('visible');
+      }
+      // A step that hadn't started yet goes back to waiting.
+      LS_STEPS.forEach(s => {
+        const r = lsStepRow(s);
+        if (s !== step && r.classList.contains('in-progress')) {
+          r.classList.remove('in-progress');
+          r.querySelector('.ls-step-status').textContent = 'Waiting';
         }
-      }
+      });
       lsSetupRunning = false;
-      const btn = document.getElementById('ls-start-btn');
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Start setup';
-      }
+      document.getElementById('screen-local-setup').classList.remove('running');
+      lsSetButton('Try again', false, startLocalSetup);
     }
 
-    // Called by the download layer once BOTH the engine and the model have
-    // finished. Transforms the screen in place, then auto-advances after ~3s.
-    function setSetupComplete() {
+    // Both files are in. Records the choice, then moves on by itself after a
+    // few seconds: someone who walked away during the download comes back to
+    // a working app. The button goes now.
+    async function setSetupComplete() {
       lsSetupRunning = true; // keep startLocalSetup from re-entering
-
       LS_STEPS.forEach(step => setStepComplete(step));
-
       const screen = document.getElementById('screen-local-setup');
-      if (screen) screen.classList.add('done');
-
-      const heading = document.getElementById('ls-heading');
-      if (heading) heading.textContent = 'Your AI is ready';
-      const sub = document.getElementById('ls-subheading');
-      if (sub) sub.textContent = 'It runs on this computer, offline, for free.';
-
-      const btn = document.getElementById('ls-start-btn');
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Open NodeBrain';
-        btn.onclick = () => { lsClearAutoAdvance(); showConsentScreen(); };
-      }
-
-      // Someone who walked away during the download should come back to a
-      // working app, not a screen waiting on a click. The button stays live
-      // for anyone who wants to go now.
+      screen.classList.remove('running');
+      screen.classList.add('done');
+      lsSetText('ls-heading', 'Your AI is ready');
+      lsSetText('ls-body', 'It runs on this computer, with no internet connection needed.');
+      lsSetText('ls-card-size', '');
+      const goOn = () => { lsClearAutoAdvance(); showConsentScreen(); };
+      lsSetButton('Continue', false, goOn);
+      await setAiMode('assistant');
       lsClearAutoAdvance();
       lsAutoAdvanceTimer = setTimeout(() => {
         lsAutoAdvanceTimer = null;
-        showConsentScreen();
+        // Only if they're still here; they may have gone Back meanwhile.
+        if (screen.classList.contains('active')) showConsentScreen();
       }, 3000);
     }
 
-    // "Start setup" — one click triggers both downloads; the user does not
-    // sequence them.
+    // "Download and continue" — one click starts both downloads.
     function startLocalSetup() {
       if (lsSetupRunning) return;
       lsSetupRunning = true;
+      document.getElementById('screen-local-setup').classList.add('running');
+      lsSetButton('Downloading…', true, startLocalSetup);
 
-      const btn = document.getElementById('ls-start-btn');
-      btn.disabled = true;
-      btn.textContent = 'Setting up…';
-
-      // Enter the in-progress visual state for both rows.
       LS_STEPS.forEach(step => {
         const row = lsStepRow(step);
-        if (!row) return;
         row.classList.remove('complete', 'failed');
-        row.classList.add('in-progress');
-        const fill = row.querySelector('.ls-step-bar-fill');
-        if (fill) fill.style.width = '0%';
-        const status = row.querySelector('.ls-step-status');
-        if (status) status.textContent = 'Starting…';
+        row.querySelector('.ls-step-bar-fill').style.width = '0%';
+        row.querySelector('.ls-step-status').textContent = 'Waiting';
         const err = row.querySelector('.ls-step-error');
-        if (err) { err.textContent = ''; err.classList.remove('visible'); }
+        err.textContent = '';
+        err.classList.remove('visible');
       });
+      const first = lsStepRow('engine');
+      first.classList.add('in-progress');
+      first.querySelector('.ls-step-status').textContent = 'Starting…';
 
-      // The main process drives both the engine download and the model pull,
-      // streaming progress back via 'local-setup-event' (registered below),
-      // which calls setStepProgress/setStepComplete/setSetupFailed/setSetupComplete.
       if (!window.electronAPI || !window.electronAPI.startLocalSetup) {
         setSetupFailed('engine', "Setup isn't available in this build. Please try again.");
         return;
       }
       window.electronAPI.startLocalSetup().catch(() => {
-        // Failures are normally reported via setSetupFailed through the event
-        // channel; this only guards against the IPC call itself throwing.
+        // Failures normally arrive through setSetupFailed; this only guards
+        // against the call itself throwing.
         setSetupFailed('engine', 'Something went wrong starting setup. Please try again.');
       });
     }
 
-    // Routes progress/completion/failure events from the main process to the
-    // wizard functions that already render them.
-    if (window.electronAPI && window.electronAPI.onLocalSetupEvent) {
-      window.electronAPI.onLocalSetupEvent(({ fn, args }) => {
-        if (typeof window[fn] === 'function') window[fn](...(args || []));
-      });
+    function lsExistingMessage(text) {
+      const msg = document.getElementById('ls-existing-msg');
+      msg.textContent = text;
+      msg.classList.toggle('visible', !!text);
     }
 
-    // "Use what's installed" — the user already runs Ollama.
+    // "Use what's installed": for someone already running Ollama with a
+    // model in it. Nothing is downloaded; the chat uses their model.
     async function useExistingOllama() {
-      const msg = document.getElementById('ls-existing-msg');
-      if (msg) { msg.textContent = ''; msg.classList.remove('visible'); }
-
+      if (lsSetupRunning) return;
+      lsExistingMessage('');
       if (!window.electronAPI || !window.electronAPI.checkExistingOllama) {
-        if (msg) {
-          msg.textContent = "Couldn't check for an existing installation. Please run setup instead.";
-          msg.classList.add('visible');
-        }
+        lsExistingMessage("Couldn't check for it here. Use Download and continue instead.");
         return;
       }
-
       let status;
       try {
         status = await window.electronAPI.checkExistingOllama();
       } catch {
         status = { running: false, hasModel: false };
       }
-
       if (status && status.running && status.hasModel) {
+        await setAiMode('assistant');
         showConsentScreen();
         return;
       }
+      lsExistingMessage(status && status.running
+        ? "It's running, but it has no AI model yet. Use Download and continue instead."
+        : "It isn't running on this computer right now. Start it and try again, or use Download and continue.");
+    }
 
-      if (msg) {
-        msg.textContent = status && status.running
-          ? "Ollama is running, but it doesn't have any models yet. Please run setup instead."
-          : "No local Ollama installation was found running. Please run setup instead.";
-        msg.classList.add('visible');
-      }
+    if (window.electronAPI && window.electronAPI.onLocalSetupEvent) {
+      window.electronAPI.onLocalSetupEvent(({ fn, args }) => {
+        if (typeof window[fn] === 'function') window[fn](...(args || []));
+      });
     }
 
     // ── Telemetry Consent screen ─────────────────────────────────────────────

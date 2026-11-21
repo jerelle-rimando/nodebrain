@@ -96,6 +96,11 @@ Integrations send data to their own services when an agent uses them. For exampl
 NodeBrain also makes these connections. They do not include your data:
 
 - checking GitHub Releases for app updates
-- downloading the local embedding model on first launch
-- downloading integration MCP server packages from npm on first use
+- downloading the local embedding model (about 25 MB, used for agent memory) from Hugging Face, only if you use AI: in the background at launch, or the first time an agent needs it
+- downloading the web search integration's server package from npm, only if you use AI: in the background at launch
+- downloading other integration MCP server packages from npm on first use
 - downloading the Ollama engine and local model, if you set up local inference
+
+If you chose **Just record and replay** in the setup wizard, opening NodeBrain makes none of the downloads above except the update check.
+
+When you record or run a workflow, NodeBrain opens Google Chrome (or Microsoft Edge) with its own profile. The browser then visits the sites in your workflow, and it also makes its own background connections to Google (or Microsoft), as it normally does: for example, checking for updates to its built-in components and safety lists. NodeBrain doesn't send anything over those connections and doesn't control what the browser sends.

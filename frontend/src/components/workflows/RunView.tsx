@@ -6,6 +6,7 @@ import {
 import type { RunForm, WorkflowRun, WorkflowRunRepair, WorkflowRunStep } from '@shared/types';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
+import { useBackLabel } from '../../utils/aiSetup';
 import { STATUS_TONE, STATUS_WORDS } from './runFormUtils';
 
 // One run, as it happens: the same phases as the run form, each step ticked
@@ -36,6 +37,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
   const waiting = !!pause;
   const [answering, setAnswering] = useState(false);
   const [raiseProblem, setRaiseProblem] = useState<string | null>(null);
+  const backLabel = useBackLabel();
 
   useEffect(() => {
     api.getRunForm(workflowId).then(setForm).catch(() => {});
@@ -101,7 +103,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
       <div className="px-6 pt-4 pb-3 border-b border-brain-border bg-brain-surface flex-shrink-0">
         <button type="button" onClick={onBack}
           className="flex items-center gap-1 text-xs text-brain-text-dim hover:text-brain-text transition-colors">
-          <ArrowLeft size={13} /> Back to chat
+          <ArrowLeft size={13} /> {backLabel}
         </button>
         <div className="flex items-center gap-3 mt-2">
           <div className="min-w-0 flex-1">

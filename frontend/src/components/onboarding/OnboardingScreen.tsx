@@ -1,4 +1,5 @@
 import { useStore } from '../../stores/appStore';
+import { useAiSetup } from '../../utils/aiSetup';
 
 interface Props {
   onComplete: () => void;
@@ -6,15 +7,19 @@ interface Props {
 
 // Other areas of the app, demoted to a single muted line below the primary
 // action — worth knowing about, but not the next step for a brand-new user.
+// Templates and NodeGraph are AI agents, so they're left out for someone who
+// chose "Just record and replay".
 const OTHER_AREAS = [
-  { name: 'Integrations', note: 'connect apps' },
-  { name: 'Templates', note: 'ready-made agents' },
-  { name: 'NodeGraph', note: 'see your agents' },
-  { name: 'Analytics', note: 'usage and costs' },
+  { name: 'Integrations', note: 'connect apps', ai: false },
+  { name: 'Templates', note: 'ready-made agents', ai: true },
+  { name: 'NodeGraph', note: 'see your agents', ai: true },
+  { name: 'Analytics', note: 'usage and costs', ai: false },
 ];
 
 export function OnboardingScreen({ onComplete }: Props) {
   const setActiveTab = useStore((s) => s.setActiveTab);
+  const noAi = useAiSetup((s) => s.aiMode) === 'none';
+  const areas = OTHER_AREAS.filter((a) => !(noAi && a.ai));
 
   function handleGoToDashboard() {
     const electronAPI = (window as any).electronAPI;
@@ -51,7 +56,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         </button>
 
         <p className="text-xs text-brain-text-dim/70 mt-6">
-          Explore later: {OTHER_AREAS.map(({ name, note }) => `${name} (${note})`).join(' · ')}
+          Explore later: {areas.map(({ name, note }) => `${name} (${note})`).join(' · ')}
         </p>
       </div>
     </div>

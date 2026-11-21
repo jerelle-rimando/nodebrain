@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronRight, ClipboardPaste, Lock, PauseCircle, Play } from 'lucide-react';
+import { useBackLabel } from '../../utils/aiSetup';
 import type { PlanPhase, PlanStep, RunForm, RunFormField } from '@shared/types';
 import { api } from '../../utils/api';
 import { fillFromRow, STATUS_TONE, STATUS_WORDS, timeAgo, type PastedRow } from './runFormUtils';
@@ -35,10 +36,11 @@ export function RunFormScreen({ workflowId, initialError, onBack, onStarted }: {
 }
 
 function BackButton({ onClick }: { onClick: () => void }) {
+  const label = useBackLabel();
   return (
     <button type="button" onClick={onClick}
       className="flex items-center gap-1 text-xs text-brain-text-dim hover:text-brain-text transition-colors">
-      <ArrowLeft size={13} /> Back to chat
+      <ArrowLeft size={13} /> {label}
     </button>
   );
 }

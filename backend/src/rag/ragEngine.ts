@@ -242,7 +242,15 @@ export async function clearAgentMemory(agentId: string): Promise<number> {
   });
 }
 
-export async function initRag(): Promise<void> {
+// Opens the index. The embedding model is fetched now only when the person
+// uses AI (preloadModel); otherwise nothing is downloaded until an agent
+// actually needs an embedding, which getEmbedding loads on demand.
+export async function initRag(preloadModel: boolean): Promise<void> {
   await getIndex();
+  if (preloadModel) await getExtractor();
+}
+
+// Fetches the embedding model ahead of first use, once AI is turned on.
+export async function preloadEmbeddingModel(): Promise<void> {
   await getExtractor();
 }

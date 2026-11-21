@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, CircleDashed, Loader2 } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, ChevronLeft, CircleDashed, Loader2, Sparkles } from 'lucide-react';
 import type { SiteSummary } from '@shared/types';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
 import { ModelPickerButton } from '../dashboard/ModelPickerButton';
 import { AiDisclaimer } from '../shared/AiDisclaimer';
-import { CHAT_MODEL_KEY, CHAT_PROVIDER_KEY, CLOUD_DEFAULT_MODEL, CLOUD_DEFAULT_PROVIDER } from '../../utils/chatModel';
+import { CHAT_MODEL_KEY, CHAT_PROVIDER_KEY } from '../../utils/chatModel';
+import { useAiSetup } from '../../utils/aiSetup';
 
 // The Dashboard's chat: you talk to one site (Jimcor), and it knows the
 // workflows recorded there — what they ask for, their steps, how recent runs
@@ -19,27 +20,44 @@ export interface PickerSite extends SiteSummary { recordingOnly?: boolean }
 
 interface Turn { role: 'user' | 'assistant'; content: string; failed?: boolean }
 
-export function SiteChatPanel({ sites, current, onChoose }: {
+export function SiteChatPanel({ sites, current, onChoose, onCollapse }: {
   sites: PickerSite[];
   current: PickerSite | null;
   onChoose: (siteKey: string) => void;
+  onCollapse: () => void;
 }) {
   const availableModels = useStore((s) => s.availableModels);
-  // A model picked here is kept. Without one, the composer stays blank for the
-  // moment it takes to ask whether the local engine is installed, then shows
-  // the local model, or the cloud one when there's no local engine. That
-  // default isn't saved, so installing local later takes effect.
-  const [provider, setProvider] = useState(() => localStorage.getItem(CHAT_PROVIDER_KEY) ?? '');
-  const [model, setModel] = useState(() => localStorage.getItem(CHAT_MODEL_KEY) ?? '');
-  useEffect(() => {
-    if (localStorage.getItem(CHAT_MODEL_KEY)) return;
-    let cancelled = false;
-    const use = (p: string, m: string) => { if (!cancelled) { setProvider(p); setModel(m); } };
-    api.getLocalEngineStatus()
-      .then((status) => status.available ? use(status.provider, status.model) : use(CLOUD_DEFAULT_PROVIDER, CLOUD_DEFAULT_MODEL))
-      .catch(() => use(CLOUD_DEFAULT_PROVIDER, CLOUD_DEFAULT_MODEL));
-    return () => { cancelled = true; };
-  }, []);
+  const credentials = useStore((s) => s.credentials);
+  const local = useAiSetup((s) => s.local);
+  const refreshLocal = useAiSetup((s) => s.refreshLocal);
+  useEffect(() => { void refreshLocal(); }, [refreshLocal]);
+
+  // The model the chat uses. A pick made here is kept while that AI is still
+  // set up. Without one: the local AI when it's installed, else the first AI
+  // the person has a key for. With neither there's no AI, and the panel says
+  // so instead of showing a model they don't have. The default isn't saved,
+  // so setting up local later takes effect.
+  const [picked, setPicked] = useState(() => ({
+    provider: localStorage.getItem(CHAT_PROVIDER_KEY) ?? '',
+    model: localStorage.getItem(CHAT_MODEL_KEY) ?? '',
+  }));
+  const keyed = credentials.map((c) => c.provider).filter((p) => p in availableModels);
+  const localModel = local?.available ? local.model : local?.ownModel;
+  const usable = (p: string) => keyed.includes(p) || (p === local?.provider && !!localModel);
+  let provider = '';
+  let model = '';
+  if (picked.provider && picked.model && usable(picked.provider)) {
+    ({ provider, model } = picked);
+  } else if (local && localModel) {
+    provider = local.provider;
+    model = localModel;
+  } else if (keyed.length > 0) {
+    provider = keyed[0];
+    model = availableModels[provider]?.[0] ?? '';
+  }
+  // Still asking whether the local AI is installed.
+  const checking = local === undefined && keyed.length === 0;
+  const hasAi = !!provider && !!model;
   const [threads, setThreads] = useState<Record<string, Turn[]>>({});
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -89,15 +107,23 @@ export function SiteChatPanel({ sites, current, onChoose }: {
 
   return (
     <aside aria-label="Chat about this site" className="h-full flex flex-col bg-brain-surface">
-      <div className="h-[72px] flex items-center px-[22px] flex-shrink-0">
+      <div className="h-[72px] flex items-center gap-2 px-[22px] flex-shrink-0">
         {current ? <SitePicker sites={sites} current={current} onChoose={onChoose} /> : (
-          <p className="flex items-center gap-2 text-[15px] font-medium text-brain-text-muted">
+          <p className="flex-1 flex items-center gap-2 text-[15px] font-medium text-brain-text-muted">
             <CircleDashed size={17} aria-hidden="true" />
             No site yet
             <ChevronDown size={15} aria-hidden="true" />
           </p>
         )}
+        <button type="button" onClick={onCollapse} aria-label="Hide the chat" title="Hide the chat"
+          className="p-1.5 rounded-lg text-brain-text-dim hover:text-brain-text hover:bg-brain-border/60 transition-colors flex-shrink-0">
+          <ChevronLeft size={16} />
+        </button>
       </div>
+
+      {checking ? (
+        <div className="flex-1 flex items-center justify-center"><Loader2 size={16} className="animate-spin text-brain-text-dim" /></div>
+      ) : !hasAi ? <NoAiState /> : (<>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-[22px] py-4 space-y-3">
         {!current ? null : turns.length === 0 ? (
@@ -143,8 +169,7 @@ export function SiteChatPanel({ sites, current, onChoose }: {
               onChange={(p, m) => {
                 localStorage.setItem(CHAT_PROVIDER_KEY, p);
                 localStorage.setItem(CHAT_MODEL_KEY, m);
-                setProvider(p);
-                setModel(m);
+                setPicked({ provider: p, model: m });
               }}
             />
             <button type="button" onClick={() => void send()} disabled={!input.trim() || sending || !canAsk} aria-label="Send"
@@ -155,13 +180,74 @@ export function SiteChatPanel({ sites, current, onChoose }: {
         </div>
         <AiDisclaimer className="mt-2" />
       </div>
+      </>)}
     </aside>
   );
 }
 
+// ── No AI set up ────────────────────────────────────────────────────────────
+
+// In place of the chat when no AI is set up: download the local one here, or
+// add a key in the Vault. Workflows don't need either.
+function NoAiState() {
+  const download = useAiSetup((s) => s.download);
+  const startDownload = useAiSetup((s) => s.startDownload);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const running = download.state === 'running';
+  const pct = download.total > 0 ? Math.min(100, (download.received / download.total) * 100) : 0;
+  const what = download.step === 'engine' ? 'the engine' : 'the AI';
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+      <span className="w-10 h-10 rounded-full bg-brain-accent/10 border border-brain-accent/30 flex items-center justify-center">
+        <Sparkles size={16} className="text-brain-accent" />
+      </span>
+      <h2 className="text-[15px] text-brain-text mt-3">No AI set up yet</h2>
+      <p className="text-[13px] text-brain-text-dim mt-1.5 leading-relaxed max-w-sm">
+        Download one and you can ask questions about whatever site you're working on. Your workflows run either way.
+      </p>
+
+      {running ? (
+        <div className="w-full max-w-xs mt-5" role="status">
+          <div className="h-1.5 rounded-full bg-brain-border overflow-hidden">
+            <div className="h-full bg-brain-accent rounded-full transition-[width] duration-300" style={{ width: `${pct.toFixed(1)}%` }} />
+          </div>
+          <p className="text-xs text-brain-text-dim mt-2">
+            Downloading {what}{download.total > 0 ? `: ${formatBytes(download.received)} of ${formatBytes(download.total)}` : '…'}
+          </p>
+          <p className="text-xs text-brain-text-muted mt-1">You can keep working while it downloads.</p>
+        </div>
+      ) : (
+        <>
+          {download.state === 'failed' && download.error && (
+            <p role="alert" className="text-xs text-brain-error mt-4 max-w-sm">{download.error}</p>
+          )}
+          <button type="button" onClick={startDownload}
+            className="mt-4 px-4 py-2 text-sm rounded-lg bg-brain-accent hover:bg-brain-accent-dim text-white transition-colors">
+            {download.state === 'failed' ? 'Try again' : 'Download an AI · 2.5 GB'}
+          </button>
+          <p className="text-xs text-brain-text-dim mt-5">
+            Already have an API key?{' '}
+            <button type="button" onClick={() => setActiveTab('vault')} className="text-brain-accent hover:underline underline-offset-2">
+              Use that instead
+            </button>
+          </p>
+          <p className="text-[11px] text-brain-text-muted mt-1 max-w-sm">Your prompts go to that provider rather than staying on your machine.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.round(bytes / 1e3)} KB`;
+}
+
 // ── The site picker ─────────────────────────────────────────────────────────
 
-function SitePicker({ sites, current, onChoose }: {
+export function SitePicker({ sites, current, onChoose }: {
   sites: PickerSite[];
   current: PickerSite;
   onChoose: (siteKey: string) => void;

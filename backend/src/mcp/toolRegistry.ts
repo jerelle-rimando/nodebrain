@@ -175,7 +175,11 @@ export function getUnavailableServers(): Array<{ name: string; message: string }
   return getFailedServers().map(name => ({ name, message: getServerStatus(name).message ?? '' }));
 }
 
-export async function initializeToolRegistry(): Promise<void> {
+// Built-ins that need no credential (web search) are fetched with npx on
+// first connect, so they're left out at boot for someone who doesn't use AI:
+// only agents use them, and agents need AI. connectDeferredServers starts
+// them once AI is turned on.
+export async function initializeToolRegistry(options: { deferCredentialFree?: boolean } = {}): Promise<void> {
   try {
     console.log('[ToolRegistry] Checking available integrations...');
     console.log(`[ToolRegistry] MCP runtime: ${describeNodeRuntime()}`);
@@ -185,6 +189,12 @@ export async function initializeToolRegistry(): Promise<void> {
     for (const config of SERVER_CONFIGS) {
       const requiresCredential = config.requiresCredential ?? true;
       const credential = requiresCredential ? getCredentialForProvider(config.credentialProvider) : '';
+
+      if (!requiresCredential && options.deferCredentialFree) {
+        console.log(`[ToolRegistry] Deferring "${config.name}" — AI isn't in use`);
+        diag.push({ name: config.name, status: 'skipped', detail: 'AI not in use' });
+        continue;
+      }
 
       if (requiresCredential && !credential) {
         console.log(`[ToolRegistry] Skipping "${config.name}" — no credential in vault`);
@@ -253,6 +263,21 @@ export async function initializeToolRegistry(): Promise<void> {
     registryInitialized = true;
     resolveRegistryReady();
     notifyIfIdle();
+  }
+}
+
+// Starts the credential-free built-ins initializeToolRegistry left out.
+// Safe to call more than once: a connected server is left alone.
+export async function connectDeferredServers(): Promise<void> {
+  for (const config of SERVER_CONFIGS) {
+    if (config.requiresCredential ?? true) continue;
+    if (getConnectedServers().includes(config.name)) continue;
+    const server = await buildBuiltinServer(config, '');
+    if ('error' in server) {
+      recordConnectionError(config.name, server.error);
+      continue;
+    }
+    await connectToServer(server, `${server.command}|${server.args.join('|')}`);
   }
 }
 

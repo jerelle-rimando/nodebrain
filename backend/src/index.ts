@@ -9,8 +9,8 @@ import { initDb, getDataDir } from './db/database';
 import { reconcileOrphanedTasks } from './db/taskRepository';
 import { reconcileOrphanedAgents, repairInvalidAgentModels } from './db/agentRepository';
 import { startScheduler } from './scheduler/scheduler';
-import { initRag } from './rag/ragEngine';
-import { initializeToolRegistry } from './mcp/toolRegistry';
+import { initRag, preloadEmbeddingModel } from './rag/ragEngine';
+import { initializeToolRegistry, connectDeferredServers } from './mcp/toolRegistry';
 import { disconnectAll } from './mcp/mcpClient';
 import { initVaultKey } from './vault/credentialVault';
 import agentRouter from './routes/agents';
@@ -72,6 +72,19 @@ process.on('unhandledRejection', (reason) => {
 
 const PORT = Number(process.env.PORT) || 3001;
 const BIND_HOST = process.env.NODEBRAIN_BIND_HOST ?? '127.0.0.1';
+
+// Whether the person uses AI, as Electron knew it when it started this
+// process ('0': chose no AI, or hasn't chosen yet). Unset (dev, older
+// Electron) keeps the old behaviour. When it's off, boot downloads nothing:
+// the embedding model and the web-search tool wait until AI is turned on.
+let aiInUse = process.env.NODEBRAIN_AI_IN_USE !== '0';
+let aiWorkStarted = false;
+function startAiBackgroundWork(): void {
+  if (aiWorkStarted) return;
+  aiWorkStarted = true;
+  connectDeferredServers().catch(err => console.warn('[ToolRegistry] Deferred servers failed:', err));
+  preloadEmbeddingModel().catch(err => console.warn('[RAG] Embedding model failed to load:', (err as Error).message ?? err));
+}
 const app = express();
 
 app.use(cors({
@@ -88,6 +101,19 @@ app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
+});
+
+// Electron tells the backend when the person turns AI on (or off) after
+// this process started, e.g. by choosing it in the first-run wizard.
+app.post('/api/ai-mode', (req, res) => {
+  const mode = (req.body ?? {}).mode;
+  if (mode !== 'assistant' && mode !== 'none') {
+    res.status(400).json({ success: false, error: 'mode must be assistant or none' });
+    return;
+  }
+  aiInUse = mode === 'assistant';
+  if (aiInUse) startAiBackgroundWork();
+  res.json({ success: true, data: { aiInUse } });
 });
 
 app.get('/api/models', (_req, res) => {
@@ -232,12 +258,12 @@ async function main() {
       emitUsageSnapshot().catch((err) => console.warn('[Telemetry] usage snapshot failed:', err));
     }, 3 * 60 * 1000);
 
-    initializeToolRegistry()
+    initializeToolRegistry({ deferCredentialFree: !aiInUse })
       .then(() => console.log('✅ Tool registry ready'))
       .catch(err => console.warn('[ToolRegistry] Failed to initialize:', err));
 
-    initRag()
-      .then(() => console.log('✅ RAG engine ready'))
+    initRag(aiInUse)
+      .then(() => console.log(aiInUse ? '✅ RAG engine ready' : '✅ RAG index ready (embedding model loads when first needed)'))
       .catch(err => console.warn('[RAG] Failed to initialize:', (err as Error).message ?? err));
 
   } catch (err) {

@@ -34,7 +34,8 @@ The system revolves around persistent AI agents that can:
 
 ### Prerequisites
 
-- An API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.), or [Ollama](https://ollama.com) for fully local inference
+- Nothing, to record and replay workflows: that part never uses AI, and needs no download and no API key.
+- For the AI assistant and agents: an API key from any supported provider (OpenAI, Groq, Anthropic, Gemini, Mistral, etc.), or local AI — the setup wizard can download it for you (about 2.5 GB), or use your own [Ollama](https://ollama.com) if it's already running
 
 ### Installation (Recommended)
 
@@ -91,13 +92,18 @@ http://localhost:5173
 
 ### First Time Setup
 
-> ⏳ **First run note:** NodeBrain downloads a ~25MB local embedding model in the background on first launch. The app starts immediately — the model loads quietly behind the scenes. This only happens once.
-> MCP integrations also download their servers from npm on first use, which may take a moment and requires an internet connection the first time each integration is used.
+The first time you open NodeBrain, the setup wizard asks how you want to use it:
 
-1. Click the **Vault** tab (shield icon) and add your API key for your preferred provider
-2. Click the **Integrations** tab (plug icon) to connect external services like Telegram, GitHub, Slack, Notion, and more
-3. On the **Dashboard**, press **Record** and do a task once in your browser. NodeBrain saves it as a workflow you can run again with new details, and you can ask about it in the chat on the left
-4. To add an AI agent instead, install one from the **Templates** tab; it appears on the **NodeGraph** tab
+- **Just record and replay** — nothing is downloaded and nothing is connected. You can add AI later from **Ask about this site** on the Dashboard.
+- **Add an AI assistant** — downloads the local AI (about 2.5 GB), uses an Ollama you already run, or takes an API key you already have.
+
+> ⏳ **First run note:** if you use AI, NodeBrain downloads a ~25MB local embedding model (used for agent memory) and the web search integration's server from npm in the background. The app starts immediately and this only happens once. If you chose **Just record and replay**, neither is downloaded until you turn AI on.
+> Other MCP integrations download their servers from npm on first use, which may take a moment and requires an internet connection the first time each integration is used.
+
+1. On the **Dashboard**, press **Record** and do a task once in your browser. NodeBrain saves it as a workflow you can run again with new details. No AI is involved in recording or running workflows.
+2. If you use AI, ask about a site's workflows in **Ask about this site** on the left of the Dashboard. To use an online AI service instead of the local one, add its API key in the **Vault** tab (shield icon)
+3. Click the **Integrations** tab (plug icon) to connect external services like Telegram, GitHub, Slack, Notion, and more
+4. To add an AI agent, install one from the **Templates** tab; it appears on the **NodeGraph** tab. Agents need AI set up
 5. Click your agent on the graph to see its settings and task history, run a task, or press the chat button to talk to it directly
 
 > 💡 **Note on running actions:** NodeBrain currently performs tool actions (sending messages, reading files, etc.) through **agents**. Open an agent on the NodeGraph and give it the task directly, from its panel or its chat.

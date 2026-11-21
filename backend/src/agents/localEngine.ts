@@ -17,6 +17,13 @@ export interface LocalEngineStatus {
   modelPresent: boolean;
   provider: typeof LOCAL_PROVIDER;
   model: string;
+  /**
+   * When NodeBrain's own engine isn't set up but the person runs Ollama
+   * themselves: a model that running instance has (NodeBrain's own model if
+   * it's there, else its first). Only the site chat uses it; agents keep
+   * going by `available`.
+   */
+  ownModel?: string;
 }
 
 function getLocalDir(): string | null {
@@ -73,6 +80,26 @@ function modelListedByRunningEngine(): Promise<boolean> {
   });
 }
 
+// Models listed by whatever Ollama answers on the local port, [] if none.
+function modelsOfRunningEngine(): Promise<string[]> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${OLLAMA_PORT}/api/tags`, { timeout: 1500 }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body) as { models?: { name?: string }[] };
+          resolve((parsed.models ?? []).map((m) => m.name ?? '').filter(Boolean));
+        } catch {
+          resolve([]);
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.on('error', () => resolve([]));
+  });
+}
+
 async function probe(): Promise<LocalEngineStatus> {
   const localDir = getLocalDir();
   const installed = localDir ? engineInstalled(path.join(localDir, 'engine')) : false;
@@ -80,12 +107,18 @@ async function probe(): Promise<LocalEngineStatus> {
   if (installed && localDir) {
     present = modelManifestOnDisk(path.join(localDir, 'models')) || (await modelListedByRunningEngine());
   }
+  let ownModel: string | undefined;
+  if (!(installed && present)) {
+    const models = await modelsOfRunningEngine();
+    ownModel = models.includes(LOCAL_MODEL) ? LOCAL_MODEL : models[0];
+  }
   return {
     available: installed && present,
     engineInstalled: installed,
     modelPresent: present,
     provider: LOCAL_PROVIDER,
     model: LOCAL_MODEL,
+    ...(ownModel && { ownModel }),
   };
 }
 
