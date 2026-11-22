@@ -22,7 +22,7 @@ import { factsForRef, factsForSelector, fieldRefInside, redactSnapshot, roleAndN
 import { escapeForSelector } from '../replay/elementFinder';
 import { siteKeyFromUrl, siteNameFromKey, siteKeyToFolderName } from './siteIdentity';
 import { captureSiteLook, isDefaultSiteName, siteIconUrl } from './siteLook';
-import { guessName, valueRows, maybeOptional, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
+import { guessName, valueRows, maybeOptional, repeatedSteps, templateLocator, templateFingerprint, fieldKeyFor, type DraftStep } from './reviewDraft';
 
 // One recording: the user does a task in a real browser window while
 // Playwright's recorder reports each action. No model is involved.
@@ -223,6 +223,8 @@ class RecordingSession {
   // (pageScript.ts watchValue): the raw value Playwright read → the shown one.
   // Steps marked "doesn't always appear" on the review screen.
   private optionalKeys = new Set<string>();
+  // Repeated steps the person chose to leave out (reviewDraft.ts repeatedSteps).
+  private droppedKeys = new Set<string>();
   private settled = new Map<string, { page: Page; raw: string; value: string }>();
   private aliases = new Map<Page, string>();
   private queue: Promise<void> = Promise.resolve();
@@ -990,6 +992,9 @@ class RecordingSession {
       layer: s.action === 'click' && s.record?.fp.layer ? this.layerFacts(s.record) : undefined,
       navigates: s.signals.some((g) => g.name === 'navigation' || g.name === 'popup'),
       description: describe(s),
+      // Only a time the page itself gave: a step with no page record has a
+      // made-up one (see onAction), which says nothing about a pause.
+      eventTs: s.record ? s.eventTs : undefined,
     }));
   }
 
@@ -1001,6 +1006,7 @@ class RecordingSession {
       suggestedName: guessName(steps, this.siteName, this.siteKey, fallbackName()),
       values: valueRows(steps),
       maybeOptional: maybeOptional(steps),
+      repeats: repeatedSteps(steps),
       steps: this.steps.map((s, i) => ({
         stepKey: steps[i].stepKey,
         position: i,
@@ -1040,6 +1046,13 @@ class RecordingSession {
     }
     // Left out: the pre-marked ones.
     this.optionalKeys = new Set(req.optional ?? this.draft.maybeOptional.filter((m) => m.preMarked).map((m) => m.stepKey));
+    // Repeats: left out, every one offered (they start ticked).
+    const repeats = new Map((this.draft.repeats ?? []).map((r) => [r.id, r]));
+    for (const id of req.dropRepeats ?? []) {
+      if (!repeats.has(id)) throw new RecordingError(`Step ${id} isn't a repeat that can be left out.`);
+    }
+    const dropping = req.dropRepeats ?? [...repeats.keys()];
+    this.droppedKeys = new Set(dropping.flatMap((id) => repeats.get(id)!.stepKeys));
     const name = req.name.replace(/\s+/g, ' ').trim() || this.draft.suggestedName;
     this.state = 'saving';
     try {
@@ -1079,7 +1092,7 @@ class RecordingSession {
     const snapshotDir = path.join(getDataDir(), 'workflow-snapshots', uuidv4());
     fs.mkdirSync(snapshotDir, { recursive: true });
     const snapshotPaths: (string | undefined)[] = this.steps.map((s, i) => {
-      if (!s.snapshot) return undefined;
+      if (!s.snapshot || this.droppedKeys.has(dsteps[i].stepKey)) return undefined;
       const file = path.join(snapshotDir, `${dsteps[i].stepKey}.yaml`);
       fs.writeFileSync(file, redactSnapshot(s.snapshot, secrets, secretRefs), 'utf8');
       return file;
@@ -1216,12 +1229,16 @@ class RecordingSession {
           return { ...input, ...source, valueTarget: 'text' };
         });
 
-        const version = createVersion(workflow.id, { reason: 'recorded' }, inputs);
+        // A repeat the person chose to leave out isn't saved. The others keep
+        // their keys (s16, s17, s20…), so the snapshots and the review
+        // screen's keys still line up; positions close the gap.
+        const kept = inputs.filter((s) => !this.droppedKeys.has(s.stepKey)).map((s, i) => ({ ...s, position: i }));
+        const version = createVersion(workflow.id, { reason: 'recorded' }, kept);
         return {
           siteAgent,
           workflow: { ...workflow, currentVersionId: version.id },
           version,
-          steps: draft.steps,
+          steps: draft.steps.filter((s) => !this.droppedKeys.has(s.stepKey)),
           savedLogin,
           fieldCount: fieldIds.size,
         };

@@ -356,6 +356,17 @@ export interface RecordingDraft {
   steps: RecordedStepSummary[]; // every step, including the opening page load
   usesSavedLogin: boolean; // a sign-in was typed; it's saved to the Vault, not listed
   maybeOptional: MaybeOptionalStep[]; // clicks that put away a pop-up or banner nobody asked for
+  repeats: RepeatedSteps[]; // steps done twice in a row with the page unchanged in between
+}
+
+// Steps the person did twice in a row (usually because the first click
+// seemed not to work), with the page the same both times. Offered on the
+// review screen, ticked, to leave the repeat out; nothing is dropped unless
+// the save says so.
+export interface RepeatedSteps {
+  id: string; // the first repeated step's key
+  stepKeys: string[]; // the repeat, which would be left out
+  description: string; // 'Clicked "Add contacts", then "Create new"'
 }
 
 // A click that dismissed a layer which appeared on its own (a cookie banner,
@@ -395,6 +406,8 @@ export interface SaveRecordingRequest {
   values: RecordedValueChoice[]; // rows left out keep their default, not secret
   // Steps marked "doesn't always appear". Left out: the pre-marked ones.
   optional?: string[];
+  // Repeats (RepeatedSteps.id) to leave out. Left out: every one offered.
+  dropRepeats?: string[];
 }
 
 // One captured step, as the review screen shows it.

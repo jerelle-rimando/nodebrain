@@ -1,6 +1,7 @@
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
-  type MaybeOptionalStep, type RecordedValue, type RecordedValueKind, type WorkflowStepAction, type WorkflowStepFingerprint,
+  type MaybeOptionalStep, type RecordedValue, type RecordedValueKind, type RepeatedSteps, type WorkflowStepAction,
+  type WorkflowStepFingerprint,
 } from '../../shared-types';
 
 // Pure helpers for the review screen: which recorded steps carry a value the
@@ -27,6 +28,7 @@ export interface DraftStep {
   layer?: { unasked: boolean; consent: boolean; vendor: boolean; promo: boolean; dismissWord: boolean; gone: boolean };
   navigates?: boolean; // the click opened another page or a pop-up window
   description?: string; // 'Clicked "Close Layer"'
+  eventTs?: number; // when the person did it (the page's clock, ms)
 }
 
 // Clicking one of these picks a value ("Texas" in a list, "LLC" among
@@ -309,4 +311,124 @@ export function maybeOptional(steps: DraftStep[]): MaybeOptionalStep[] {
     });
   }
   return out;
+}
+
+// ── Repeats ─────────────────────────────────────────────────────────────────
+//
+// The same steps done twice in a row because the first try seemed not to
+// work: HubSpot's "Add contacts" then "Create new", twice, after the first
+// "Create new" lagged (recording of 2026-11-22). Replayed, the first pair
+// worked and the repeat's "Add contacts" was greyed out: 15 s, then the run
+// stopped. Offered on the review screen, ticked; nothing is dropped unless
+// the person saves with it ticked.
+//
+// A run of steps counts as a repeat of the run just before it when, step by
+// step: the same action on the same saved locator in the same window, none
+// of them types or chooses a value, signs in, opens a page or a window, or
+// sits inside a frame; every step on both runs has its page snapshot; each
+// pair of snapshots is the same page once noise is masked (samePage); and the
+// repeat started within REPEAT_GAP_MS of the end of the first run.
+//
+// Clicking the same button twice on purpose changes the page in between (a
+// count goes up, a row appears), and that keeps them apart. What this can't
+// see: a change that isn't in the accessibility tree (styling only, a
+// canvas), one that happened only on the server, one inside a frame (frame
+// steps are left out for that reason), or one only in text masked as noise
+// (a clock, a long generated id).
+
+// Longer than a "did that work?" retry (a few seconds), shorter than going
+// off to do something else and coming back to it.
+export const REPEAT_GAP_MS = 20_000;
+const MAX_REPEAT_LEN = 6;
+const REPEATABLE = new Set<WorkflowStepAction>(['click', 'press', 'check', 'uncheck', 'hover']);
+
+export function repeatedSteps(steps: DraftStep[]): RepeatedSteps[] {
+  const out: RepeatedSteps[] = [];
+  const norm = new Map<number, string | null>();
+  const pageOf = (i: number): string | null => {
+    if (!norm.has(i)) norm.set(i, steps[i].snapshot ? normaliseSnapshot(steps[i].snapshot!) : null);
+    return norm.get(i)!;
+  };
+  const repeatable = (s: DraftStep): boolean => REPEATABLE.has(s.action) && !!s.locator && !s.opening && !s.navigates
+    && !s.usesSavedLogin && s.value === undefined && !valueKindOf(s) && !s.fingerprint.framePath?.length;
+
+  let i = 1;
+  while (i < steps.length) {
+    let found = 0;
+    for (let len = 1; len <= MAX_REPEAT_LEN && i - len >= 0 && i + len <= steps.length; len++) {
+      let same = true;
+      for (let k = 0; k < len && same; k++) {
+        const a = steps[i - len + k];
+        const b = steps[i + k];
+        same = repeatable(a) && repeatable(b) && a.action === b.action && a.locator === b.locator
+          && a.pageAlias === b.pageAlias && sameArgs(a, b);
+        if (same) {
+          const pa = pageOf(i - len + k);
+          same = pa !== null && pa === pageOf(i + k);
+        }
+      }
+      if (!same) continue;
+      const lastOfFirst = steps[i - 1].eventTs;
+      const startOfRepeat = steps[i].eventTs;
+      if (lastOfFirst === undefined || startOfRepeat === undefined || startOfRepeat - lastOfFirst > REPEAT_GAP_MS) continue;
+      found = len;
+      break;
+    }
+    if (!found) { i++; continue; }
+    const repeat = steps.slice(i, i + found);
+    out.push({ id: repeat[0].stepKey, stepKeys: repeat.map((s) => s.stepKey), description: describeRun(repeat) });
+    i += found; // the repeat can't also be the first half of another
+  }
+  return out;
+}
+
+// Keys a recorded click carries that make it a different click.
+function sameArgs(a: DraftStep, b: DraftStep): boolean {
+  return a.action !== 'press' || a.description === b.description; // a key press: same key (in the description)
+}
+
+// A snapshot with what changes on every capture masked out:
+//   - Playwright's element refs ([ref=e685] then [ref=e700] for the same
+//     menu), focus ([active]) and [cursor=pointer];
+//   - times and dates ("9:11 PM", "Refreshed just now", "3 minutes ago",
+//     "22/11/2026");
+//   - long generated tokens (session ids, nonces) and link query strings.
+// Everything else (every role, name, value and line) must match exactly.
+export function normaliseSnapshot(snapshot: string): string {
+  return snapshot
+    .replace(/ ?\[ref=[a-z0-9]+\]/gi, '')
+    .replace(/ ?\[active\]/g, '')
+    .replace(/ ?\[cursor=[a-z-]+\]/g, '')
+    .replace(/(\/url: [^?\s]*)\?\S*/g, '$1?…')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?/gi, '<time>')
+    .replace(/\bjust now\b/gi, '<time>')
+    .replace(/\b\d+\s*(?:s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)\s+ago\b/gi, '<time>')
+    .replace(/\b\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}\b/g, '<date>')
+    .replace(/[A-Za-z0-9_-]{24,}/g, '<id>')
+    .split('\n').map((l) => l.trimEnd()).join('\n');
+}
+
+// 'Clicked "Add contacts", then "Create new"'. The steps' own descriptions
+// when they have a name; else the name of the element that had focus in the
+// step's snapshot (HubSpot's buttons had a test id and no name of their own).
+function describeRun(steps: DraftStep[]): string {
+  const names = steps.map((s) => quotedName(s.description) ?? (s.snapshot ? activeName(s.snapshot) : undefined));
+  if (steps.every((s) => s.action === 'click') && names.every(Boolean)) {
+    return `Clicked ${names.map((n) => `"${n}"`).join(', then ')}`;
+  }
+  return steps.map((s, k) => (names[k] && s.action === 'click' ? `Clicked "${names[k]}"` : s.description ?? 'A step')).join(', then ');
+}
+
+function quotedName(description: string | undefined): string | undefined {
+  return description ? /"([^"]+)"/.exec(description)?.[1] : undefined;
+}
+
+// The focused element's name in an aria snapshot: `button "Create new" [active]`.
+function activeName(snapshot: string): string | undefined {
+  for (const line of snapshot.split('\n')) {
+    if (!line.includes('[active]')) continue;
+    const m = /^\s*-\s+[a-zA-Z]+\s+"((?:[^"\\]|\\.)*)"/.exec(line);
+    if (m) return m[1].replace(/\\(.)/g, '$1');
+  }
+  return undefined;
 }

@@ -4,6 +4,7 @@ import {
   startRecording, getRecording, listRecordings, finishRecording, saveRecording, discardRecording, RecordingError,
 } from '../recorder/recordingSession';
 import { BrowserNotFoundError } from '../recorder/browserLauncher';
+import type { SaveRecordingRequest } from '../../shared-types';
 
 // Workflow recorder. Starting a recording opens a browser window at the
 // given address; the person does the task there and presses Done on the
@@ -72,7 +73,20 @@ const saveSchema = z.object({
     secret: z.boolean(),
   })).max(500),
   optional: z.array(z.string().min(1).max(20)).max(500).optional(),
+  // Repeats to leave out. Must be listed here: zod drops unknown keys, and a
+  // missing list means "leave out every one offered".
+  dropRepeats: z.array(z.string().min(1).max(20)).max(500).optional(),
 });
+
+// The schema and SaveRecordingRequest must describe exactly the same body:
+// zod drops keys it doesn't list, so a field added to the type alone was
+// silently lost at this route (dropRepeats, 2026-11-22), and one added to
+// the schema alone would be accepted with nothing reading it. Plain two-way
+// assignability isn't enough: an extra optional field passes both ways. This
+// is exact type identity, so a field on either side alone fails to compile.
+type Exactly<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+const saveSchemaMatchesRequest: Exactly<z.infer<typeof saveSchema>, SaveRecordingRequest> = true;
+void saveSchemaMatchesRequest;
 
 // POST /api/recordings/:id/save { name, values } → creates the site agent,
 // the workflow, its input fields (from values marked "Changes") and

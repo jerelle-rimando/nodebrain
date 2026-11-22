@@ -34,6 +34,10 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
   const [optional, setOptional] = useState<Record<string, boolean>>(() =>
     Object.fromEntries((draft.maybeOptional ?? []).map((m) => [m.stepKey, m.preMarked])),
   );
+  // Repeats to leave out: all of them to begin with.
+  const [drop, setDrop] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries((draft.repeats ?? []).map((r) => [r.id, true])),
+  );
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState<'save' | 'discard' | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -54,6 +58,7 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
         name: trimmedName,
         values: draft.values.map((v) => ({ stepKey: v.stepKey, ...choices[v.stepKey] })),
         optional: Object.keys(optional).filter((k) => optional[k]),
+        dropRepeats: Object.keys(drop).filter((k) => drop[k]),
       });
       const asks = saved.result?.fieldCount ?? 0;
       toast.success(asks
@@ -168,6 +173,31 @@ function ReviewDialog({ status }: { status: RecordingStatus }) {
                         className="accent-brain-accent"
                       />
                       Doesn't always appear
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(draft.repeats ?? []).length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-brain-text-dim uppercase tracking-wider mb-1">Done twice</p>
+              <p className="text-xs text-brain-text-muted mb-2">
+                You did this twice and the page didn't change in between. Drop the repeat? Untick it if you meant to do it twice.
+              </p>
+              <ul className="space-y-2">
+                {draft.repeats.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 rounded-lg border border-brain-border bg-brain-bg px-3 py-2.5">
+                    <p className="min-w-0 flex-1 text-sm text-brain-text truncate" title={r.description}>{r.description}</p>
+                    <label className="flex flex-shrink-0 items-center gap-1.5 text-xs text-brain-text-dim cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!drop[r.id]}
+                        onChange={(e) => setDrop((d) => ({ ...d, [r.id]: e.target.checked }))}
+                        className="accent-brain-accent"
+                      />
+                      Drop the repeat
                     </label>
                   </li>
                 ))}
