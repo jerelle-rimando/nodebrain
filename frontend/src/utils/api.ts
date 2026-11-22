@@ -96,12 +96,14 @@ export const api = {
       steps: import('@shared/types').WorkflowRunStep[];
       active: boolean;
       repair?: import('@shared/types').WorkflowRunRepair;
+      skips?: import('@shared/types').WorkflowRunSkips;
     }>(`/workflow-runs/${runId}`),
   cancelWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' }),
   // Fixing a run that stopped because the site changed
   startRepair: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/repair`, { method: 'POST' }),
   takeRunPicture: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/picture`, { method: 'POST' }),
   markStepOptional: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/optional`, { method: 'POST' }),
+  doStepByHand: (runId: string) => request<import('@shared/types').WorkflowRunRepair | null>(`/workflow-runs/${runId}/by-hand`, { method: 'POST' }),
   cancelRepair: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/repair/cancel`, { method: 'POST' }),
   releaseWorkflowRun: (runId: string) => request<{ runId: string }>(`/workflow-runs/${runId}/release`, { method: 'POST' }),
   runScreenshotUrl: (runId: string) => `${BASE_URL}/workflow-runs/${runId}/screenshot`,

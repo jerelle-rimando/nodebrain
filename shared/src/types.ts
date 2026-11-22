@@ -286,7 +286,15 @@ export interface WorkflowRun {
 // A run that stopped because a step's element couldn't be found, and what
 // can be done about it. Plain words only: never a locator or step key.
 export interface WorkflowRunRepair {
+  // 'missing': the step's element wasn't found (or more than one matched).
+  // 'action': it was found, but clicking or typing into it failed (greyed
+  // out, covered…). Marking it optional wouldn't help there: it would be
+  // found again and fail the same way.
+  kind: 'missing' | 'action';
   live: boolean; // the run's window is still open, waiting at the stopped step
+  // "I'll do this step myself": Take Control on the held window, and the run
+  // carries on from the next step when the person presses Done.
+  canDoByHand: boolean;
   fixed: boolean; // a repair from this run has been saved
   fixedBy?: 'pointing' | 'optional'; // how: shown where it is, or marked as not always appearing
   canFix: boolean; // "Show me where it is"
@@ -304,6 +312,15 @@ export interface WorkflowRunRepair {
   // No picture yet, but the run's window is still open: "Show the page" can
   // take one (a run in its minimized window can't take it when it stops).
   canTakePicture: boolean;
+}
+
+// What a run left out because it wasn't on the page, for the run view: a
+// run that skipped steps shouldn't look the same as one that did them all.
+export interface WorkflowRunSkips {
+  count: number; // optional steps skipped because they weren't there (sign-in steps not counted)
+  // Plain sentences, one per step shown in a repair as an alternative to
+  // another step, where neither showed up this run.
+  neither: string[];
 }
 
 export type WorkflowRunStepStatus = 'ok' | 'failed' | 'skipped' | 'repaired';

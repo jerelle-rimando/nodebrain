@@ -3,7 +3,7 @@ import path from 'path';
 import type { Locator, Page } from 'playwright-core';
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
-  type WorkflowField, type WorkflowRun, type WorkflowRunRepair, type WorkflowRunStep, type WorkflowStep,
+  type WorkflowField, type WorkflowRun, type WorkflowRunRepair, type WorkflowRunSkips, type WorkflowRunStep, type WorkflowStep,
   type WorkflowStepFingerprint, type WorkflowVersion,
 } from '../../shared-types';
 import { getDataDir } from '../db/database';
@@ -22,8 +22,8 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { buildPhases } from '../workflows/runPlan';
 import { findElement } from './elementFinder';
 import {
-  getRepairHold, isRunActive, markRunBrowserShown, isMissError, describeStepTarget, verbFor, picksOption,
-  locatorRoleName, type RepairHold,
+  getRepairHold, isRunActive, markRunBrowserShown, isMissError, isActionError, isOptionalSkip, onDifferentPage,
+  describeStepTarget, verbFor, picksOption, locatorRoleName, type RepairHold,
 } from './replayEngine';
 
 // Repairing a workflow whose step can't find its element any more: the
@@ -44,6 +44,15 @@ import {
 // A repair writes a new version (deriveVersion, reason 'repair'): every step
 // copied, the repaired one with a new locator and fingerprint. The old
 // version keeps the old locator, so rollback works.
+//
+// Unless the person pointed while the browser was on a different page from
+// the one the step was recorded on (onDifferentPage, the same test behind
+// missMessage's "The browser is on a different page…"). Then the site showed
+// another screen, not a moved button: HubSpot's "Set up two-factor" screen
+// in place of its "Check your email" code box (run cbbd709f). Replacing the
+// step made every later run need that other screen. So the step is kept,
+// marked optional, and what was pointed at goes in right after it, also
+// optional: runs then handle whichever screen shows up.
 //
 // The other fix is "This doesn't always appear" (markOptional): the step is
 // conditional (a consent dialog, a cookie banner), so a new version (reason
@@ -81,7 +90,9 @@ const states = new Map<string, RepairState>(); // by run id
 
 export function repairStatus(runId: string): WorkflowRunRepair | undefined {
   const run = getRunById(runId);
-  if (!run || run.status !== 'needs_attention' || !run.failedStepKey || !isMissError(run.error)) return undefined;
+  if (!run || run.status !== 'needs_attention' || !run.failedStepKey) return undefined;
+  const kind = isMissError(run.error) ? 'missing' : isActionError(run.error) ? 'action' : undefined;
+  if (!kind) return undefined;
   const workflow = getWorkflowById(run.workflowId);
   if (!workflow) return undefined;
   const hold = getRepairHold(runId);
@@ -115,12 +126,18 @@ export function repairStatus(runId: string): WorkflowRunRepair | undefined {
 
   const failedRow = [...runSteps].reverse().find((r) => r.stepKey === step.stepKey && r.status === 'failed');
   return {
+    kind,
     live,
+    // Take Control on the held window. Only for a step that was found: one
+    // that wasn't is fixed by pointing or by marking it optional.
+    canDoByHand: live && kind === 'action' && !pointing,
     fixed: !!fixedBy,
     fixedBy: fixedBy ? (fixedBy.reason === 'optional' ? 'optional' : 'pointing') : undefined,
     canFix: !fixedBy && !whyNot,
     whyNot,
-    canMarkOptional: !fixedBy && !blocked && !pointing,
+    // A found step marked optional would be found again and fail the same
+    // way: optional only skips a step that isn't there.
+    canMarkOptional: kind === 'missing' && !fixedBy && !blocked && !pointing,
     optionalCaution: optionalCaution(step, steps),
     phase: state?.phase,
     problem: state?.problem,
@@ -233,7 +250,19 @@ export function markOptional(runId: string): void {
     throw new RepairError('NodeBrain couldn’t save that. Nothing was changed.');
   }
   console.log(`[repair] workflow ${run.workflowId}: step ${stepKey} marked optional as version ${version.number} (from run ${runId})`);
-  hold?.resume(getStepsByVersion(version.id), 'skip');
+  hold?.resume(getStepsByVersion(version.id), { then: 'skip' });
+}
+
+// "I'll do this step myself": for a step that was found but couldn't be
+// clicked or typed into. The held window becomes the person's (Take
+// Control); when they press Done the run carries on from the next step.
+// Nothing is saved to the workflow: the next run tries the step again.
+export function doByHand(runId: string): void {
+  const status = repairStatus(runId);
+  if (!status?.canDoByHand) throw new RepairError('This step can’t be handed over from here.');
+  const hold = getRepairHold(runId)!;
+  markRunBrowserShown(runId);
+  hold.resume(hold.steps, { then: 'byHand' });
 }
 
 // "Show the page": a run that stopped in its minimized window has no picture
@@ -268,9 +297,11 @@ function startLive(hold: RepairHold): void {
       const picked = await session.run();
       if (!picked) return; // cancelled: the run goes on waiting
       state.phase = 'saving';
-      const steps = saveRepair(hold.workflowId, hold.versionId, hold.step.stepKey, hold.runId, picked);
+      const saved = saveRepair(hold.workflowId, hold.versionId, hold.step, hold.runId, picked);
       await session.close();
-      hold.resume(steps, 'retry'); // the run carries on from the repaired step
+      // The run carries on from the repaired step, or from the one added
+      // after it (its own page didn't show up, so it's left out this time).
+      hold.resume(saved.steps, saved.added ? { then: 'alternative', stepKey: saved.added } : { then: 'retry' });
     } catch (err) {
       console.error('[repair] live repair failed:', err instanceof Error ? err.message : err);
       problem = err instanceof RepairError ? err.message : 'Something went wrong while fixing this step. Nothing was changed.';
@@ -323,7 +354,7 @@ async function startLater(runId: string): Promise<void> {
         return;
       }
       state.phase = 'saving';
-      saveRepair(workflow.id, versionId, step.stepKey, runId, picked);
+      saveRepair(workflow.id, versionId, step, runId, picked);
       await session.close();
       states.delete(runId);
     } catch (err) {
@@ -363,25 +394,80 @@ function valueForLater(run: WorkflowRun, step: WorkflowStep, fields: WorkflowFie
 
 // ── Saving ──────────────────────────────────────────────────────────────────
 
-interface Picked { locator: string; fingerprint: WorkflowStepFingerprint }
+// `url`: the address the page was at when the person picked, for the
+// different-page test.
+interface Picked { locator: string; fingerprint: WorkflowStepFingerprint; url: string }
 
-function saveRepair(workflowId: string, versionId: string, stepKey: string, runId: string, picked: Picked): WorkflowStep[] {
+// Returns the new version's steps, and the key of the step added after the
+// stopped one when it was an alternative rather than a replacement.
+function saveRepair(workflowId: string, versionId: string, step: WorkflowStep, runId: string, picked: Picked):
+    { steps: WorkflowStep[]; added?: string } {
+  const stepKey = step.stepKey;
   const wf = getWorkflowById(workflowId);
   if (!wf || wf.currentVersionId !== versionId) {
     throw new RepairError('This workflow was changed while you were fixing it, so the fix wasn’t saved. Run it again.');
   }
+  const elsewhere = onDifferentPage(step, picked.url);
   let version;
   try {
-    version = deriveVersion(workflowId, { reason: 'repair', repairedStepKey: stepKey, fromRunId: runId }, {
-      // The old snapshot shows the old page; there's no new one to keep.
-      [stepKey]: { locator: picked.locator, fingerprint: picked.fingerprint, snapshotPath: undefined },
-    });
+    if (elsewhere) {
+      // Kept, and added to. The added step copies the stopped one (action,
+      // value, page) apart from what was pointed at. Its click position was
+      // measured on the old element, so it goes. It carries no recorded
+      // page change (the old step's belongs to the old screen): the engine
+      // waits briefly after its click instead (replayEngine POINTED_NAV_WAIT_MS).
+      const { position: _p, ...args } = step.args;
+      version = deriveVersion(workflowId, { reason: 'repair', repairedStepKey: stepKey, fromRunId: runId },
+        { [stepKey]: { optional: true } },
+        {
+          after: stepKey,
+          patch: {
+            locator: picked.locator, fingerprint: picked.fingerprint, snapshotPath: undefined,
+            optional: true, signals: [], args: { ...args, pointedAt: true, alternativeTo: stepKey },
+          },
+        });
+    } else {
+      version = deriveVersion(workflowId, { reason: 'repair', repairedStepKey: stepKey, fromRunId: runId }, {
+        // The old snapshot shows the old page; there's no new one to keep.
+        [stepKey]: { locator: picked.locator, fingerprint: picked.fingerprint, snapshotPath: undefined },
+      });
+    }
   } catch (err) {
     console.error('[repair] could not save:', err instanceof Error ? err.message : err);
     throw new RepairError('NodeBrain couldn’t save that. Nothing was changed. Try pointing at it again.');
   }
-  console.log(`[repair] workflow ${workflowId}: step ${stepKey} repaired as version ${version.number} (from run ${runId})`);
-  return getStepsByVersion(version.id);
+  const steps = getStepsByVersion(version.id);
+  if (!elsewhere) {
+    console.log(`[repair] workflow ${workflowId}: step ${stepKey} repaired as version ${version.number} (from run ${runId})`);
+    return { steps };
+  }
+  const added = steps[steps.findIndex((s) => s.stepKey === stepKey) + 1]?.stepKey;
+  console.log(`[repair] workflow ${workflowId}: step ${stepKey} kept as optional, alternative ${added} added, as version ${version.number} (from run ${runId})`);
+  return { steps, added };
+}
+
+// What a run left out because it wasn't on the page (WorkflowRunSkips). Read
+// against the steps the run ended on: its own version, or the last fix made
+// during it.
+export function runSkips(runId: string): WorkflowRunSkips | undefined {
+  const run = getRunById(runId);
+  if (!run) return undefined;
+  const rows = getRunSteps(runId);
+  const lastRow = new Map<string, WorkflowRunStep>();
+  for (const r of rows) lastRow.set(r.stepKey, r); // ordered by position, then time
+  const skipped = new Set([...lastRow.values()].filter(isOptionalSkip).map((r) => r.stepKey));
+  const during = fixVersions(run.workflowId, runId).sort((a, b) => b.number - a.number)[0];
+  const steps = getStepsByVersion(during?.id ?? run.versionId);
+  const fieldsById = new Map(getFieldsByWorkflow(run.workflowId).map((f) => [f.id, f]));
+  const neither: string[] = [];
+  for (const s of steps) {
+    const original = typeof s.args.alternativeTo === 'string' ? steps.find((o) => o.stepKey === s.args.alternativeTo) : undefined;
+    if (!original || !skipped.has(s.stepKey) || !skipped.has(original.stepKey)) continue;
+    const a = describeStepTarget(original, undefined, steps, fieldsById);
+    const b = describeStepTarget(s, undefined, steps, fieldsById);
+    neither.push(`Neither ${a} nor ${b} showed up this time, so NodeBrain did neither. That’s fine if the site didn’t need either one. If it did, check what the site shows now.`);
+  }
+  return { count: skipped.size, neither };
 }
 
 // ── Picking ─────────────────────────────────────────────────────────────────
@@ -530,7 +616,7 @@ class PickSession {
       : false;
     await handle?.dispose().catch(() => {});
     if (!same) return { problem: 'NodeBrain couldn’t pin that one down reliably. Try clicking it again, or the part of it with the words on it.' };
-    return { locator, fingerprint };
+    return { locator, fingerprint, url: this.page.url() };
   }
 
   // Role, name, heading, landmark, list and position, read from the page's
@@ -867,8 +953,12 @@ function explain(
   const done = runSteps.filter((r) => (r.status === 'ok' || r.status === 'repaired') && r.position < step.position);
   const last = done.length ? done[done.length - 1] : undefined;
   const ambiguous = run.error?.startsWith('More than one');
+  // "Found …, but couldn't click it: it's greyed out." → "it's greyed out"
+  const actionWhy = isActionError(run.error) ? /: ([^:]+?)\.?$/.exec(run.error ?? '')?.[1] : undefined;
 
-  const miss = ambiguous
+  const miss = actionWhy
+    ? `found ${what} but couldn’t ${verb} it: ${actionWhy}`
+    : ambiguous
     ? `found more than one ${stripArticle(what)} and couldn’t tell which one to ${verb}`
     : `couldn’t find ${what} I usually ${verb}`;
   const first = last
@@ -898,6 +988,8 @@ function explain(
     ? 'You said it doesn’t always appear, so from now on runs skip it when it isn’t there, and still do it when it is.'
     : fixed
     ? 'You’ve shown NodeBrain the new one, so the next run will use it.'
+    : live && actionWhy
+      ? 'The browser is still open where I stopped. You can do this step yourself there and I’ll carry on from the next one.'
     : live
       ? 'The browser is still open where I stopped.'
       : 'That browser window has closed, so this run can’t carry on. You can still show me the new one: I’ll open the page, and nothing gets filled in or sent. The next run will use it.';

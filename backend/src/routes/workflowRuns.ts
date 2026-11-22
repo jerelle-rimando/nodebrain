@@ -4,7 +4,10 @@ import { getWorkflowById, getRunsByWorkflow, getFieldsByWorkflow, getRunById, ge
 import { startRun, cancelRun, getRunDetail, isRunActive, markRunBrowserShown, RunStartError } from '../replay/replayEngine';
 import { resolveTakeControl, listTakeControlRequests } from '../browser/takeControl';
 import { raiseSiteWindow } from '../browser/raiseWindow';
-import { repairStatus, stoppedScreenshot, finalScreenshot, startRepair, cancelRepair, releaseRun, markOptional, takeStoppedPicture, RepairError } from '../replay/repair';
+import {
+  repairStatus, stoppedScreenshot, finalScreenshot, startRepair, cancelRepair, releaseRun, markOptional, takeStoppedPicture,
+  doByHand, runSkips, RepairError,
+} from '../replay/repair';
 
 // Replaying saved workflows. A run starts here and goes on in the
 // background; progress arrives on /api/events as run:started, run:step and
@@ -61,7 +64,9 @@ workflowRunsRouter.get('/workflow-runs/:id', (req: Request, res: Response) => {
     res.status(404).json({ success: false, error: "That run doesn't exist." });
     return;
   }
-  res.json({ success: true, data: { ...detail, active: isRunActive(req.params.id), repair: repairStatus(req.params.id) } });
+  res.json({ success: true, data: {
+    ...detail, active: isRunActive(req.params.id), repair: repairStatus(req.params.id), skips: runSkips(req.params.id),
+  } });
 });
 
 // The picture taken where the run stopped.
@@ -129,6 +134,23 @@ workflowRunsRouter.post('/workflow-runs/:id/optional', (req: Request, res: Respo
     }
     console.error('[workflow-runs] marking optional failed:', err instanceof Error ? err.message : err);
     res.status(500).json({ success: false, error: "Couldn't save that. Nothing was changed." });
+  }
+});
+
+// "I'll do this step myself": a step that was found but couldn't be clicked
+// or typed into. The waiting run hands its window over (Take Control) and
+// carries on from the next step on Done.
+workflowRunsRouter.post('/workflow-runs/:id/by-hand', (req: Request, res: Response) => {
+  try {
+    doByHand(req.params.id);
+    res.json({ success: true, data: repairStatus(req.params.id) ?? null });
+  } catch (err) {
+    if (err instanceof RepairError) {
+      res.status(400).json({ success: false, error: err.message });
+      return;
+    }
+    console.error('[workflow-runs] hand-over failed:', err instanceof Error ? err.message : err);
+    res.status(500).json({ success: false, error: "Couldn't hand the browser over." });
   }
 });
 

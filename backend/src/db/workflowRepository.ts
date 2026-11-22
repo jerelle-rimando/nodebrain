@@ -666,8 +666,14 @@ export function createVersion(workflowId: string, meta: VersionMeta, steps: Step
 // A new version from the current one with some steps changed: a repair
 // (new locator/fingerprint for one step) or a marking edit (Changes /
 // Always this). Every other step is copied as stored.
+//
+// `insert` adds one step right after the step `after`: a copy of that step
+// (same action, value and page) with `patch` applied, under a step key no
+// version of this workflow has used, so run records and step history never
+// mix the two up. Positions are renumbered.
 export function deriveVersion(
   workflowId: string, meta: VersionMeta, patches: Record<string, StepPatch>,
+  insert?: { after: string; patch: StepPatch },
 ): WorkflowVersion {
   return dbTransaction(() => {
     const current = getCurrentVersion(workflowId);
@@ -677,10 +683,30 @@ export function deriveVersion(
     for (const key of Object.keys(patches)) {
       if (!known.has(key)) throw new Error(`No step ${key} in version ${current.number}`);
     }
-    const steps = rows.map(({ id: _id, version_id: _v, ...cols }) =>
+    let steps = rows.map(({ id: _id, version_id: _v, ...cols }) =>
       patches[cols.step_key] ? patchColumns(cols, patches[cols.step_key]) : cols);
+    if (insert) {
+      const at = rows.findIndex((r) => r.step_key === insert.after);
+      if (at < 0) throw new Error(`No step ${insert.after} in version ${current.number}`);
+      const { id: _id, version_id: _v, ...base } = rows[at];
+      const added = patchColumns({ ...base, step_key: unusedStepKey(workflowId, insert.after) }, insert.patch);
+      steps = [...steps.slice(0, at + 1), added, ...steps.slice(at + 1)].map((s, i) => ({ ...s, position: i }));
+    }
     return writeVersion(workflowId, meta, steps);
   });
+}
+
+// "s11b", "s11c"…: the first that no version of the workflow has used.
+function unusedStepKey(workflowId: string, base: string): string {
+  const used = new Set(dbAll<{ step_key: string }>(
+    `SELECT DISTINCT s.step_key FROM workflow_steps s JOIN workflow_versions v ON v.id = s.version_id WHERE v.workflow_id = ?`,
+    [workflowId],
+  ).map((r) => r.step_key));
+  for (let c = 98; c <= 122; c++) {
+    const key = `${base}${String.fromCharCode(c)}`;
+    if (!used.has(key)) return key;
+  }
+  for (let n = 2; ; n++) if (!used.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
 // Makes an older version current again, as a new 'rollback' version that
@@ -765,18 +791,23 @@ export interface RunStepInput {
   url?: string;
   error?: string;
   screenshotPath?: string;
+  // Stored, never returned (see raw_error in workflowSchema.ts). The caller
+  // has already redacted it and decided it may be kept at all.
+  rawError?: string;
 }
 
 export function addRunStep(runId: string, input: RunStepInput): WorkflowRunStep {
   assertOneOf(input.status, RUN_STEP_STATUSES, 'run step status');
   if (input.resolvedBy !== undefined) assertOneOf(input.resolvedBy, RESOLVED_BY, 'resolved by');
   if (!getRunById(runId)) throw new Error(`Run not found: ${runId}`);
-  const step: WorkflowRunStep = { id: uuidv4(), runId, ...input, createdAt: now() };
+  const { rawError, ...shown } = input;
+  const step: WorkflowRunStep = { id: uuidv4(), runId, ...shown, createdAt: now() };
   dbRun(
-    `INSERT INTO workflow_run_steps (id, run_id, step_key, position, status, resolved_by, duration_ms, url, error, screenshot_path, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workflow_run_steps (id, run_id, step_key, position, status, resolved_by, duration_ms, url, error, screenshot_path, created_at, raw_error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [step.id, runId, step.stepKey, step.position, step.status, step.resolvedBy ?? null,
-     step.durationMs ?? null, step.url ?? null, step.error ?? null, step.screenshotPath ?? null, step.createdAt],
+     step.durationMs ?? null, step.url ?? null, step.error ?? null, step.screenshotPath ?? null, step.createdAt,
+     rawError ?? null],
   );
   return step;
 }

@@ -3,7 +3,7 @@ import {
   AppWindow, ArrowLeft, CheckCircle2, Circle, EyeOff, Hand, Loader2, MessageSquare, MinusCircle, MousePointerClick, PauseCircle,
   RotateCcw, Square, Wrench, XCircle,
 } from 'lucide-react';
-import type { RunForm, WorkflowRun, WorkflowRunRepair, WorkflowRunStep } from '@shared/types';
+import type { RunForm, WorkflowRun, WorkflowRunRepair, WorkflowRunSkips, WorkflowRunStep } from '@shared/types';
 import { api } from '../../utils/api';
 import { useStore } from '../../stores/appStore';
 import { useBackLabel } from '../../utils/aiSetup';
@@ -29,6 +29,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
   const [steps, setSteps] = useState<WorkflowRunStep[]>([]);
   const [active, setActive] = useState(true);
   const [repair, setRepair] = useState<WorkflowRunRepair | undefined>();
+  const [skips, setSkips] = useState<WorkflowRunSkips | undefined>();
   const [stopping, setStopping] = useState(false);
   // Bumped to start polling again after an action on a finished run.
   const [pollKey, setPollKey] = useState(0);
@@ -54,6 +55,7 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
         setSteps(d.steps);
         setActive(d.active);
         setRepair(d.repair);
+        setSkips(d.skips);
         const repairing = !!d.repair?.phase && d.repair.phase !== 'failed';
         if (!d.active && !repairing) return;
       } catch {
@@ -151,9 +153,22 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
             </div>
           )}
           {finished && status === 'completed' && (
-            <p className="text-sm text-brain-success mb-4">
-              Every step went through.{steps.some((s) => s.status === 'repaired') ? ' The step you fixed is saved, so the next run will use it too.' : ''}
-            </p>
+            // A run that left steps out doesn't say "every step": it says how
+            // many weren't there, and warns where a step and the alternative
+            // shown in a repair were both missing.
+            <>
+              <p className={`text-sm mb-4 ${skips?.count ? 'text-brain-text' : 'text-brain-success'}`}>
+                {skips?.count
+                  ? `Finished. ${skips.count === 1 ? '1 step wasn’t' : `${skips.count} steps weren’t`} on the page this time, so NodeBrain left ${skips.count === 1 ? 'it' : 'them'} out (marked below).`
+                  : 'Every step went through.'}
+                {steps.some((s) => s.status === 'repaired') ? ' The step you fixed is saved, so the next run will use it too.' : ''}
+              </p>
+              {skips?.neither.map((text, i) => (
+                <div key={i} role="status" className="rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-sm text-brain-text">
+                  {text}
+                </div>
+              ))}
+            </>
           )}
           {finished && run?.finalPicture && !(repair && status === 'needs_attention') && (
             <FinalPicture key={runId} runId={runId} openAtFirst={status !== 'completed'} />
@@ -236,7 +251,9 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [handing, setHanding] = useState(false);
   const [taking, setTaking] = useState(false);
+  const action = repair.kind === 'action';
   const [showPicture, setShowPicture] = useState(false);
   const busy = !!repair.phase && repair.phase !== 'failed';
 
@@ -294,6 +311,22 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
     }
   }
 
+  // A step that was found but couldn't be done: the person does it in the
+  // held window (Take Control's banner appears with Done), and the run
+  // carries on from the next step.
+  async function byHand() {
+    setError(null);
+    setHanding(true);
+    try {
+      await api.doStepByHand(runId);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't hand the browser over.");
+    } finally {
+      setHanding(false);
+    }
+  }
+
   async function cancel() {
     await api.cancelRepair(runId).catch(() => {});
     onChanged();
@@ -310,7 +343,7 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
     }`}>
       <h2 className="flex items-center gap-1.5 text-sm font-semibold text-brain-text">
         {repair.fixed ? <CheckCircle2 size={14} className="text-brain-success" /> : <Wrench size={14} className="text-brain-warning" />}
-        {repair.fixed ? 'Fixed' : 'The website seems to have changed'}
+        {repair.fixed ? 'Fixed' : action ? 'NodeBrain couldn’t do this step' : 'The website seems to have changed'}
       </h2>
       <p className="text-sm text-brain-text mt-1.5 leading-relaxed">{repair.explanation}</p>
 
@@ -361,12 +394,22 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
       ) : (
         <>
           {repair.whyNot && <p className="text-xs text-brain-text-dim mt-2">{repair.whyNot}</p>}
-          {(repair.canFix || repair.canMarkOptional) && (
+          {(repair.canFix || repair.canMarkOptional || repair.canDoByHand) && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {repair.canFix && (
-                <button type="button" onClick={showMe} disabled={starting || marking}
+              {repair.canDoByHand && (
+                <button type="button" onClick={byHand} disabled={starting || marking || handing}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-brain-accent hover:bg-brain-accent-dim disabled:opacity-50 text-white rounded-lg transition-colors">
-                  <MousePointerClick size={13} /> {starting ? 'Opening…' : 'Show me where it is'}
+                  <Hand size={13} /> {handing ? 'Handing over…' : 'I’ll do this step myself'}
+                </button>
+              )}
+              {repair.canFix && (
+                <button type="button" onClick={showMe} disabled={starting || marking || handing}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
+                    repair.canDoByHand
+                      ? 'border border-brain-border text-brain-text hover:border-brain-border-bright'
+                      : 'bg-brain-accent hover:bg-brain-accent-dim text-white'
+                  }`}>
+                  <MousePointerClick size={13} /> {starting ? 'Opening…' : action ? 'It’s a different one: show me' : 'Show me where it is'}
                 </button>
               )}
               {repair.canMarkOptional && (
@@ -375,15 +418,29 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
                   <EyeOff size={13} /> {marking ? 'Saving…' : 'This doesn’t always appear'}
                 </button>
               )}
-              <button type="button" onClick={askAgent}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-border text-brain-text-dim hover:text-brain-text hover:border-brain-border-bright rounded-lg transition-colors">
-                <MessageSquare size={13} /> I don’t know either — ask the agent
-              </button>
+              {/* Its question says the element couldn't be found, which isn't
+                  what happened to a step that was found. */}
+              {!action && (
+                <button type="button" onClick={askAgent}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-brain-border text-brain-text-dim hover:text-brain-text hover:border-brain-border-bright rounded-lg transition-colors">
+                  <MessageSquare size={13} /> I don’t know either, ask the agent
+                </button>
+              )}
             </div>
           )}
-          {(repair.canFix || repair.canMarkOptional) && (
+          {(repair.canFix || repair.canMarkOptional || repair.canDoByHand) && (
             <ul className="text-xs text-brain-text-dim mt-2 space-y-1">
-              {repair.canFix && (
+              {repair.canDoByHand && (
+                <li>Do it in the browser window yourself, then press Done. NodeBrain carries on from the next step. Nothing is saved to the workflow, so the next run tries this step again.</li>
+              )}
+              {repair.canFix && action && (
+                <li>
+                  {repair.live
+                    ? 'Was it meant to be something else? Point at the right one in the browser and NodeBrain tries again with it.'
+                    : 'Was it meant to be something else? Point at the right one, and the next run will use it.'}
+                </li>
+              )}
+              {repair.canFix && !action && (
                 <li>
                   {repair.live
                     ? 'Moved? Point at the new one in the browser, and NodeBrain carries on from this step. The earlier steps aren’t done again.'

@@ -146,6 +146,10 @@ export function migrateWorkflowTables(db: SqlJsDatabase): void {
   // The picture of the page when the run ended (replay/finalPicture.ts),
   // under <data>/workflow-runs/<run id>/. NULL when none was taken.
   addColumn(db, 'workflow_runs', 'final_screenshot_path', 'TEXT');
+  // Playwright's own message when a step failed, after the run's redact().
+  // For finding out afterwards why a step failed; never sent to the app.
+  // NULL when there was none, or when a saved sign-in was used in the run.
+  addColumn(db, 'workflow_run_steps', 'raw_error', 'TEXT');
 }
 
 // Same guard as database.ts's own column migrations: an unguarded ADD COLUMN

@@ -5,7 +5,7 @@ import {
 import {
   getAllSiteAgents, getAllWorkflows, getRunsByWorkflow, getRunSteps, getStepsByVersion, getFieldsByWorkflow,
 } from '../db/workflowRepository';
-import { isRunActive, getRepairHold, describeStepTarget, isMissError } from '../replay/replayEngine';
+import { isRunActive, getRepairHold, describeStepTarget, isMissError, isActionError, verbFor } from '../replay/replayEngine';
 import { repairStatus } from '../replay/repair';
 import { listTakeControlRequests } from '../browser/takeControl';
 import { siteIconUrl } from '../recorder/siteLook';
@@ -96,9 +96,11 @@ function pausedText(steps: WorkflowStep[], seen: string[], reason: string): stri
 // "Stopped because the "Submit renewal" button moved".
 function stoppedText(run: WorkflowRun, steps: WorkflowStep[]): string {
   const step = steps.find((s) => s.stepKey === run.failedStepKey);
-  if (!step || !isMissError(run.error)) return 'Stopped because something on the page moved';
+  const action = isActionError(run.error);
+  if (!step || (!isMissError(run.error) && !action)) return 'Stopped because something on the page moved';
   const fields = new Map(getFieldsByWorkflow(run.workflowId).map((f) => [f.id, f]));
   const what = describeStepTarget(step, undefined, steps, fields);
+  if (action) return `Stopped because it couldn’t ${verbFor(step)} ${what}`;
   return run.error?.startsWith('More than one')
     ? `Stopped because it found more than one ${what.replace(/^the /, '')}`
     : `Stopped because ${what} moved`;

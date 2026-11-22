@@ -66,6 +66,24 @@ const FINAL_MAX_WAIT_MS = 10_000;
 // What the run view says under an optional step that was skipped.
 const OPTIONAL_SKIPPED_TEXT = "Wasn't on the page this time. It doesn't always appear, so NodeBrain carried on.";
 const OPTIONAL_MARKED_TEXT = "You said this doesn't always appear, so NodeBrain skipped it and carried on.";
+// A step whose page didn't show up, where the person pointed at what to do
+// on the page that showed instead (repair.ts saveRepair, the 'alternative' fix).
+const ALTERNATIVE_TEXT = "This page didn't show up this time. You showed NodeBrain what to do on the one that did, so it did that instead.";
+const BY_HAND_TEXT = 'You did this step yourself in the browser.';
+
+// The run-step texts that mean "an optional step wasn't there, so it was
+// left out" (not a sign-in the profile didn't need, not a stop).
+export function isOptionalSkip(row: { status: WorkflowRunStep['status']; error?: string }): boolean {
+  return row.status === 'skipped'
+    && (row.error === OPTIONAL_SKIPPED_TEXT || row.error === OPTIONAL_MARKED_TEXT || row.error === ALTERNATIVE_TEXT);
+}
+
+// How long a pointed-at step (one a repair added) waits after its click for
+// the page to start going somewhere else. The recording never saw that click,
+// so there's no recorded navigation to wait for; without this, the next step
+// was judged 2.2 s after "Skip for now" on HubSpot while the old address was
+// still showing (run cbbd709f, s12, 2026-11-22).
+const POINTED_NAV_WAIT_MS = 3_000;
 
 interface ActiveRun {
   runId: string;
@@ -97,7 +115,22 @@ const REPAIR_HOLD_MS = 30 * 60_000;
 
 // A run waiting, window open, for the person to point at a step's element.
 // Read by replay/repair.ts; everything else about the run stays private.
+// How a held run carries on:
+//   retry: the step was shown where it is now; it runs again.
+//   skip: it was marked as not always appearing; the run moves past it.
+//   alternative: its page didn't show up, and the person pointed at what to
+//     do on the page that did; that's a new step right after it (stepKey),
+//     which runs next. The stopped step itself is left out this time.
+//   byHand: the person does the step in the browser (Take Control); the run
+//     moves past it once they press Done.
+export type RepairResume =
+  | { then: 'retry' | 'skip' | 'byHand' }
+  | { then: 'alternative'; stepKey: string };
+
 export interface RepairHold {
+  // 'missing': nothing found, nothing done. 'action': found, but the click
+  // or typing failed, so part of it may have happened.
+  kind: 'missing' | 'action';
   runId: string;
   workflowId: string;
   versionId: string; // the version the stopped step belongs to
@@ -110,9 +143,8 @@ export interface RepairHold {
   recordedValue?: string;
   signal: AbortSignal;
   redact: (text: string) => string;
-  // Carry on with a fixed version's steps: run this step again (it was shown
-  // where it is), or skip it (it was marked as not always appearing).
-  resume: (steps: WorkflowStep[], then: 'retry' | 'skip') => void;
+  // Carry on, with a fixed version's steps (the same ones for byHand).
+  resume: (steps: WorkflowStep[], how: RepairResume) => void;
   release: () => void; // stop waiting: the run ends as needs_attention
   // The Fix screen's "Show the page": brings the window forward and takes
   // the picture of where it stopped, which isn't taken while it's minimized.
@@ -259,7 +291,9 @@ type StepOutcome =
   | { ok: true }
   // repairable: the step's element wasn't found (or wasn't the only match),
   // so nothing was done to the page and the person can point at it instead.
-  | { ok: false; status: WorkflowRunStatus; error: string; repairable?: boolean };
+  // actionFailed: it was found, but clicking or typing into it failed. The
+  // person can do it by hand from the held window, or point at another one.
+  | { ok: false; status: WorkflowRunStatus; error: string; repairable?: boolean; actionFailed?: boolean };
 
 interface ResolvedValue { value?: string; recordedValue?: string; shownOnPage: boolean }
 
@@ -346,7 +380,7 @@ class Replay {
   }
 
   private record(step: WorkflowStep, status: WorkflowRunStep['status'], started: number,
-                 extra: { resolvedBy?: WorkflowStepResolvedBy; error?: string; screenshotPath?: string } = {}): void {
+                 extra: { resolvedBy?: WorkflowStepResolvedBy; error?: string; screenshotPath?: string; rawError?: string } = {}): void {
     if (this.justRepaired === step.stepKey) {
       this.justRepaired = undefined;
       if (status === 'ok') {
@@ -360,6 +394,7 @@ class Replay {
       stepKey: step.stepKey, position: step.position, status,
       resolvedBy: extra.resolvedBy, durationMs: Date.now() - started, url,
       error: extra.error ? this.redact(extra.error) : undefined, screenshotPath: extra.screenshotPath,
+      rawError: extra.rawError, // already redacted and gated by stop()
     });
     replayEvents.emit('run:step', row);
   }
@@ -421,10 +456,11 @@ class Replay {
       const step = this.steps[i];
       const outcome = await this.runStep(step);
       if (!outcome.ok) {
-        // A step whose element wasn't found: keep the window as it is and
-        // wait for the person to point at the element (replay/repair.ts).
-        // A repair brings a new version's steps; the same step runs again.
-        const repaired = outcome.repairable ? await this.holdForRepair(step, outcome.error) : null;
+        // A step whose element wasn't found, or was found but couldn't be
+        // clicked or typed into: keep the window as it is and wait for the
+        // person (replay/repair.ts). A repair brings a new version's steps.
+        const kind = outcome.repairable ? 'missing' : outcome.actionFailed ? 'action' : undefined;
+        const repaired = kind ? await this.holdForRepair(step, outcome.error, kind) : null;
         if (repaired) {
           // The page was in the person's hands. What it shows now (a box
           // marked invalid when focus left it for the Fix bar) isn't the
@@ -432,8 +468,30 @@ class Replay {
           this.errorWatch = undefined;
           this.steps = repaired.steps;
           blocks = signInBlocks(this.steps);
-          if (repaired.then === 'skip') {
+          const how = repaired.how;
+          if (how.then === 'skip') {
             this.record(step, 'skipped', Date.now(), { error: OPTIONAL_MARKED_TEXT });
+            continue;
+          }
+          if (how.then === 'alternative') {
+            // The new step sits right after this one, so it's next.
+            this.record(step, 'skipped', Date.now(), { error: ALTERNATIVE_TEXT });
+            this.justRepaired = how.stepKey;
+            continue;
+          }
+          if (how.then === 'byHand') {
+            const started = Date.now();
+            const page = this.pages.get(step.pageAlias) ?? (await this.pageFor(step));
+            const answer = page && !page.isClosed()
+              ? await this.pause(step, page, `${capitalise(verbFor(step))} ${this.describeTarget(step, undefined)} yourself in the browser window, then press Done. NodeBrain carries on from the next step.`)
+              : 'stopped';
+            if (answer !== 'done') {
+              // Closing the window isn't "You stopped the run".
+              const end = this.browserGone ? this.stopped(step, started) : await this.endAtPause(step, started, answer);
+              if (!end.ok) this.finish(end.status, { error: end.error, failedStepKey: end.status === 'needs_attention' ? step.stepKey : undefined });
+              return;
+            }
+            this.record(step, 'ok', started, { resolvedBy: 'human', error: BY_HAND_TEXT });
             continue;
           }
           this.justRepaired = step.stepKey;
@@ -487,7 +545,10 @@ class Replay {
   // secret other than a masked password is showing. After a saved sign-in
   // value went in, only a real screenshot (window showing) is taken, never
   // the page copy; a minimized run then has no final picture.
-  private async finalPicture(page: Page): Promise<string | undefined> {
+  //
+  // `name` set: a picture of where a step failed (failurePicture), kept on
+  // that step's row by the caller instead of as the run's final picture.
+  private async finalPicture(page: Page, name?: string): Promise<string | undefined> {
     if (this.secretShown || page.isClosed() || !this.context) return undefined;
     const dir = path.join(getDataDir(), 'workflow-runs', this.run.id);
     try {
@@ -495,13 +556,13 @@ class Replay {
     } catch {
       return undefined;
     }
-    const file = path.join(dir, 'final.png');
+    const file = path.join(dir, name ?? 'final.png');
     const ok = await takeFinalPicture(page, this.context, file, !!this.entry.shown, !this.credentialFilled).catch(() => false);
     if (!ok) {
-      console.log(`[replay] ${this.run.id}: no final picture (window ${this.entry.shown ? 'showing' : 'minimized'}${this.credentialFilled ? ', saved sign-in used: no page copy' : ''})`);
+      console.log(`[replay] ${this.run.id}: no ${name ? 'failure' : 'final'} picture (window ${this.entry.shown ? 'showing' : 'minimized'}${this.credentialFilled ? ', saved sign-in used: no page copy' : ''})`);
       return undefined;
     }
-    setRunFinalScreenshot(this.run.id, file);
+    if (!name) setRunFinalScreenshot(this.run.id, file);
     return file;
   }
 
@@ -748,7 +809,8 @@ class Replay {
     } catch (err) {
       if (this.closedOrStopped()) return this.stopped(step, started);
       const msg = err instanceof Error ? err.message : String(err);
-      return this.stop(step, started, 'needs_attention', `Found ${what}, but couldn't ${verbFor(step)} it: ${actionProblem(msg)}.`, true);
+      const failed = await this.stop(step, started, 'needs_attention', `Found ${what}, but couldn't ${verbFor(step)} it: ${actionProblem(msg)}.`, true, msg);
+      return { ...failed, actionFailed: true } as StepOutcome;
     }
 
     if (pick && !navigates) {
@@ -866,7 +928,9 @@ class Replay {
     } catch (err) {
       if (this.closedOrStopped()) return this.stopped(step, started);
       const msg = err instanceof Error ? err.message : String(err);
-      return this.stop(step, started, 'needs_attention', `Found the choice in ${listWhat}, but couldn't click it: ${actionProblem(msg)}.`, true);
+      // Not held for a fix: a typeahead pick is checked by reading the box
+      // back, which a pick made by hand would skip (see the note above).
+      return this.stop(step, started, 'needs_attention', `Found the choice in ${listWhat}, but couldn't click it: ${actionProblem(msg)}.`, true, msg);
     }
     this.typeahead = undefined;
     if (box) {
@@ -1004,6 +1068,15 @@ class Replay {
         } else {
           await el.click(opts);
         }
+        // A step a repair added: the recording never saw this click, so it
+        // has no recorded page change to wait for. Give the page a moment to
+        // start going somewhere; if it does, wait for the new page to load.
+        // The next step's search would otherwise settle on the old page.
+        if (step.args.pointedAt && !step.signals.some((s) => s.name === 'navigation')) {
+          const before = page.url();
+          const moved = await page.waitForURL((u) => u.href !== before, { timeout: POINTED_NAV_WAIT_MS }).then(() => true, () => false);
+          if (moved) await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => {});
+        }
         return undefined;
       }
       case 'fill':
@@ -1079,9 +1152,23 @@ class Replay {
     this.entry.shown = true;
     await page.bringToFront().catch(() => {});
     console.log(`[replay] ${this.run.id} ${step.stepKey}: waiting for the person in the browser`);
-    const done = await requestTakeControl({ runId: this.run.id, title: this.workflow.name, reason }, this.signal);
-    if (this.browserGone) return 'stopped';
-    return done ? 'done' : 'stopped';
+    // The wait also ends when the window goes: closed by the person, or the
+    // browser quit. Before, only Done or Stop ended it, so a window closed
+    // during a pause left the run (and the site) waiting forever.
+    const ended = new AbortController();
+    const onEnd = () => ended.abort();
+    const browser = this.entry.launched?.browser;
+    this.signal.addEventListener('abort', onEnd);
+    browser?.on('disconnected', onEnd);
+    if (this.signal.aborted || this.browserGone) ended.abort();
+    try {
+      const done = await requestTakeControl({ runId: this.run.id, title: this.workflow.name, reason }, ended.signal);
+      if (this.browserGone) return 'stopped';
+      return done ? 'done' : 'stopped';
+    } finally {
+      this.signal.removeEventListener('abort', onEnd);
+      browser?.off('disconnected', onEnd);
+    }
   }
 
   private async endAtPause(step: WorkflowStep, started: number, outcome: 'stopped' | 'unattended'): Promise<StepOutcome> {
@@ -1103,11 +1190,33 @@ class Replay {
     return { ok: false, status: 'cancelled', error };
   }
 
-  private async stop(step: WorkflowStep, started: number, status: WorkflowRunStatus, error: string, screenshot = false): Promise<StepOutcome> {
+  // `raw` is Playwright's own message, kept on the step row (never shown) so
+  // a failure can be looked into afterwards. It names the selector and often
+  // the element's markup, and a selector can hold a typed value, so it goes
+  // through redact(), and isn't kept at all once a saved sign-in went in:
+  // redact() only knows the password, and the sign-in name or a value the
+  // page reformatted could still be in it.
+  private async stop(step: WorkflowStep, started: number, status: WorkflowRunStatus, error: string, screenshot = false,
+                     raw?: string): Promise<StepOutcome> {
     let screenshotPath: string | undefined;
-    if (screenshot) screenshotPath = await this.screenshot(step);
-    this.record(step, 'failed', started, { error, screenshotPath });
+    if (screenshot) screenshotPath = await this.screenshot(step) ?? await this.failurePicture(step);
+    // Playwright's call log comes with terminal colour codes; they go.
+    // eslint-disable-next-line no-control-regex
+    const rawError = raw && !this.credentialFilled ? this.redact(raw.replace(/\u001b\[[0-9;]*m/g, '')).slice(0, 4000) : undefined;
+    this.record(step, 'failed', started, { error, screenshotPath, rawError });
     return { ok: false, status, error };
+  }
+
+  // A picture of where the run stopped when the window is minimized (the
+  // usual case), where screenshot() can't take one: the page copy, through
+  // the same finalPicture path as the end of the run, so the same rules
+  // hold (no picture once a secret is showing, the copy deleted in its
+  // finally). After a saved sign-in went in, no failure picture at all.
+  private async failurePicture(step: WorkflowStep): Promise<string | undefined> {
+    if (this.credentialFilled) return undefined;
+    const page = this.pages.get(step.pageAlias);
+    if (!page || page.isClosed() || this.closedOrStopped()) return undefined;
+    return this.finalPicture(page, `${step.stepKey}.png`);
   }
 
   // A picture of where the run stopped, so the person can see it. Not taken
@@ -1163,7 +1272,7 @@ class Replay {
   // or skip the step, or null when the hold ends without a fix: the person
   // closed the window or chose to fix it later, the run was stopped, or
   // nobody answered within REPAIR_HOLD_MS. A run nobody is watching isn't held.
-  private async holdForRepair(step: WorkflowStep, error: string): Promise<{ steps: WorkflowStep[]; then: 'retry' | 'skip' } | null> {
+  private async holdForRepair(step: WorkflowStep, error: string, kind: RepairHold['kind']): Promise<{ steps: WorkflowStep[]; how: RepairResume } | null> {
     if (this.run.trigger === 'schedule' || this.closedOrStopped()) return null;
     const page = this.pages.get(step.pageAlias);
     const browser = this.entry.launched?.browser;
@@ -1176,8 +1285,8 @@ class Replay {
     replayEvents.emit('run:needs_repair', getRunById(this.run.id));
     console.log(`[replay] ${this.run.id} ${step.stepKey}: holding the window for a repair`);
 
-    const repaired = await new Promise<{ steps: WorkflowStep[]; then: 'retry' | 'skip' } | null>((resolve) => {
-      const end = (fixed: { steps: WorkflowStep[]; then: 'retry' | 'skip' } | null) => {
+    const repaired = await new Promise<{ steps: WorkflowStep[]; how: RepairResume } | null>((resolve) => {
+      const end = (fixed: { steps: WorkflowStep[]; how: RepairResume } | null) => {
         if (holds.get(this.run.id) !== hold) return;
         holds.delete(this.run.id);
         clearTimeout(timer);
@@ -1187,11 +1296,12 @@ class Replay {
       };
       const onGone = () => end(null);
       const hold: RepairHold = {
+        kind,
         runId: this.run.id, workflowId: this.workflow.id, versionId: step.versionId, siteKey: this.site.siteKey,
         step, steps: this.steps, fieldsById: this.fieldsById, page,
         value: value.value, recordedValue: value.recordedValue, signal: this.signal,
         redact: (text) => this.redact(text),
-        resume: (steps, then) => end({ steps, then }),
+        resume: (steps, how) => end({ steps, how }),
         release: () => end(null),
         takePicture: () => this.takePicture(step),
       };
@@ -1211,9 +1321,8 @@ class Replay {
       return `More than one thing on the page matches ${what}, and NodeBrain can't tell which one is meant. The run stopped here rather than guess.`;
     }
     let hint = '';
-    const recordedPath = step.fingerprint.urlPath;
     const here = pathOf(page.url());
-    const elsewhere = !!recordedPath && !!here && here !== recordedPath;
+    const elsewhere = onDifferentPage(step, page.url());
     // Taken somewhere else, to what looks like a sign-in page: the session ran out.
     const looksLikeSignIn = elsewhere && step.valueSource !== 'credential'
       && /log ?in|sign ?in|auth/i.test(`${here} ${await page.title().catch(() => '')}`)
@@ -1232,10 +1341,27 @@ const ROLE_WORDS: Record<string, string> = {
   spinbutton: 'number box', listbox: 'list', switch: 'switch',
 };
 
+// The browser is on a different page from the one this step was recorded on:
+// the address's path isn't the recorded one. What missMessage says ("The
+// browser is on a different page…"), and what decides whether pointing at
+// something replaces the step or adds an alternative to it (repair.ts).
+export function onDifferentPage(step: WorkflowStep, url: string): boolean {
+  const recordedPath = step.fingerprint.urlPath;
+  const here = pathOf(url);
+  return !!recordedPath && !!here && here !== recordedPath;
+}
+
 // True for the stop messages missMessage() writes: the element wasn't found,
 // or more than one thing matched. Nothing was done to the page at that step.
 export function isMissError(text: string | undefined): boolean {
   return !!text && (text.startsWith("Couldn't find ") || text.startsWith('More than one thing on the page matches '));
+}
+
+// True for the stop written when a step's element was found but clicking or
+// typing into it failed (runStep's catch around perform): "Found the "Add
+// contacts" button, but couldn't click it: it's greyed out."
+export function isActionError(text: string | undefined): boolean {
+  return !!text && text.startsWith('Found ') && / but couldn't .+: /.test(text) && !text.startsWith('Found the choice in ');
 }
 
 // "the "Get my quote" button", ""Business name"", "the option you chose".
