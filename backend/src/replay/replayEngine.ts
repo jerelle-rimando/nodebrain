@@ -19,11 +19,12 @@ import { siteKeyToFolderName } from '../recorder/siteIdentity';
 import { captureSiteLook, isDefaultSiteName, siteIconFile } from '../recorder/siteLook';
 import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../browser/siteBrowserLock';
 import { requestTakeControl } from '../browser/takeControl';
-import { findElement, SETTLED_MS } from './elementFinder';
+import { fillTemplate, findElement, SETTLED_MS } from './elementFinder';
 import { trackActivity } from './pageActivity';
 import { isTypeahead, offers, readBack, sameValue, waitForList, LIST_STILL_MS } from './typeahead';
 import { describeErrors, lastingNewErrors, readPageErrors, type PageError } from './pageErrors';
 import { takeFinalPicture } from './finalPicture';
+import { onAnotherPage, pathOf } from './pagePath';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -84,6 +85,51 @@ export function isOptionalSkip(row: { status: WorkflowRunStep['status']; error?:
 // was judged 2.2 s after "Skip for now" on HubSpot while the old address was
 // still showing (run cbbd709f, s12, 2026-11-22).
 const POINTED_NAV_WAIT_MS = 3_000;
+
+// A pick from a list the step before opened (Replay.listOpenerFor): how long
+// the opener has to show its list as closed before it's opened again, how
+// long clicking it may take, and how long the choice is then waited for.
+const LIST_CLOSED_GRACE_MS = 1_000;
+const LIST_REOPEN_CLICK_MS = 5_000;
+const LIST_REOPEN_TIMEOUT_MS = 5_000;
+
+type OpenerState = 'open' | 'closed' | 'unknown' | 'none';
+// reopened: the opener was clicked again for this step. openNow: whether
+// its list was open when the choice was finally not found.
+interface ListCheck { reopened: boolean; openNow?: OpenerState }
+
+// A control with no open/closed facts still counts as the opener when the
+// choice was recorded as a list item: its state just can't be read.
+const LIST_ITEM_ROLES = new Set(['option', 'menuitem', 'menuitemradio', 'menuitemcheckbox']);
+function listState(state: OpenerState, step: WorkflowStep): OpenerState {
+  if (state !== 'none') return state;
+  const fp = step.fingerprint;
+  const item = (fp.role && LIST_ITEM_ROLES.has(fp.role)) || !!fp.container
+    || /internal:role=(option|menuitem|menuitemradio|menuitemcheckbox)\b/.test(step.locator ?? '');
+  return item ? 'unknown' : 'none';
+}
+
+// Whether the list a control opens is showing as open, from its own
+// aria-expanded (or that of a wrapper up to 3 levels out, or a child).
+async function expandState(loc: Locator): Promise<OpenerState> {
+  const facts = await loc.evaluate((el: any) => {
+    let s = el.hasAttribute('aria-expanded') ? el : null;
+    for (let n = el.parentElement, d = 0; !s && n && d < 3; n = n.parentElement, d++) {
+      if (n.hasAttribute('aria-expanded')) s = n;
+    }
+    if (!s) s = el.querySelector('[aria-expanded]');
+    const popup = (s ?? el).getAttribute('aria-haspopup') ?? el.getAttribute('aria-haspopup');
+    return {
+      expanded: s ? String(s.getAttribute('aria-expanded')) : null,
+      popup: !!popup && popup !== 'false',
+      combobox: (el.getAttribute('role') ?? '') === 'combobox',
+    };
+  }, undefined, { timeout: 1_000 }).catch(() => null);
+  if (!facts) return 'none';
+  if (facts.expanded === 'true') return 'open';
+  if (facts.expanded === 'false') return 'closed';
+  return facts.popup || facts.combobox ? 'unknown' : 'none';
+}
 
 interface ActiveRun {
   runId: string;
@@ -335,6 +381,11 @@ class Replay {
   // The typeahead box the last step typed into or clicked, for the pick that
   // follows it (typeahead.ts). Cleared by any step elsewhere.
   private typeahead?: TypeaheadBox;
+  // The last step that was done (not skipped), for a pick from a list that
+  // step opened (see listOpenerFor).
+  private lastDone?: WorkflowStep;
+  // Whether the last clicked control's list was open just before the click.
+  private clickedFrom?: { stepKey: string; state: OpenerState };
   // The error messages showing before the last step acted, and what it did,
   // for a message that shows up only after that step was recorded as done
   // (checked before the next step acts, and at the end of the run).
@@ -388,6 +439,9 @@ class Replay {
         extra = { ...extra, resolvedBy: 'human', error: 'You showed NodeBrain where this is now.' };
       }
     }
+    // A skipped optional step in between leaves the step before it as the
+    // last one done; a stop leaves it too, so a retried step still knows it.
+    if (status === 'ok' || status === 'repaired') this.lastDone = step;
     const page = this.pages.get(step.pageAlias);
     const url = page && !page.isClosed() ? this.redact(page.url()) : undefined;
     const row = addRunStep(this.run.id, {
@@ -738,14 +792,40 @@ class Replay {
     }
 
     this.typeahead = box;
-    const found = await findElement(page, step, {
+    // A click right after a click on a control that opens a list (a custom
+    // dropdown, a menu): the list must be open for its choice to be there.
+    // If it has closed (or never opened), it's opened again before the
+    // choice is looked for, and once more before giving up.
+    const opener = this.listOpenerFor(step);
+    const list: ListCheck = { reopened: false };
+    if (opener) await this.openListIfClosed(page, step, resolved.value, opener, list);
+    if (this.closedOrStopped()) return this.stopped(step, started);
+    const findOpts = {
       value: resolved.value, recordedValue: resolved.recordedValue,
       primaryTimeoutMs: step.optional ? OPTIONAL_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
       fallbackTimeoutMs: step.optional ? OPTIONAL_FALLBACK_TIMEOUT_MS : FALLBACK_TIMEOUT_MS,
       signal: this.signal,
       activity: trackActivity(page),
-    });
+    };
+    let found = await findElement(page, step, findOpts);
     if (this.closedOrStopped()) return this.stopped(step, started);
+    if (!found.found && !found.ambiguous && opener) {
+      // Not there. Failing is the last resort: if the list isn't showing as
+      // open, open it and look again. A list that is open and doesn't have
+      // the choice isn't clicked (that would close it): that's a real miss.
+      if (await this.reopenAfterMiss(page, step, opener, list)) {
+        found = await findElement(page, step, {
+          ...findOpts, activity: trackActivity(page),
+          primaryTimeoutMs: step.optional ? OPTIONAL_PRIMARY_TIMEOUT_MS : LIST_REOPEN_TIMEOUT_MS,
+        });
+        if (this.closedOrStopped()) return this.stopped(step, started);
+      }
+      if (!found.found) {
+        const now = listState(await this.openerState(page, opener), step);
+        // Said only about a control that opens a list, or one just clicked.
+        if (now !== 'none' || list.reopened) list.openNow = now;
+      }
+    }
     // Not there this time, and the person said it doesn't always appear.
     // Several matches isn't "not there": that still stops, as any step would.
     if (!found.found && step.optional && !found.ambiguous) {
@@ -753,8 +833,14 @@ class Replay {
       return { ok: true };
     }
     if (!found.found) {
-      const missed = await this.stop(step, started, 'needs_attention', await this.missMessage(page, step, what, found.ambiguous ?? false), true);
+      const inList = opener && list.openNow !== undefined
+        ? { opener: this.describeTarget(opener.step, opener.value), reopened: list.reopened, now: list.openNow }
+        : undefined;
+      const missed = await this.stop(step, started, 'needs_attention', await this.missMessage(page, step, what, found.ambiguous ?? false, inList), true);
       return { ...missed, repairable: true } as StepOutcome;
+    }
+    if (list.reopened) {
+      console.log(`[replay] ${this.run.id} ${step.stepKey}: the list ${opener!.step.stepKey} opens had closed; opened it again`);
     }
     if (found.resolvedBy === 'fallback') {
       console.log(`[replay] ${this.run.id} ${step.stepKey}: saved locator missed, found by ${found.how}`);
@@ -798,6 +884,8 @@ class Replay {
       : '';
     const errorsBefore = await readPageErrors(page);
     this.expectDialog = step.signals.some((s) => s.name === 'dialog');
+    this.clickedFrom = step.action === 'click' && !navigates
+      ? { stepKey: step.stepKey, state: await expandState(found.locator) } : undefined;
     try {
       const problem = await this.perform(page, found.locator, step, resolved.value, what);
       if (problem) return this.stop(step, started, 'needs_attention', problem, true);
@@ -1263,6 +1351,114 @@ class Replay {
     return describeStepTarget(step, value, this.steps, this.fieldsById);
   }
 
+  // ── Picking from a list another step opened ───────────────────────────────
+  //
+  // A custom dropdown (HubSpot's Lead Status) is two recorded steps: a click
+  // on the control, then a click on the choice. The choice is a button in a
+  // pop-up that exists only while the list is open. The recorder doesn't
+  // pair the two; they're independent steps. So when the choice is missing
+  // the run used to stop at once, even when the list had simply closed again
+  // (the page re-drew after its address changed, or the first click came
+  // before the control was ready).
+  //
+  // The step before is treated as the choice's opener only when it was a
+  // click done in this run, in the same window, and its element is still
+  // there, exactly once, by its saved locator. Whether the list is open is
+  // read from that element (or the wrapper or child that carries it):
+  //   aria-expanded="true"  → open; aria-expanded="false" → closed;
+  //   no aria-expanded but aria-haspopup or role=combobox → can't tell;
+  //   none of those → not an opener, unless the choice itself was recorded
+  //   as a list item (role option / menuitem…, or inside a named list),
+  //   then → can't tell.
+  // Closed: opened before looking. Can't tell: opened only after the choice
+  // wasn't found (a list that was open and lacks the choice gets closed by
+  // that click, and the run stops anyway). Open: never clicked.
+  // A native <select> is a 'select' step and never comes through here.
+
+  private listOpenerFor(step: WorkflowStep): { step: WorkflowStep; value?: string } | undefined {
+    const prev = this.lastDone;
+    if (step.action !== 'click' || step.args.picksTyped || !prev || prev === step) return undefined;
+    if (prev.action !== 'click' || prev.pageAlias !== step.pageAlias || !prev.locator) return undefined;
+    if (prev.signals.some((s) => s.name === 'navigation' || s.name === 'popup')) return undefined;
+    // Its list was open when it was clicked: that click closed it (a section
+    // folded away), so it isn't opened again.
+    if (this.clickedFrom?.stepKey === prev.stepKey && this.clickedFrom.state === 'open') return undefined;
+    // Immediately before, apart from optional steps that were skipped.
+    const i = this.steps.findIndex((s) => s.stepKey === step.stepKey);
+    const j = this.steps.findIndex((s) => s.stepKey === prev.stepKey);
+    if (j < 0 || i <= j || this.steps.slice(j + 1, i).some((s) => !s.optional)) return undefined;
+    let value: string | undefined;
+    if (prev.valueTarget === 'locator') {
+      try {
+        const v = this.resolveValue(prev);
+        if ('error' in v || v.value === undefined) return undefined;
+        value = v.value;
+      } catch { return undefined; }
+    }
+    return { step: prev, value };
+  }
+
+  private openerLocator(page: Page, opener: { step: WorkflowStep; value?: string }): Locator {
+    const sel = opener.step.valueTarget === 'locator' ? fillTemplate(opener.step.locator!, opener.value ?? '') : opener.step.locator!;
+    return page.locator(sel);
+  }
+
+  private async openerState(page: Page, opener: { step: WorkflowStep; value?: string }): Promise<OpenerState> {
+    const loc = this.openerLocator(page, opener);
+    if ((await loc.count().catch(() => 0)) !== 1) return 'none';
+    return expandState(loc);
+  }
+
+  // How many elements the step's saved locator matches right now; -1 when
+  // it has none to check.
+  private async choiceCount(page: Page, step: WorkflowStep, value: string | undefined): Promise<number> {
+    if (!step.locator) return -1;
+    if (step.valueTarget === 'locator' && value === undefined) return -1;
+    const sel = step.valueTarget === 'locator' ? fillTemplate(step.locator, value!) : step.locator;
+    return page.locator(sel).count().catch(() => -1);
+  }
+
+  // Before looking: the choice isn't there and the opener says its list is
+  // closed. A list still opening can show "closed" for a moment after the
+  // click, so it has to stay closed for LIST_CLOSED_GRACE_MS first.
+  private async openListIfClosed(page: Page, step: WorkflowStep, value: string | undefined,
+                                 opener: { step: WorkflowStep; value?: string }, list: ListCheck): Promise<void> {
+    const until = Date.now() + LIST_CLOSED_GRACE_MS;
+    for (;;) {
+      if (this.closedOrStopped()) return;
+      if ((await this.choiceCount(page, step, value)) !== 0) return;
+      if ((await this.openerState(page, opener)) !== 'closed') return;
+      if (Date.now() >= until) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    list.reopened = await this.clickOpener(page, opener);
+  }
+
+  // After the choice wasn't found: open the list if it isn't showing as
+  // open. True when the opener was clicked.
+  private async reopenAfterMiss(page: Page, step: WorkflowStep, opener: { step: WorkflowStep; value?: string },
+                                list: ListCheck): Promise<boolean> {
+    if (list.reopened) return false; // opened once already for this step
+    const state = listState(await this.openerState(page, opener), step);
+    if (state !== 'closed' && state !== 'unknown') return false;
+    list.reopened = await this.clickOpener(page, opener);
+    return list.reopened;
+  }
+
+  private async clickOpener(page: Page, opener: { step: WorkflowStep; value?: string }): Promise<boolean> {
+    const a = opener.step.args;
+    try {
+      await this.openerLocator(page, opener).click({
+        timeout: LIST_REOPEN_CLICK_MS,
+        ...(isPoint(a.position) ? { position: a.position } : {}),
+      });
+    } catch {
+      return false;
+    }
+    console.log(`[replay] ${this.run.id}: clicked ${opener.step.stepKey} again to open its list`);
+    return true;
+  }
+
   // The run stopped on a step whose element it couldn't find. A person
   // watching can point at the element (replay/repair.ts) and the run carries
   // on from this step with the repaired version. Or they say the step doesn't
@@ -1316,9 +1512,23 @@ class Replay {
     return repaired;
   }
 
-  private async missMessage(page: Page, step: WorkflowStep, what: string, ambiguous: boolean): Promise<string> {
+  // inList: the step picks from a list the step before opened, and NodeBrain
+  // checked the list (opener: that control, described; reopened: it was
+  // clicked again for this step; now: the list's state at the end).
+  private async missMessage(page: Page, step: WorkflowStep, what: string, ambiguous: boolean,
+                            inList?: { opener: string; reopened: boolean; now: OpenerState }): Promise<string> {
     if (ambiguous) {
       return `More than one thing on the page matches ${what}, and NodeBrain can't tell which one is meant. The run stopped here rather than guess.`;
+    }
+    let found = `Couldn't find ${what}.`;
+    if (inList?.now === 'open') {
+      found = `Couldn't find ${what} in the list ${inList.opener} opens. ${inList.reopened
+        ? 'The list had closed, so NodeBrain opened it again, and that choice isn’t in it.'
+        : 'The list is open, and that choice isn’t in it.'}`;
+    } else if (inList?.reopened && inList.now === 'unknown') {
+      found = `Couldn't find ${what}. NodeBrain clicked ${inList.opener} again to open its list, and that choice still isn’t there.`;
+    } else if (inList?.reopened) {
+      found = `Couldn't find ${what}. Its list wasn't open, and clicking ${inList.opener} again didn't open it.`;
     }
     let hint = '';
     const here = pathOf(page.url());
@@ -1329,7 +1539,7 @@ class Replay {
       && (await page.locator('input[type=password]').filter({ visible: true }).count().catch(() => 0)) > 0;
     if (looksLikeSignIn) hint = ' The site seems to be asking you to sign in.';
     else if (elsewhere) hint = ' The browser is on a different page from the one this step was recorded on.';
-    return `Couldn't find ${what}.${hint} The run stopped here rather than guess.`;
+    return `${found}${hint} The run stopped here rather than guess.`;
   }
 }
 
@@ -1342,13 +1552,12 @@ const ROLE_WORDS: Record<string, string> = {
 };
 
 // The browser is on a different page from the one this step was recorded on:
-// the address's path isn't the recorded one. What missMessage says ("The
-// browser is on a different page…"), and what decides whether pointing at
-// something replaces the step or adds an alternative to it (repair.ts).
+// the address's path isn't the recorded one, record ids aside (pagePath.ts:
+// HubSpot's contact record has a new id every run). What missMessage says
+// ("The browser is on a different page…"), and what decides whether pointing
+// at something replaces the step or adds an alternative to it (repair.ts).
 export function onDifferentPage(step: WorkflowStep, url: string): boolean {
-  const recordedPath = step.fingerprint.urlPath;
-  const here = pathOf(url);
-  return !!recordedPath && !!here && here !== recordedPath;
+  return onAnotherPage(step.fingerprint.urlPath, url);
 }
 
 // True for the stop messages missMessage() writes: the element wasn't found,
@@ -1499,10 +1708,6 @@ function keyCombo(step: WorkflowStep): string {
 
 function isPoint(p: unknown): p is { x: number; y: number } {
   return !!p && typeof (p as { x: unknown }).x === 'number' && typeof (p as { y: unknown }).y === 'number';
-}
-
-function pathOf(url: string): string | undefined {
-  try { return new URL(url).pathname; } catch { return undefined; }
 }
 
 function hostOf(url: string): string {

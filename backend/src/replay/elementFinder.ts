@@ -1,5 +1,6 @@
 import type { Locator, Page } from 'playwright-core';
 import type { PageActivity } from './pageActivity';
+import { onAnotherPage } from './pagePath';
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type WorkflowStep, type WorkflowStepFingerprint,
@@ -10,7 +11,8 @@ import {
 //   2. if that matches nothing, or more than one element, the fingerprint:
 //      test id, role + accessible name, label, placeholder, name attribute,
 //      narrowed by the nearest heading and the recorded position (ordinal),
-//      and only on the page path the step was recorded on.
+//      and only on the page path the step was recorded on (record ids in
+//      the path aside: pagePath.ts).
 // Either way it must come down to exactly one element; anything else is a
 // miss and the run stops.
 
@@ -100,10 +102,6 @@ const NEAREST_HEADING = (el: any): string | null => {
   }
   return last;
 };
-
-function pathOf(url: string): string | undefined {
-  try { return new URL(url).pathname; } catch { return undefined; }
-}
 
 interface Candidate { how: string; locator: Locator; byRoleName?: boolean }
 
@@ -203,8 +201,8 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
 
   // 2. The fingerprint. Only on the page the step was recorded on: the same
   // role and name on another page is a different element.
-  const here = pathOf(page.url());
-  if (fp.urlPath && here !== undefined && here !== fp.urlPath) {
+  // Record ids in the path don't count (pagePath.ts).
+  if (onAnotherPage(fp.urlPath, page.url())) {
     return {
       found: false, tried,
       reason: ambiguousPrimary ? 'several elements match' : 'not found on this page',

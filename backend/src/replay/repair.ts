@@ -47,7 +47,8 @@ import {
 //
 // Unless the person pointed while the browser was on a different page from
 // the one the step was recorded on (onDifferentPage, the same test behind
-// missMessage's "The browser is on a different page…"). Then the site showed
+// missMessage's "The browser is on a different page…"; record ids in the
+// path don't count, see pagePath.ts). Then the site showed
 // another screen, not a moved button: HubSpot's "Set up two-factor" screen
 // in place of its "Check your email" code box (run cbbd709f). Replacing the
 // step made every later run need that other screen. So the step is kept,
@@ -402,6 +403,9 @@ interface Picked { locator: string; fingerprint: WorkflowStepFingerprint; url: s
 // stopped one when it was an alternative rather than a replacement.
 function saveRepair(workflowId: string, versionId: string, step: WorkflowStep, runId: string, picked: Picked):
     { steps: WorkflowStep[]; added?: string } {
+  // Backstop for PickSession.examine: never save the page itself as a step.
+  // Nothing is written; a live run stays held for another try.
+  if (isRootLocator(picked.locator)) throw new RepairError(ROOT_PICK_PROBLEM);
   const stepKey = step.stepKey;
   const wf = getWorkflowById(workflowId);
   if (!wf || wf.currentVersionId !== versionId) {
@@ -586,6 +590,15 @@ class PickSession {
     const selector = (picked as unknown as { _selector?: string })._selector;
     if (!selector || selector.includes(PILL_HOST_ID)) return { problem: 'Click the thing on the page itself, not this bar.' };
     if ((await picked.count()) !== 1) return { problem: 'NodeBrain couldn’t tell exactly which one that was. Try clicking it again.' };
+    // The page itself (html, body) is never what a step acts on. Playwright's
+    // picker returned `html` once in three picks on the dropdown fixture
+    // (2026-11-22), and that was saved as the step's locator. Refused here;
+    // the picker stays on, so the person just clicks again.
+    if (isRootLocator(selector)
+        || await picked.evaluate((el: any) => el === el.ownerDocument.documentElement || el === el.ownerDocument.body).catch(() => false)) {
+      console.log(`[repair] picked the page itself (${selector}); asking again`);
+      return { problem: ROOT_PICK_PROBLEM };
+    }
 
     const facts = await picked.evaluate(pageFacts, picksOption(this.step) ? 'pick-option' : this.step.action);
     if (!facts.fits) return { problem: misfitProblem(this.step) };
@@ -686,6 +699,14 @@ ${ELEMENT_FACTS_SOURCE}
 // A real function (its source is what Playwright sends to the page). The
 // backend has no DOM types, hence the string.
 const pageFacts = new Function(`return ${PAGE_FACTS_FN}`)() as (el: unknown, action: string) => { fp: PageElementFacts; fits: boolean };
+
+const ROOT_PICK_PROBLEM = 'NodeBrain didn’t catch which part of the page you meant. Click it again, right on the thing itself.';
+
+// A locator for the page itself: html, body, :root, or a chain ending there.
+function isRootLocator(locator: string): boolean {
+  const last = locator.split('>>').pop()!.trim().toLowerCase();
+  return /^(css=)?(html|body|:root|html\s*>\s*body)$/.test(last);
+}
 
 function misfitProblem(step: WorkflowStep): string {
   if (picksOption(step)) {
