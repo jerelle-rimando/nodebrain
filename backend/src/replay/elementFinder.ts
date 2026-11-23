@@ -1,6 +1,6 @@
-import type { Locator, Page } from 'playwright-core';
+import type { Frame, Locator, Page } from 'playwright-core';
 import type { PageActivity } from './pageActivity';
-import { onAnotherPage } from './pagePath';
+import { onAnotherPageFor, recordedFrames } from './pagePath';
 import {
   WORKFLOW_VALUE_PLACEHOLDER,
   type WorkflowStep, type WorkflowStepFingerprint,
@@ -12,7 +12,8 @@ import {
 //      test id, role + accessible name, label, placeholder, name attribute,
 //      narrowed by the nearest heading and the recorded position (ordinal),
 //      and only on the page path the step was recorded on (record ids in
-//      the path aside: pagePath.ts).
+//      the path aside: pagePath.ts). A step recorded inside a frame is
+//      looked for inside that frame, and only while the page has it.
 // Either way it must come down to exactly one element; anything else is a
 // miss and the run stops.
 
@@ -105,7 +106,7 @@ const NEAREST_HEADING = (el: any): string | null => {
 
 interface Candidate { how: string; locator: Locator; byRoleName?: boolean }
 
-function candidates(page: Page, fp: WorkflowStepFingerprint, valueBound = false): Candidate[] {
+function candidates(page: Page | Frame, fp: WorkflowStepFingerprint, valueBound = false): Candidate[] {
   const out: Candidate[] = [];
   if (fp.testId) out.push({ how: 'test id', locator: page.getByTestId(fp.testId) });
   if (fp.role && fp.name) {
@@ -131,7 +132,7 @@ function candidates(page: Page, fp: WorkflowStepFingerprint, valueBound = false)
 }
 
 async function tryFallback(
-  page: Page, fp: WorkflowStepFingerprint, useOrdinal: boolean, valueBound: boolean,
+  page: Page | Frame, fp: WorkflowStepFingerprint, useOrdinal: boolean, valueBound: boolean,
 ): Promise<{ hit?: Candidate & { locator: Locator }; ambiguous: boolean }> {
   let ambiguous = false;
   for (const c of candidates(page, fp, valueBound)) {
@@ -156,6 +157,26 @@ async function tryFallback(
     ambiguous = true;
   }
   return { ambiguous };
+}
+
+// The fingerprint, tried where the step was recorded: the main page, or
+// for a step in a frame, the page's frames at that frame's address. A hit
+// in more than one such frame is several matches, not a find.
+async function fallbackIn(
+  page: Page, fp: WorkflowStepFingerprint, useOrdinal: boolean, valueBound: boolean,
+): Promise<{ hit?: Candidate & { locator: Locator }; ambiguous: boolean }> {
+  const frames = recordedFrames(fp, page);
+  if (!frames) return tryFallback(page, fp, useOrdinal, valueBound);
+  let hit: (Candidate & { locator: Locator }) | undefined;
+  let ambiguous = false;
+  for (const frame of frames) {
+    const r = await tryFallback(frame, fp, useOrdinal, valueBound);
+    ambiguous = ambiguous || r.ambiguous;
+    if (!r.hit) continue;
+    if (hit) return { ambiguous: true };
+    hit = r.hit;
+  }
+  return hit ? { hit, ambiguous: false } : { ambiguous };
 }
 
 export async function findElement(page: Page, step: WorkflowStep, opts: FindOptions): Promise<FindResult> {
@@ -201,8 +222,9 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
 
   // 2. The fingerprint. Only on the page the step was recorded on: the same
   // role and name on another page is a different element.
-  // Record ids in the path don't count (pagePath.ts).
-  if (onAnotherPage(fp.urlPath, page.url())) {
+  // Record ids in the path don't count (pagePath.ts). A step in a frame is
+  // compared frame to frame (onAnotherPageFor) and looked for in that frame.
+  if (onAnotherPageFor(fp, page)) {
     return {
       found: false, tried,
       reason: ambiguousPrimary ? 'several elements match' : 'not found on this page',
@@ -212,7 +234,7 @@ export async function findElement(page: Page, step: WorkflowStep, opts: FindOpti
   const deadline = Date.now() + (settled ? 0 : opts.fallbackTimeoutMs);
   let ambiguous = ambiguousPrimary;
   for (;;) {
-    const r = await tryFallback(page, fp, !positionStale, valueBound);
+    const r = await fallbackIn(page, fp, !positionStale, valueBound);
     if (r.hit) {
       return { found: true, locator: r.hit.locator, resolvedBy: 'fallback', how: r.hit.how, note };
     }

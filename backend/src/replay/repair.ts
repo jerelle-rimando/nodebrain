@@ -376,7 +376,9 @@ async function startLater(runId: string): Promise<void> {
 function whereItStopped(run: WorkflowRun, step: WorkflowStep, startUrl: string): string {
   const row = [...getRunSteps(run.id)].reverse().find((r) => r.stepKey === step.stepKey && r.status === 'failed');
   if (row?.url && !row.url.includes('•••') && /^https?:/i.test(row.url)) return row.url;
-  if (step.origin && step.fingerprint.urlPath) return step.origin + step.fingerprint.urlPath;
+  // Not for a step in a frame: its urlPath is the frame's own address, and
+  // opening that shows the frame's page bare, outside the page it lives in.
+  if (step.origin && step.fingerprint.urlPath && !step.fingerprint.framePath?.length) return step.origin + step.fingerprint.urlPath;
   return startUrl;
 }
 
@@ -395,9 +397,10 @@ function valueForLater(run: WorkflowRun, step: WorkflowStep, fields: WorkflowFie
 
 // ── Saving ──────────────────────────────────────────────────────────────────
 
-// `url`: the address the page was at when the person picked, for the
-// different-page test.
-interface Picked { locator: string; fingerprint: WorkflowStepFingerprint; url: string }
+// `elsewhere`: when the person picked, the browser wasn't on the page the
+// stopped step was recorded on (onDifferentPage, read from the live page so
+// a step in a frame is judged by its frame).
+interface Picked { locator: string; fingerprint: WorkflowStepFingerprint; elsewhere: boolean }
 
 // Returns the new version's steps, and the key of the step added after the
 // stopped one when it was an alternative rather than a replacement.
@@ -411,7 +414,7 @@ function saveRepair(workflowId: string, versionId: string, step: WorkflowStep, r
   if (!wf || wf.currentVersionId !== versionId) {
     throw new RepairError('This workflow was changed while you were fixing it, so the fix wasn’t saved. Run it again.');
   }
-  const elsewhere = onDifferentPage(step, picked.url);
+  const elsewhere = picked.elsewhere;
   let version;
   try {
     if (elsewhere) {
@@ -629,7 +632,7 @@ class PickSession {
       : false;
     await handle?.dispose().catch(() => {});
     if (!same) return { problem: 'NodeBrain couldn’t pin that one down reliably. Try clicking it again, or the part of it with the words on it.' };
-    return { locator, fingerprint, url: this.page.url() };
+    return { locator, fingerprint, elsewhere: onDifferentPage(this.step, this.page) };
   }
 
   // Role, name, heading, landmark, list and position, read from the page's

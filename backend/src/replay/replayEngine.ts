@@ -24,7 +24,7 @@ import { trackActivity } from './pageActivity';
 import { isTypeahead, offers, readBack, sameValue, waitForList, LIST_STILL_MS } from './typeahead';
 import { describeErrors, lastingNewErrors, readPageErrors, type PageError } from './pageErrors';
 import { takeFinalPicture } from './finalPicture';
-import { onAnotherPage, pathOf } from './pagePath';
+import { onAnotherPageFor, pathOf, type PlaceNow } from './pagePath';
 
 // Replays a saved workflow in the person's browser, step by step, with no
 // model in the loop. Each step's element is found by its saved locator, else
@@ -1532,7 +1532,7 @@ class Replay {
     }
     let hint = '';
     const here = pathOf(page.url());
-    const elsewhere = onDifferentPage(step, page.url());
+    const elsewhere = onDifferentPage(step, page);
     // Taken somewhere else, to what looks like a sign-in page: the session ran out.
     const looksLikeSignIn = elsewhere && step.valueSource !== 'credential'
       && /log ?in|sign ?in|auth/i.test(`${here} ${await page.title().catch(() => '')}`)
@@ -1556,8 +1556,10 @@ const ROLE_WORDS: Record<string, string> = {
 // HubSpot's contact record has a new id every run). What missMessage says
 // ("The browser is on a different page…"), and what decides whether pointing
 // at something replaces the step or adds an alternative to it (repair.ts).
-export function onDifferentPage(step: WorkflowStep, url: string): boolean {
-  return onAnotherPage(step.fingerprint.urlPath, url);
+// A step recorded inside a frame is judged by whether the page has that
+// frame, not by the main page's address (pagePath.ts onAnotherPageFor).
+export function onDifferentPage(step: WorkflowStep, page: PlaceNow): boolean {
+  return onAnotherPageFor(step.fingerprint, page);
 }
 
 // True for the stop messages missMessage() writes: the element wasn't found,

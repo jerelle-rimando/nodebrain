@@ -63,3 +63,48 @@ export function onAnotherPage(recordedPath: string | undefined, url: string): bo
   const here = pathOf(url);
   return !!recordedPath && !!here && !samePagePath(recordedPath, here);
 }
+
+// What a step recorded about where it was. For a step inside a frame (an
+// <iframe>), urlPath is the FRAME's path, not the main page's, and framePath
+// holds the frame's origin + path (recorder pageScript.ts).
+export interface RecordedPlace { urlPath?: string; framePath?: string[] }
+
+// Just what's needed of a Playwright Page (and kept structural so tests can
+// pass a plain object).
+export interface PlaceNow { url(): string; frames(): Array<{ url(): string }> }
+
+// The browser is on a different page from the one a step was recorded on.
+//
+// A step in a frame is judged frame to frame: it's on its page when the page
+// has a frame (other than the main one) at the recorded frame's origin and
+// path, record ids aside. Comparing the frame's path with the main page's
+// address, as this used to, never matched: every step in HubSpot's Create
+// Contact panel (an iframe at /object-builder/<portal>/0-1/embed over
+// /contacts/<portal>/objects/0-1/views/all/list) was "on a different page"
+// (run 7a2f6100, 2026-11-23). It still sees a real move: when the browser
+// has gone somewhere that frame isn't, no frame matches and it's elsewhere.
+// The main page's own address isn't compared for a frame step: the same
+// panel opens over several pages, and older recordings never stored it.
+export function onAnotherPageFor(recorded: RecordedPlace, now: PlaceNow): boolean {
+  const frames = recordedFrames(recorded, now);
+  if (!frames) return onAnotherPage(recorded.urlPath, now.url());
+  return frames.length === 0;
+}
+
+// The page's frames that are the one a framed step was recorded in (same
+// origin, same path with record ids aside), in page order. undefined for a
+// step that wasn't recorded in a frame.
+export function recordedFrames<F extends { url(): string }>(
+  recorded: RecordedPlace, now: { frames(): F[] },
+): F[] | undefined {
+  const framed = recorded.framePath?.length ? recorded.framePath[recorded.framePath.length - 1] : undefined;
+  if (!framed) return undefined;
+  let want: URL;
+  try { want = new URL(framed); } catch { return undefined; }
+  const wantPath = recorded.urlPath ?? want.pathname;
+  return now.frames().slice(1).filter((f) => { // [0] is the main frame
+    let u: URL;
+    try { u = new URL(f.url()); } catch { return false; }
+    return u.origin === want.origin && samePagePath(wantPath, u.pathname);
+  });
+}
