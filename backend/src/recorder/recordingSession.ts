@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { BrowserContext, Page } from 'playwright-core';
+import type { BrowserContext, ElementHandle, Frame, Locator, Page } from 'playwright-core';
 import {
   SITE_LOGIN_PROVIDER, WORKFLOW_VALUE_PLACEHOLDER,
   type RecordingState, type RecordingStatus, type RecordingResult, type RecordingDraft,
@@ -267,7 +267,7 @@ class RecordingSession {
       await closeBrowser(this.launched);
       throw new RecordingError("This copy of NodeBrain can't record yet: its browser library is too old.");
     }
-    await context.exposeBinding(RECORDER_BINDING, (source, msg) => this.onPageMessage(source.page, msg));
+    await context.exposeBinding(RECORDER_BINDING, (source, msg) => this.onPageMessage(source.page, msg, source.frame));
     await context.addInitScript(PAGE_SCRIPT);
 
     for (const p of context.pages()) this.watchPage(p);
@@ -377,7 +377,7 @@ class RecordingSession {
     });
   }
 
-  private onPageMessage(page: Page, msg: unknown): unknown {
+  private onPageMessage(page: Page, msg: unknown, frame?: Frame): unknown {
     if (!msg || typeof msg !== 'object') return undefined;
     const m = msg as Record<string, unknown>;
     switch (m.type) {
@@ -390,7 +390,7 @@ class RecordingSession {
         void this.discard();
         return undefined;
       case 'pick':
-        if (this.accepting()) this.enqueue(() => this.onPick(page, m));
+        if (this.accepting()) this.enqueue(() => this.onPick(page, m, frame));
         return undefined;
       case 'layerDone': {
         const docId = m.docId;
@@ -571,7 +571,19 @@ class RecordingSession {
   // nothing for it, so NodeBrain builds the step: a role locator with the
   // option's exact name, which is how Playwright itself would name a
   // role=option element, plus nth when several options share that name.
-  private async onPick(page: Page, m: Record<string, unknown>): Promise<void> {
+  //
+  // `frame`: the frame the pick was reported from. An option inside a frame
+  // (HubSpot's Lead status list, in the Create Contact panel's iframe) gets
+  // the same frame chain Playwright puts on every other step there
+  // (`<iframe selector> >> internal:control=enter-frame >> …`). Without it
+  // the step looked for the list on the main page and never found it (run
+  // 7a2f6100 s19, 2026-11-23).
+  //
+  // The step also gets a page snapshot, which Playwright otherwise attaches
+  // to each action it reports (it reports none for these). It's taken when
+  // the pick arrives, 500 ms after the mouse-down, so it shows the page just
+  // AFTER the choice: the list has gone and the control shows the choice.
+  private async onPick(page: Page, m: Record<string, unknown>, frame?: Frame): Promise<void> {
     if (!this.accepting()) return;
     const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
     const role = str(m.role);
@@ -582,7 +594,14 @@ class RecordingSession {
     const fp = (m.fp && typeof m.fp === 'object' ? m.fp : {}) as PageRecord['fp'];
     const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const scope = m.inListbox === true ? 'internal:role=listbox >> ' : '';
-    const locator = `${scope}internal:role=${role}[name="${escaped}"s]` + (sameCount > 1 ? ` >> nth=${ordinal}` : '');
+    const inFrame = !!frame && frame !== page.mainFrame();
+    const prefix = inFrame ? await this.frameChain(page, frame!, fp.framePath) : '';
+    if (prefix === undefined) {
+      console.log('[recorder] an option picked inside a frame: no way to name the frame was found; the step has no frame chain');
+    }
+    const locator = `${prefix ?? ''}${scope}internal:role=${role}[name="${escaped}"s]` + (sameCount > 1 ? ` >> nth=${ordinal}` : '');
+    const snapshot = await (frame ?? page.mainFrame()).locator(':root')
+      .ariaSnapshot({ mode: 'ai', timeout: 2_000 }).catch(() => undefined);
     // Lists are often appended at the end of the page (Select2), where the
     // nearest heading is unrelated; the opener's section heading is the right one.
     const opener = [...this.steps].reverse().find((s) => s.pageAlias === this.aliasOf(page) && !s.picked);
@@ -603,6 +622,7 @@ class RecordingSession {
       origin: fp.origin ?? safeOrigin(page.url()),
       args: { button: 'left', modifiers: 0, clickCount: 1, selectsOn: 'mousedown' },
       signals: [],
+      snapshot,
       at: Date.now(),
       eventTs: record.pageTs,
       picked: true,
@@ -613,6 +633,62 @@ class RecordingSession {
     this.steps.splice(i, 0, step);
     this.pushCount();
     recorderEvents.emit('recording:step', { id: this.id, stepCount: this.stepCount() });
+  }
+
+  // The selector part that takes a locator from the main page into `frame`,
+  // ending in "internal:control=enter-frame >> ". undefined when none can be
+  // made.
+  //   1. The chain on the latest step Playwright reported in the same frame
+  //      (the control that opened the list, usually the step just before):
+  //      Playwright's own wording, so the two steps agree.
+  //   2. Else built from each frame's <iframe> element, outermost first: its
+  //      test id, id, name or title, with nth= when that isn't unique.
+  private async frameChain(page: Page, frame: Frame, framePath: string[] | undefined): Promise<string | undefined> {
+    const ENTER = 'internal:control=enter-frame >> ';
+    const here = framePath?.length ? framePath[framePath.length - 1] : frameAddress(frame.url());
+    const alias = this.aliasOf(page);
+    for (let i = this.steps.length - 1; i >= 0; i--) {
+      const s = this.steps[i];
+      if (s.picked || s.pageAlias !== alias || !s.locator) continue;
+      const theirs = s.fingerprint.framePath;
+      if (!theirs?.length || theirs[theirs.length - 1] !== here) continue;
+      const at = s.locator.lastIndexOf(ENTER);
+      if (at >= 0) return s.locator.slice(0, at + ENTER.length);
+    }
+    const parts: string[] = [];
+    for (let f: Frame | null = frame; f && f.parentFrame(); f = f.parentFrame()) {
+      const parent: Frame = f.parentFrame()!;
+      const el = await f.frameElement().catch(() => null);
+      if (!el) return undefined;
+      // No named inner functions in here: under tsx (dev, the e2e harness)
+      // they get wrapped in __name(), which doesn't exist in the page.
+      const css = await el.evaluate((e: any) => {
+        const tag = e.tagName.toLowerCase();
+        for (const a of ['data-testid', 'data-test-id', 'data-test', 'id', 'name', 'title']) {
+          const v = e.getAttribute(a);
+          if (v) return `${tag}[${a}=${JSON.stringify(v)}]`;
+        }
+        return tag;
+      }).catch(() => null);
+      await el.dispose().catch(() => {});
+      if (!css) return undefined;
+      const all: Locator = parent.locator(css);
+      const count = await all.count().catch(() => 0);
+      let sel = css;
+      if (count > 1) {
+        let index = -1;
+        for (let k = 0; k < count && index < 0; k++) {
+          const h: ElementHandle | null = await all.nth(k).elementHandle({ timeout: 1_000 }).catch(() => null);
+          const fr: Frame | null = h ? await h.contentFrame().catch(() => null) : null;
+          await h?.dispose().catch(() => {});
+          if (fr === f) index = k;
+        }
+        if (index < 0) return undefined;
+        sel = `${css} >> nth=${index}`;
+      }
+      parts.unshift(`${sel} >> ${ENTER}`);
+    }
+    return parts.join('');
   }
 
   private async buildStep(page: Page, action: RecorderAction): Promise<CapturedStep | undefined> {
@@ -1280,6 +1356,17 @@ export type PageElementFacts = PageRecord['fp'];
 
 function fallbackName(): string {
   return `Recorded ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
+}
+
+// A frame's address as the page script writes it into framePath:
+// origin + path, no query or fragment.
+function frameAddress(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeOrigin(url: string): string | undefined {
