@@ -58,16 +58,28 @@ const writeValues = new Function(`return ${WRITE_VALUES}`)() as (values: Control
 // Saves the picture to `file` (PNG). True when it was taken. With
 // `copyAllowed` false no MHTML copy is ever written: only a real screenshot,
 // when the window is showing, can be taken.
-export async function takeFinalPicture(page: Page, context: BrowserContext, file: string, windowShown: boolean, copyAllowed: boolean): Promise<boolean> {
+// `failures`, when given, gets one entry per attempt that failed (which
+// attempt, and the error as thrown), for the caller's log. They're raw: a
+// Playwright message can carry the page's address or markup, so the caller
+// redacts them and decides whether they may be logged at all.
+export async function takeFinalPicture(
+  page: Page, context: BrowserContext, file: string, windowShown: boolean, copyAllowed: boolean,
+  failures?: string[],
+): Promise<boolean> {
   if (page.isClosed()) return false;
   // The person has the window up: a real picture. If it was minimized again
   // since, the screenshot times out and the copy is made instead.
   if (windowShown) {
-    const ok = await page.screenshot({ path: file, timeout: SHOT_TIMEOUT_MS }).then(() => true, () => false);
+    const ok = await page.screenshot({ path: file, timeout: SHOT_TIMEOUT_MS })
+      .then(() => true, (err: unknown) => { failures?.push(`screenshot: ${errorText(err)}`); return false; });
     if (ok) return true;
   }
   if (!copyAllowed) return false;
-  return pictureFromCopy(page, context, file);
+  return pictureFromCopy(page, context, file, failures);
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // Deletes page copies left in run folders (<runsDir>/<run id>/*.mhtml) by a
@@ -94,7 +106,7 @@ export function removeLeftoverCopies(runsDir: string): number {
   return removed;
 }
 
-async function pictureFromCopy(page: Page, context: BrowserContext, file: string): Promise<boolean> {
+async function pictureFromCopy(page: Page, context: BrowserContext, file: string, failures?: string[]): Promise<boolean> {
   const mhtmlFile = `${file}.mhtml`;
   let copyBrowser: Browser | undefined;
   try {
@@ -116,7 +128,8 @@ async function pictureFromCopy(page: Page, context: BrowserContext, file: string
     if (values.length) await copy.evaluate(writeValues, values).catch(() => {});
     await copy.screenshot({ path: file, timeout: SHOT_TIMEOUT_MS });
     return true;
-  } catch {
+  } catch (err) {
+    failures?.push(`page copy: ${errorText(err)}`);
     return false;
   } finally {
     await copyBrowser?.close().catch(() => {});

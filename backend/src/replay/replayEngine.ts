@@ -679,9 +679,21 @@ class Replay {
       return undefined;
     }
     const file = path.join(dir, name ?? 'final.png');
-    const ok = await takeFinalPicture(page, this.context, file, !!this.entry.shown, !this.credentialFilled).catch(() => false);
+    const failures: string[] = [];
+    const ok = await takeFinalPicture(page, this.context, file, !!this.entry.shown, !this.credentialFilled, failures)
+      .catch((err: unknown) => { failures.push(`unexpected: ${err instanceof Error ? err.message : String(err)}`); return false; });
     if (!ok) {
       console.log(`[replay] ${this.run.id}: no ${name ? 'failure' : 'final'} picture (window ${this.entry.shown ? 'showing' : 'minimized'}${this.credentialFilled ? ', saved sign-in used: no page copy' : ''})`);
+      // Why each attempt failed, for the log only (never the run record or
+      // anything the person reads). Gated like rawError in stop(): redacted,
+      // first line only, and the message itself not logged once a saved
+      // sign-in went in (redact() doesn't know the sign-in name).
+      for (const f of failures) {
+        const attempt = f.slice(0, f.indexOf(':'));
+        // eslint-disable-next-line no-control-regex
+        const text = this.redact(f.replace(/\u001b\[[0-9;]*m/g, '')).split('\n')[0].slice(0, 500);
+        console.log(`[replay] ${this.run.id}:   ${this.credentialFilled ? `${attempt} failed (reason not logged: saved sign-in used)` : text}`);
+      }
       return undefined;
     }
     if (!name) setRunFinalScreenshot(this.run.id, file);
