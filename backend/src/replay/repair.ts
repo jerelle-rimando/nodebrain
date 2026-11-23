@@ -22,7 +22,7 @@ import { claimSiteBrowser, releaseSiteBrowser, siteBrowserHolder } from '../brow
 import { buildPhases } from '../workflows/runPlan';
 import { findElement } from './elementFinder';
 import {
-  getRepairHold, isRunActive, markRunBrowserShown, isMissError, isActionError, isOptionalSkip, onDifferentPage,
+  getRepairHold, isRunActive, markRunBrowserShown, isMissError, isActionError, classifySkips, onDifferentPage,
   describeStepTarget, verbFor, picksOption, locatorRoleName, type RepairHold,
 } from './replayEngine';
 
@@ -459,22 +459,17 @@ function saveRepair(workflowId: string, versionId: string, step: WorkflowStep, r
 export function runSkips(runId: string): WorkflowRunSkips | undefined {
   const run = getRunById(runId);
   if (!run) return undefined;
-  const rows = getRunSteps(runId);
-  const lastRow = new Map<string, WorkflowRunStep>();
-  for (const r of rows) lastRow.set(r.stepKey, r); // ordered by position, then time
-  const skipped = new Set([...lastRow.values()].filter(isOptionalSkip).map((r) => r.stepKey));
   const during = fixVersions(run.workflowId, runId).sort((a, b) => b.number - a.number)[0];
   const steps = getStepsByVersion(during?.id ?? run.versionId);
   const fieldsById = new Map(getFieldsByWorkflow(run.workflowId).map((f) => [f.id, f]));
-  const neither: string[] = [];
-  for (const s of steps) {
-    const original = typeof s.args.alternativeTo === 'string' ? steps.find((o) => o.stepKey === s.args.alternativeTo) : undefined;
-    if (!original || !skipped.has(s.stepKey) || !skipped.has(original.stepKey)) continue;
+  // The same rule that set the run's status (replayEngine classifySkips).
+  const { left, replaced, fixed, neither: pairs } = classifySkips(getRunSteps(runId), steps);
+  const neither = pairs.map(({ original, alternative }) => {
     const a = describeStepTarget(original, undefined, steps, fieldsById);
-    const b = describeStepTarget(s, undefined, steps, fieldsById);
-    neither.push(`Neither ${a} nor ${b} showed up this time, so NodeBrain did neither. That’s fine if the site didn’t need either one. If it did, check what the site shows now.`);
-  }
-  return { count: skipped.size, neither };
+    const b = describeStepTarget(alternative, undefined, steps, fieldsById);
+    return `Neither ${a} nor ${b} showed up this time, so NodeBrain did neither. That’s fine if the site didn’t need either one. If it did, check what the site shows now.`;
+  });
+  return { count: left.length, replaced: replaced.length, fixed: fixed.length, neither };
 }
 
 // ── Picking ─────────────────────────────────────────────────────────────────

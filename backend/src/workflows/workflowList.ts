@@ -76,7 +76,7 @@ function rowState(last: WorkflowRun | undefined, runs: WorkflowRun[], pauseReaso
   }
   // A last run that didn't finish keeps its id, so the row can open it and
   // show why it stopped. Not once it's been fixed: that reason is old news.
-  const unfinished = last && (last.status === 'failed' || (last.status === 'needs_attention' && !repairStatus(last.id)?.fixed));
+  const unfinished = last && (last.status === 'failed' || last.status === 'completed_with_skips' || (last.status === 'needs_attention' && !repairStatus(last.id)?.fixed));
   return { state: 'idle', stateText: idleText(last, runs, now), runId: unfinished ? last.id : undefined };
 }
 
@@ -114,6 +114,9 @@ function idleText(last: WorkflowRun | undefined, runs: WorkflowRun[], now: Date)
   }
   if (last.status === 'failed') return "Didn't finish last time";
   if (last.status === 'cancelled') return 'You stopped it last time';
+  // Got to the end, but left steps out: not the same as a plain success.
+  if (last.status === 'completed_with_skips') return 'Left steps out last time';
+  if (last.status === 'completed_with_fixes') return 'Finished with your help last time';
   const today = runs.filter((r) => sameDay(new Date(r.startedAt), now)).length;
   if (today === 1) return 'Ran once today';
   if (today > 1) return `Ran ${today} times today`;

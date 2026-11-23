@@ -56,7 +56,9 @@ export function siteContext(siteAgentId: string): string | null {
 }
 
 const RUN_WORDS: Record<string, string> = {
-  pending: 'starting', running: 'running', completed: 'finished', failed: "didn't finish",
+  pending: 'starting', running: 'running', completed: 'finished',
+  completed_with_skips: 'finished, but left steps out', completed_with_fixes: 'finished after the person fixed steps',
+  failed: "didn't finish",
   cancelled: 'stopped by the person', needs_attention: 'stopped and needs the person',
 };
 

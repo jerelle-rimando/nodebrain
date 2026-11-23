@@ -152,16 +152,28 @@ export function RunView({ workflowId, runId, onBack, onRunAgain }: {
               {run.error}
             </div>
           )}
-          {finished && status === 'completed' && (
-            // A run that left steps out doesn't say "every step": it says how
-            // many weren't there, and warns where a step and the alternative
-            // shown in a repair were both missing.
+          {finished && (status === 'completed' || status === 'completed_with_skips' || status === 'completed_with_fixes') && (
+            // "Every step went through" only when nothing was left out,
+            // nothing was fixed by the person and nothing done another way.
+            // Left out (status completed_with_skips) gets a warning; fixed
+            // by the person (completed_with_fixes) and done another way (an
+            // alternative shown in an earlier repair) are said plainly. It
+            // warns where a step and the alternative were both missing.
             <>
-              <p className={`text-sm mb-4 ${skips?.count ? 'text-brain-text' : 'text-brain-success'}`}>
-                {skips?.count
-                  ? `Finished. ${skips.count === 1 ? '1 step wasn’t' : `${skips.count} steps weren’t`} on the page this time, so NodeBrain left ${skips.count === 1 ? 'it' : 'them'} out (marked below).`
-                  : 'Every step went through.'}
-                {steps.some((s) => s.status === 'repaired') ? ' The step you fixed is saved, so the next run will use it too.' : ''}
+              {skips?.count ? (
+                <div role="status" className="rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-sm text-brain-text">
+                  {`Got to the end, but ${skips.count === 1 ? '1 step wasn’t' : `${skips.count} steps weren’t`} on the page this time, so NodeBrain left ${skips.count === 1 ? 'it' : 'them'} out (marked below). Check the site has everything it needed.`}
+                </div>
+              ) : null}
+              <p className={`text-sm mb-4 ${skips?.count || skips?.fixed || skips?.replaced ? 'text-brain-text' : 'text-brain-success'}`}>
+                {skips?.count ? '' : skips?.fixed || skips?.replaced ? 'Finished.' : 'Every step went through.'}
+                {skips?.fixed
+                  ? ` ${skips.fixed === 1 ? '1 step needed' : `${skips.fixed} steps needed`} you to step in on the way.`
+                  : ''}
+                {skips?.replaced
+                  ? ` ${skips.replaced === 1 ? '1 step was' : `${skips.replaced} steps were`} done the other way you showed NodeBrain, because the page it was recorded on didn’t show up.`
+                  : ''}
+                {steps.some((s) => s.status === 'repaired') ? ' What you showed NodeBrain is saved, so the next run will use it too.' : ''}
               </p>
               {skips?.neither.map((text, i) => (
                 <div key={i} role="status" className="rounded-lg border border-brain-warning/30 bg-brain-warning/10 px-3 py-2.5 mb-4 text-sm text-brain-text">
@@ -461,7 +473,7 @@ function FixPanel({ runId, repair, onChanged, onRunAgain }: {
           {repair.live && (
             <button type="button" onClick={fixLater}
               className="mt-2 text-xs text-brain-text-dim hover:text-brain-text underline underline-offset-2">
-              Close the browser and fix it later
+              Stop the run and close the browser
             </button>
           )}
         </>

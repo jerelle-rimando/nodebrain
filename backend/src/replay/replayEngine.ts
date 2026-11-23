@@ -79,6 +79,67 @@ export function isOptionalSkip(row: { status: WorkflowRunStep['status']; error?:
     && (row.error === OPTIONAL_SKIPPED_TEXT || row.error === OPTIONAL_MARKED_TEXT || row.error === ALTERNATIVE_TEXT);
 }
 
+// What a run's optional skips really were, read from each step's last row
+// against the steps the run ended on.
+//   left: left out, nothing done in its place. A step and the alternatives
+//         a repair added for it (args.alternativeTo) count as one: left
+//         only when none of them was done. One key per group, the original.
+//   replaced: the original step skipped, and an alternative of its group
+//         done instead (the other screen showed up, or the person pointed
+//         at it this run). An alternative skipped because the original was
+//         done is the normal case and isn't counted.
+//   fixed: steps the person put right during this run: pointed at (row
+//         'repaired') or, once stopped, did themselves ("Do it myself").
+//   neither: groups where the step and an alternative were both left out.
+// A run with anything in `left` finishes as 'completed_with_skips', and one
+// with anything in `fixed` as 'completed_with_fixes', not 'completed': run
+// 7a2f6100 skipped the Create button and said "completed".
+export function classifySkips(rows: WorkflowRunStep[], steps: WorkflowStep[]):
+    { left: string[]; replaced: string[]; fixed: string[]; neither: Array<{ original: WorkflowStep; alternative: WorkflowStep }> } {
+  const lastRow = new Map<string, WorkflowRunStep>();
+  for (const r of rows) lastRow.set(r.stepKey, r); // rows come ordered by position, then time
+  const groupOf = (s: WorkflowStep): string =>
+    typeof s.args.alternativeTo === 'string' && steps.some((o) => o.stepKey === s.args.alternativeTo) ? s.args.alternativeTo : s.stepKey;
+  const groups = new Map<string, WorkflowStep[]>();
+  for (const s of steps) {
+    const g = groupOf(s);
+    groups.set(g, [...(groups.get(g) ?? []), s]);
+  }
+  const done = (s: WorkflowStep) => {
+    const st = lastRow.get(s.stepKey)?.status;
+    return st === 'ok' || st === 'repaired';
+  };
+  const skipped = (s: WorkflowStep) => {
+    const r = lastRow.get(s.stepKey);
+    return !!r && isOptionalSkip(r);
+  };
+  const left: string[] = [];
+  const replaced: string[] = [];
+  const neither: Array<{ original: WorkflowStep; alternative: WorkflowStep }> = [];
+  for (const [key, members] of groups) {
+    const skips = members.filter(skipped);
+    if (!skips.length) continue;
+    if (members.some(done)) {
+      const original = members.find((s) => s.stepKey === key);
+      if (original && skipped(original)) replaced.push(key);
+      continue;
+    }
+    left.push(key);
+    const original = members.find((s) => s.stepKey === key);
+    for (const alt of members) {
+      if (alt !== original && original && skipped(original) && skipped(alt)) neither.push({ original, alternative: alt });
+    }
+  }
+  // Every row, not just the last: a step pointed at and then done again
+  // later in the run (a retry) was still fixed by the person.
+  // A handoff step (recorded as the person's to do) is human by design and
+  // doesn't count; only a stopped step they did by hand (BY_HAND_TEXT) does.
+  const fixed = [...new Set(rows
+    .filter((r) => r.status === 'repaired' || (r.resolvedBy === 'human' && r.error === BY_HAND_TEXT))
+    .map((r) => r.stepKey))];
+  return { left, replaced, fixed, neither };
+}
+
 // How long a pointed-at step (one a repair added) waits after its click for
 // the page to start going somewhere else. The recording never saw that click,
 // so there's no recorded navigation to wait for; without this, the next step
@@ -581,7 +642,14 @@ class Replay {
       }
     }
     if (last && !last.isClosed() && !this.closedOrStopped()) await this.finalPicture(last);
-    this.finish('completed');
+    // Steps left out (optional, not there, nothing done instead): the run
+    // got to the end, but not by doing everything it was recorded doing.
+    // Steps the person fixed on the way: it finished, but not on its own.
+    // Left-out steps win: they're the ones that may mean work wasn't done.
+    const { left, fixed } = classifySkips(getRunSteps(this.run.id), this.steps);
+    if (left.length) console.log(`[replay] ${this.run.id}: finished with ${left.length} step(s) left out: ${left.join(', ')}`);
+    if (fixed.length) console.log(`[replay] ${this.run.id}: finished with ${fixed.length} step(s) fixed by the person: ${fixed.join(', ')}`);
+    this.finish(left.length ? 'completed_with_skips' : fixed.length ? 'completed_with_fixes' : 'completed');
   }
 
   private async settleAfterLastStep(page: Page): Promise<void> {

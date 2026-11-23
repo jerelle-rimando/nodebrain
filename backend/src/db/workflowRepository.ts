@@ -30,10 +30,10 @@ const VERSION_REASONS: readonly WorkflowVersionReason[] = ['recorded', 'repair',
 const FIELD_KINDS: readonly WorkflowFieldKind[] = ['text', 'option', 'file'];
 const RUN_TRIGGERS: readonly WorkflowRunTrigger[] = ['manual', 'schedule', 'chat'];
 const RUN_STATUSES: readonly WorkflowRunStatus[] = [
-  'pending', 'running', 'completed', 'failed', 'cancelled', 'needs_attention',
+  'pending', 'running', 'completed', 'completed_with_skips', 'completed_with_fixes', 'failed', 'cancelled', 'needs_attention',
 ];
 const TERMINAL_RUN_STATUSES: readonly WorkflowRunStatus[] = [
-  'completed', 'failed', 'cancelled', 'needs_attention',
+  'completed', 'completed_with_skips', 'completed_with_fixes', 'failed', 'cancelled', 'needs_attention',
 ];
 const RUN_STEP_STATUSES: readonly WorkflowRunStepStatus[] = ['ok', 'failed', 'skipped', 'repaired'];
 const RESOLVED_BY: readonly WorkflowStepResolvedBy[] = ['primary', 'fallback', 'human'];

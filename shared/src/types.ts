@@ -265,7 +265,7 @@ export interface WorkflowField {
 
 export type WorkflowRunTrigger = 'manual' | 'schedule' | 'chat';
 export type WorkflowRunStatus =
-  | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'needs_attention';
+  | 'pending' | 'running' | 'completed' | 'completed_with_skips' | 'completed_with_fixes' | 'failed' | 'cancelled' | 'needs_attention';
 
 export interface WorkflowRun {
   id: string;
@@ -317,7 +317,16 @@ export interface WorkflowRunRepair {
 // What a run left out because it wasn't on the page, for the run view: a
 // run that skipped steps shouldn't look the same as one that did them all.
 export interface WorkflowRunSkips {
-  count: number; // optional steps skipped because they weren't there (sign-in steps not counted)
+  // Steps left out: optional, not there, and nothing done in their place (a
+  // step and the alternatives a repair added for it count as one). Sign-in
+  // steps not counted. Above 0, the run's status is 'completed_with_skips'.
+  count: number;
+  // Steps skipped because another way was taken: an alternative the person
+  // showed NodeBrain (this run or before) was done instead.
+  replaced: number;
+  // Steps the person put right during this run (pointed at, or did by hand
+  // after a stop). Above 0 with count 0, the status is 'completed_with_fixes'.
+  fixed: number;
   // Plain sentences, one per step shown in a repair as an alternative to
   // another step, where neither showed up this run.
   neither: string[];
